@@ -1,0 +1,58 @@
+package com.coffeeshop.userservice.config;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+@Component
+@RequiredArgsConstructor
+public class SchemaMigrationRunner {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    @jakarta.annotation.PostConstruct
+    public void migrate() {
+        Integer tableExists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='users'",
+                Integer.class
+        );
+
+        if (tableExists == null || tableExists == 0) {
+            return;
+        }
+
+        jdbcTemplate.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check");
+        jdbcTemplate.execute(
+                "ALTER TABLE users " +
+                        "ADD CONSTRAINT users_role_check " +
+                        "CHECK (role IN ('ADMIN','MANAGER','WAITER','BARISTA','STAFF','CUSTOMER'))"
+        );
+
+        jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_code VARCHAR(255)");
+        jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS personal_qr_code VARCHAR(255)");
+        jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_shift VARCHAR(50)");
+        jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN");
+        jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS branch_id VARCHAR(255)");
+        jdbcTemplate.execute("UPDATE users SET is_active = TRUE WHERE is_active IS NULL");
+        jdbcTemplate.execute("ALTER TABLE users ALTER COLUMN is_active SET DEFAULT TRUE");
+        jdbcTemplate.execute("ALTER TABLE users ALTER COLUMN is_active SET NOT NULL");
+        jdbcTemplate.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_users_employee_code ON users(employee_code) WHERE employee_code IS NOT NULL");
+        jdbcTemplate.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_users_personal_qr_code ON users(personal_qr_code) WHERE personal_qr_code IS NOT NULL");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_users_branch_id ON users(branch_id)");
+
+        jdbcTemplate.execute(
+                "CREATE TABLE IF NOT EXISTS branches (" +
+                        "id VARCHAR(255) PRIMARY KEY, " +
+                        "name VARCHAR(255) NOT NULL, " +
+                        "address VARCHAR(255), " +
+                        "phone VARCHAR(255), " +
+                        "manager_id VARCHAR(255), " +
+                        "is_active BOOLEAN NOT NULL DEFAULT TRUE, " +
+                        "created_at TIMESTAMP DEFAULT NOW(), " +
+                        "updated_at TIMESTAMP DEFAULT NOW()" +
+                        ")"
+        );
+        jdbcTemplate.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_branches_name_lower ON branches (LOWER(name))");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_branches_manager_id ON branches(manager_id)");
+    }
+}

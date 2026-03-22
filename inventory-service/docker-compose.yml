@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  inventory-service:
+    build: .
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=development
+      - PORT=3005
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - coffeshop-network
+
+networks:
+  coffeshop-network:
+    driver: bridge

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+  
+  api-gateway:
+    build: .
+    ports:
+      - '8080:8080'
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your-super-secret-jwt-key
+      - USER_SERVICE_URL=http://user-service:3000
+      - ORDER_SERVICE_URL=http://order-service:3001
+    depends_on:
+      - redis
+
+  # Link to other services in root compose
+

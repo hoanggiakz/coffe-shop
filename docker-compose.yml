@@ -1,0 +1,351 @@
+services:
+  # ── Databases ──────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secretpass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── API Gateway (Node.js / NestJS) ────────────────────────
+  api-gateway:
+    build: ./api-gateway
+    expose:
+      - "8080"
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      JWT_SECRET: supersecret-change-in-prod
+      REDIS_URL: redis://redis:6379
+      USER_SERVICE_URL: http://user-service:3000
+      TABLE_SERVICE_URL: http://table-service:3003
+      ORDER_SERVICE_URL: http://order-service:3001
+      CHAT_SERVICE_URL: http://chat-service:3007
+      INVENTORY_SERVICE_URL: http://inventory-service:3005
+      PAYMENT_SERVICE_URL: http://payment-service:3004
+      REPORT_SERVICE_URL: http://report-service:3006
+    depends_on:
+      redis:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      table-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      report-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── User Service (Spring Boot) ────────────────────────────
+  user-service:
+    build: ./user-service
+    expose:
+      - "3000"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/userdb
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: secretpass
+      JWT_SECRET: supersecret-change-in-prod
+      JWT_EXPIRATION: 86400000
+      SERVER_PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/users/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── Table Service (Spring Boot) ───────────────────────────
+  table-service:
+    build: ./table-service
+    expose:
+      - "3003"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/tabledb
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: secretpass
+      SERVER_PORT: 3003
+      APP_BASE_URL: https://localhost:3443
+      APP_CHAT_SERVICE_URL: http://chat-service:3007/api/chats
+      APP_ORDER_SERVICE_URL: http://order-service:3001/api/orders
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3003/api/tables/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── Order Service (Node.js / NestJS) ──────────────────────
+  order-service:
+    build: ./order-service
+    command: sh -c "npx prisma db push --accept-data-loss && npx prisma db seed && node dist/src/main.js"
+    expose:
+      - "3001"
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://postgres:secretpass@postgres:5432/orderdb?schema=public
+      INVENTORY_SERVICE_URL: http://inventory-service:3005
+      USER_SERVICE_URL: http://user-service:3000
+      CHAT_SERVICE_URL: http://chat-service:3007/api/chats
+      TABLE_SERVICE_URL: http://table-service:3003
+      INTERNAL_SERVICE_TOKEN: internal-service-token
+    depends_on:
+      postgres:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/orders/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── Chat Service (Node.js / NestJS + Socket.io) ──────────
+  chat-service:
+    build: ./chat-service
+    command: sh -c "npx prisma db push && node dist/main"
+    expose:
+      - "3007"
+    environment:
+      NODE_ENV: production
+      PORT: 3007
+      DATABASE_URL: postgresql://postgres:secretpass@postgres:5432/chatdb?schema=public
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3007/api/chats/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 35s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── Inventory Service (Node.js / NestJS) ─────────────────
+  inventory-service:
+    build: ./inventory-service
+    command: sh -c "npx prisma db push && node dist/src/main.js"
+    expose:
+      - "3005"
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      DATABASE_URL: postgresql://postgres:secretpass@postgres:5432/inventorydb?schema=public
+      KAFKA_BROKERS: ""
+      CHAT_SERVICE_URL: http://chat-service:3007/api/chats
+      JWT_SECRET: supersecret-change-in-prod
+      INTERNAL_SERVICE_TOKEN: internal-service-token
+      LOW_STOCK_ALERT_EMAILS: manager@coffeeshop.com
+      SMTP_HOST: ""
+      SMTP_PORT: 587
+      SMTP_USER: ""
+      SMTP_PASS: ""
+      SMTP_FROM: "\"Coffee Shop\" <noreply@coffeeshop.com>"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3005/api/v1/ingredients/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 35s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── Payment Service (Node.js / NestJS) ───────────────────
+  payment-service:
+    build: ./payment-service
+    command: sh -c "npx prisma db push && node dist/src/main.js"
+    expose:
+      - "3004"
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      DATABASE_URL: postgresql://postgres:secretpass@postgres:5432/paymentdb?schema=public
+      KAFKA_BROKERS: ""
+      JWT_SECRET: supersecret-change-in-prod
+      INTERNAL_SERVICE_TOKEN: internal-service-token
+      CHAT_SERVICE_URL: http://chat-service:3007/api/chats
+      VIETQR_BANK_BIN: 970422
+      VIETQR_ACCOUNT_NO: 1900123456789
+      VIETQR_ACCOUNT_NAME: COFFEE SHOP
+      VIETQR_SECRET: ""
+      MOMO_RETURN_URL: https://localhost:3443/payment/return
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3004/api/v1/payments/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 35s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── Report Service (Node.js / NestJS) ───────────────────
+  report-service:
+    build: ./report-service
+    command: sh -c "npx prisma db push && node dist/src/main.js"
+    expose:
+      - "3006"
+    environment:
+      NODE_ENV: production
+      PORT: 3006
+      DATABASE_URL: postgresql://postgres:secretpass@postgres:5432/reportdb?schema=public
+      ORDER_DATABASE_URL: postgresql://postgres:secretpass@postgres:5432/orderdb?schema=public
+      INVENTORY_DATABASE_URL: postgresql://postgres:secretpass@postgres:5432/inventorydb?schema=public
+      PAYMENT_DATABASE_URL: postgresql://postgres:secretpass@postgres:5432/paymentdb?schema=public
+      USER_DATABASE_URL: postgresql://postgres:secretpass@postgres:5432/userdb?schema=public
+      KAFKA_BROKERS: ""
+      JWT_SECRET: supersecret-change-in-prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3006/api/reports/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 35s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── Frontend (Vite + Nginx) ────────────────────────────────
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+      - "3443:443"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 15s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── Daily PostgreSQL Backup Job ───────────────────────────
+  db-backup:
+    image: postgres:15-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_PASSWORD: secretpass
+      BACKUP_INTERVAL_SECONDS: 86400
+      BACKUP_RETENTION_DAYS: 7
+    command: >
+      sh -c "
+      mkdir -p /backups &&
+      while true; do
+        ts=$$(date +%Y%m%d-%H%M%S);
+        PGPASSWORD=$$POSTGRES_PASSWORD pg_dumpall -h postgres -U postgres > /backups/backup-$$ts.sql &&
+        find /backups -type f -name 'backup-*.sql' -mtime +$$BACKUP_RETENTION_DAYS -delete;
+        sleep $$BACKUP_INTERVAL_SECONDS;
+      done"
+    volumes:
+      - ./backups:/backups
+    networks:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  backend:
+    driver: bridge

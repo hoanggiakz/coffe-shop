@@ -1,0 +1,54 @@
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.tsx'
+import './index.css'
+import { Toaster } from 'react-hot-toast'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useEffect } from 'react'
+import { useUiStore } from './stores/uiStore.ts'
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 60000,
+    },
+  },
+})
+
+function UiEffects() {
+  const darkMode = useUiStore((state) => state.darkMode)
+  const density = useUiStore((state) => state.density)
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode)
+  }, [darkMode])
+
+  useEffect(() => {
+    document.documentElement.dataset.density = density
+  }, [density])
+
+  return null
+}
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <UiEffects />
+      <App />
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 3200,
+          className: 'shadow-lg',
+          style: {
+            borderRadius: '14px',
+            border: '1px solid #d6d3d1',
+            background: '#fffaf0',
+            color: '#292524',
+          },
+        }}
+      />
+    </QueryClientProvider>
+  </React.StrictMode>,
+)

@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+  menuItems MenuItem[]
+
+  @@map("categories")
+  @@index([name])
+}
+
+model MenuItem {
+  id          String        @id @default(cuid())
+  name        String
+  price       Decimal
+  categoryId  String
+  description String?
+  image       String?
+  createdAt   DateTime      @default(now())
+  category    Category      @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  optionGroups OptionGroup[]
+
+  @@map("menu_items")
+  @@index([categoryId])
+}
+
+model OptionGroup {
+  id        String       @id @default(cuid())
+  name      String       // e.g. "Size", "Topping"
+  menuItemId String?
+  createdAt DateTime     @default(now())
+  menuItem  MenuItem?    @relation(fields: [menuItemId], references: [id])
+  optionValues OptionValue[]
+
+  @@map("option_groups")
+  @@index([menuItemId])
+}
+
+model OptionValue {
+  id        String      @id @default(cuid())
+  name      String      // e.g. "Small", "Pepperoni"
+  price     Decimal     @default(0)
+  groupId   String
+  createdAt DateTime    @default(now())
+  group     OptionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@map("option_values")
+  @@index([groupId])
+}

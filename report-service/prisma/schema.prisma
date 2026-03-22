@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Aggregate tables for analytics - denormalized for performance
+model DailyRevenue {
+  date       DateTime @unique
+  revenue    Decimal  @default(0)
+  orderCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("daily_revenue")
+  @@index([date])
+}
+
+model ItemSales {
+  id           String   @id @default(cuid())
+  date         DateTime
+  menuItemId   String
+  quantity     Int
+  revenue      Decimal
+  orderCount   Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("item_sales")
+  @@index([date])
+  @@index([menuItemId])
+  @@index([date, menuItemId])
+}
+
+model DailyStats {
+  date              DateTime @unique
+  totalOrders       Int      @default(0)
+  totalRevenue      Decimal  @default(0)
+  avgOrderValue     Decimal  @default(0)
+  topItemMenuId     String?
+  topItemQuantity   Int?
+  topItemRevenue    Decimal?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("daily_stats")
+  @@index([date])
+}
+

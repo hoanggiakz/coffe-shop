@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Chat {
+  id            String     @id @default(cuid())
+  tableId       String
+  customerName  String?
+  customerPhone String?
+  status        ChatStatus @default(OPEN)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  messages      Message[]
+
+  @@map("chats")
+  @@index([tableId])
+}
+
+model Message {
+  id         String     @id @default(cuid())
+  chatId     String
+  senderType SenderType
+  senderId   String?    // userId nếu là STAFF
+  senderName String
+  content    String
+  createdAt  DateTime   @default(now())
+
+  chat       Chat       @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+  @@index([chatId])
+}
+
+enum ChatStatus {
+  OPEN
+  CLOSED
+}
+
+enum SenderType {
+  CUSTOMER
+  STAFF
+}

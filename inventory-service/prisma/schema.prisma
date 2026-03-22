@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Ingredient {
+  id        String         @id @default(cuid())
+  branchId  String?
+  name      String
+  unit      String         // e.g. "kg", "liter", "piece"
+  stock     Decimal        @default(0)
+  minStock  Decimal        @default(0)
+  importPrice Decimal      @default(0)
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  movements StockMovement[]
+
+  @@map("ingredients")
+  @@index([branchId])
+  @@index([branchId, name])
+  @@index([name])
+  @@index([isActive])
+}
+
+model StockMovement {
+  id          String     @id @default(cuid())
+  ingredientId String
+  branchId     String?
+  type        StockType
+  source      StockSource @default(MANUAL)
+  quantity    Decimal
+  unitPrice   Decimal     @default(0)
+  totalPrice  Decimal     @default(0)
+  reason      String?
+  note        String?
+  referenceCode String?
+  beforeStock Decimal     @default(0)
+  afterStock  Decimal     @default(0)
+  createdBy   String?
+  createdAt   DateTime   @default(now())
+  ingredient  Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@map("stock_movements")
+  @@index([ingredientId])
+  @@index([branchId])
+  @@index([branchId, createdAt])
+  @@index([type])
+  @@index([source])
+  @@index([createdAt])
+}
+
+enum StockType {
+  IMPORT
+  EXPORT
+  ADJUST
+}
+
+enum StockSource {
+  MANUAL
+  RECEIPT
+  ORDER
+  STOCKTAKE
+  SYNC_MENU
+  SYSTEM
+}

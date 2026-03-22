@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  kds-service:
+    build: .
+    ports:
+      - '3006:3006'
+    environment:
+      - NODE_ENV=development
+      - PORT=3006
+    depends_on:
+      - kafka
+      - redis
+    volumes:
+      - .:/app
+      - /app/node_modules

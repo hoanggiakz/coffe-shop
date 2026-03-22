@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Menu (hardcoded seed hoặc CRUD đơn giản) ───────────────
+model MenuItem {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  price       Int      // VND – ví dụ 45000
+  image       String?
+  branchId    String?
+  categoryId  String?
+  category    String   @default("coffee")
+  customizations Json?
+  available   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  categoryRef MenuCategory?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  optionGroups MenuItemOptionGroup[]
+  ingredients MenuItemIngredient[]
+
+  @@map("menu_items")
+  @@index([branchId])
+  @@index([categoryId])
+  @@index([available])
+}
+
+model MenuCategory {
+  id          String    @id @default(cuid())
+  name        String
+  branchId    String?
+  description String?
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  menuItems   MenuItem[]
+
+  @@map("menu_categories")
+  @@unique([name, branchId])
+  @@index([branchId])
+  @@index([isActive, sortOrder])
+}
+
+enum MenuOptionGroupType {
+  SINGLE
+  MULTI
+  TEXT
+}
+
+model MenuOptionGroup {
+  id         String              @id @default(cuid())
+  name       String
+  branchId   String?
+  type       MenuOptionGroupType @default(SINGLE)
+  isActive   Boolean             @default(true)
+  isGlobal   Boolean             @default(true)
+  sortOrder  Int                 @default(0)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  values     MenuOptionValue[]
+  menuItems  MenuItemOptionGroup[]
+
+  @@map("menu_option_groups")
+  @@index([branchId])
+  @@index([isActive, sortOrder])
+}
+
+model MenuOptionValue {
+  id         String          @id @default(cuid())
+  groupId    String
+  value      String
+  label      String
+  priceDelta Int             @default(0)
+  isDefault  Boolean         @default(false)
+  isActive   Boolean         @default(true)
+  sortOrder  Int             @default(0)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  group      MenuOptionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@map("menu_option_values")
+  @@unique([groupId, value])
+  @@index([groupId, isActive, sortOrder])
+}
+
+model MenuItemOptionGroup {
+  id        String          @id @default(cuid())
+  menuItemId String
+  groupId   String
+  required  Boolean         @default(false)
+  sortOrder Int             @default(0)
+  createdAt DateTime        @default(now())
+  menuItem  MenuItem        @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  group     MenuOptionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@map("menu_item_option_groups")
+  @@unique([menuItemId, groupId])
+  @@index([menuItemId, sortOrder])
+  @@index([groupId])
+}
+
+model MenuItemIngredient {
+  id             String   @id @default(cuid())
+  menuItemId     String
+  ingredientId   String
+  ingredientName String?
+  quantity       Decimal
+  unit           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  menuItem       MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@map("menu_item_ingredients")
+  @@unique([menuItemId, ingredientId])
+  @@index([menuItemId])
+  @@index([ingredientId])
+}
+
+// ── Orders ──────────────────────────────────────────────────
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum ItemStatus {
+  WAITING
+  PREPARING
+  DONE
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+}
+
+enum PromotionScope {
+  ORDER
+  ITEM
+}
+
+model PromotionCode {
+  id             String       @id @default(cuid())
+  code           String       @unique
+  branchId       String?
+  description    String?
+  discountType   DiscountType
+  discountValue  Int
+  appliesTo      PromotionScope @default(ORDER)
+  menuItemIds    Json?
+  minOrderAmount Int          @default(0)
+  maxDiscount    Int?
+  isActive       Boolean      @default(true)
+  startAt        DateTime?
+  endAt          DateTime?
+  usageLimit     Int?
+  usedCount      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@map("promotion_codes")
+  @@index([branchId])
+  @@index([code, isActive])
+  @@index([appliesTo, isActive])
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  tableId       String
+  branchId      String?
+  customerId    String?
+  customerEmail String?
+  customerName  String?
+  customerPhone String?
+  status        OrderStatus @default(PENDING)
+  subtotalAmount Int        @default(0) // Tong truoc khuyen mai
+  discountAmount Int        @default(0) // So tien giam
+  promotionCode  String?    // Ma khuyen mai ap dung
+  pointsEarned   Int        @default(0)
+  totalAmount   Int         @default(0) // VND
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  orderItems    OrderItem[]
+
+  @@map("orders")
+  @@index([tableId])
+  @@index([branchId])
+  @@index([status])
+  @@index([customerId])
+  @@index([customerEmail])
+  @@index([customerPhone])
+}
+
+model OrderItem {
+  id          String     @id @default(cuid())
+  orderId     String
+  menuItemId  String
+  quantity    Int
+  price       Int        // VND – giá tại thời điểm đặt
+  note        String?
+  options     String?    // JSON string cho các tùy chọn
+  status      ItemStatus @default(WAITING)
+
+  order       Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("order_items")
+  @@index([orderId])
+}

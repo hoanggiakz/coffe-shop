@@ -1,0 +1,719 @@
+import { FormEvent, useEffect, useMemo, useState } from 'react'
+import toast from 'react-hot-toast'
+import Card from '@/components/ui/Card'
+import Button from '@/components/ui/Button'
+import api from '@/utils/api'
+import { TableStatus } from '@/types'
+import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
+import { trangThaiBan, trangThaiDonHang } from '@/utils/display'
+
+interface TableApi {
+  id: string
+  number: number
+  area?: string
+  capacity: number
+  status: TableStatus
+  branchId?: string
+  qrCode?: string
+}
+
+interface MenuItemApi {
+  id: string
+  name: string
+  price: number
+  available: boolean
+}
+
+type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED'
+
+interface OrderApi {
+  id: string
+  tableId: string
+  status: OrderStatus
+  totalAmount: number
+  createdAt: string
+  orderItems: Array<{ id: string; quantity: number; price: number }>
+}
+
+type TableActionMode = 'TRANSFER' | 'MERGE'
+type TableGridState = 'AVAILABLE' | 'OCCUPIED' | 'WAITING_PAYMENT' | 'MAINTENANCE'
+
+const statuses: TableStatus[] = ['AVAILABLE', 'OCCUPIED', 'RESERVED', 'CLEANING', 'MAINTENANCE']
+const activeStatuses: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY']
+
+export default function Tables() {
+  const [tables, setTables] = useState<TableApi[]>([])
+  const [orders, setOrders] = useState<OrderApi[]>([])
+  const [menuItems, setMenuItems] = useState<MenuItemApi[]>([])
+  const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [updating, setUpdating] = useState(false)
+  const [deletingTableId, setDeletingTableId] = useState('')
+  const [creatingWalkInOrder, setCreatingWalkInOrder] = useState(false)
+  const [performingTableAction, setPerformingTableAction] = useState(false)
+  const [printingBatch, setPrintingBatch] = useState(false)
+  const [orderTableId, setOrderTableId] = useState('')
+  const [orderCart, setOrderCart] = useState<Record<string, number>>({})
+  const [selectedQrTableIds, setSelectedQrTableIds] = useState<string[]>([])
+  const [editingTableId, setEditingTableId] = useState('')
+  const [tableAction, setTableAction] = useState<{
+    fromTableId: string
+    toTableId: string
+    mode: TableActionMode
+  }>({ fromTableId: '', toTableId: '', mode: 'TRANSFER' })
+  const [form, setForm] = useState({
+    number: '',
+    capacity: '',
+    area: 'Indoor',
+    branchId: '',
+  })
+  const [editForm, setEditForm] = useState({
+    number: '',
+    capacity: '',
+    area: '',
+    branchId: '',
+    status: 'AVAILABLE' as TableStatus,
+  })
+
+  const loadTables = async () => {
+    try {
+      const [tableRes, orderRes, menuRes] = await Promise.all([
+        api.get('/tables'),
+        api.get('/orders'),
+        api.get('/orders/menu'),
+      ])
+      const nextTables = Array.isArray(tableRes.data) ? (tableRes.data as TableApi[]) : []
+      const nextOrders = Array.isArray(orderRes.data) ? (orderRes.data as OrderApi[]) : []
+      const nextMenu = Array.isArray(menuRes.data) ? (menuRes.data as MenuItemApi[]) : []
+
+      setTables(nextTables.sort((a, b) => a.number - b.number))
+      setOrders(nextOrders)
+      setMenuItems(nextMenu)
+
+      if (!orderTableId && nextTables.length > 0) {
+        setOrderTableId(nextTables[0].id)
+      }
+      if (!tableAction.fromTableId && nextTables.length > 0) {
+        setTableAction((prev) => ({ ...prev, fromTableId: nextTables[0].id }))
+      }
+      if (!tableAction.toTableId && nextTables.length > 1) {
+        setTableAction((prev) => ({ ...prev, toTableId: nextTables[1].id }))
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Không tải được danh sách bàn')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadTables()
+  }, [])
+
+  const createTable = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!form.number || !form.capacity) {
+      toast.error('Vui lòng nhập số bàn và sức chứa')
+      return
+    }
+    setCreating(true)
+    try {
+      await api.post('/tables', {
+        number: Number(form.number),
+        capacity: Number(form.capacity),
+        area: form.area,
+        branchId: form.branchId || undefined,
+      })
+      setForm({
+        number: '',
+        capacity: '',
+        area: 'Indoor',
+        branchId: '',
+      })
+      toast.success('Tạo bàn thành công')
+      await loadTables()
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Tạo bàn thất bại')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const updateStatus = async (id: string, status: TableStatus) => {
+    try {
+      await api.patch(`/tables/${id}/status`, { status })
+      setTables((prev) => prev.map((table) => (table.id === id ? { ...table, status } : table)))
+      toast.success('Cập nhật trạng thái bàn thành công')
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Cập nhật trạng thái thất bại')
+    }
+  }
+
+  const startEditTable = (table: TableApi) => {
+    setEditingTableId(table.id)
+    setEditForm({
+      number: String(table.number),
+      capacity: String(table.capacity),
+      area: table.area || '',
+      branchId: table.branchId || '',
+      status: table.status,
+    })
+  }
+
+  const submitEditTable = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!editingTableId) return
+    if (!editForm.number || !editForm.capacity) {
+      toast.error('Vui lòng nhập số bàn và sức chứa')
+      return
+    }
+
+    setUpdating(true)
+    try {
+      await api.patch(`/tables/${editingTableId}`, {
+        number: Number(editForm.number),
+        capacity: Number(editForm.capacity),
+        area: editForm.area,
+        branchId: editForm.branchId || null,
+        status: editForm.status,
+      })
+      toast.success('Đã cập nhật thông tin bàn')
+      setEditingTableId('')
+      await loadTables()
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Cập nhật bàn thất bại')
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const deleteTable = async (table: TableApi) => {
+    if (!window.confirm(`Xóa bàn ${table.number}?`)) {
+      return
+    }
+    setDeletingTableId(table.id)
+    try {
+      await api.delete(`/tables/${table.id}`)
+      toast.success(`Đã xóa bàn ${table.number}`)
+      setSelectedQrTableIds((prev) => prev.filter((id) => id !== table.id))
+      if (editingTableId === table.id) {
+        setEditingTableId('')
+      }
+      await loadTables()
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Xóa bàn thất bại')
+    } finally {
+      setDeletingTableId('')
+    }
+  }
+
+  const increaseItem = (menuItemId: string) => {
+    setOrderCart((prev) => ({ ...prev, [menuItemId]: (prev[menuItemId] || 0) + 1 }))
+  }
+
+  const decreaseItem = (menuItemId: string) => {
+    setOrderCart((prev) => {
+      const next = { ...prev }
+      if (!next[menuItemId]) return prev
+      if (next[menuItemId] <= 1) {
+        delete next[menuItemId]
+      } else {
+        next[menuItemId] -= 1
+      }
+      return next
+    })
+  }
+
+  const createWalkInOrder = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!orderTableId) {
+      toast.error('Vui lòng chọn bàn')
+      return
+    }
+
+    const items = Object.entries(orderCart)
+      .filter(([, quantity]) => quantity > 0)
+      .map(([menuItemId, quantity]) => ({ menuItemId, quantity }))
+
+    if (!items.length) {
+      toast.error('Vui lòng chọn món trước khi tạo đơn')
+      return
+    }
+
+    setCreatingWalkInOrder(true)
+    try {
+      await api.post('/orders', {
+        tableId: orderTableId,
+        customerName: 'Khách tại quán',
+        items,
+      })
+      toast.success('Đã tạo đơn hộ khách thành công')
+      setOrderCart({})
+      await loadTables()
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Tạo đơn hộ khách thất bại')
+    } finally {
+      setCreatingWalkInOrder(false)
+    }
+  }
+
+  const executeTableAction = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!tableAction.fromTableId || !tableAction.toTableId) {
+      toast.error('Vui lòng chọn bàn nguồn và bàn đích')
+      return
+    }
+    if (tableAction.fromTableId === tableAction.toTableId) {
+      toast.error('Bàn nguồn và bàn đích không được trùng nhau')
+      return
+    }
+
+    setPerformingTableAction(true)
+    try {
+      await api.post('/orders/table-actions/transfer', tableAction)
+      toast.success(tableAction.mode === 'MERGE' ? 'Đã ghép bàn thành công' : 'Đã chuyển bàn thành công')
+      await loadTables()
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Thao tác bàn thất bại')
+    } finally {
+      setPerformingTableAction(false)
+    }
+  }
+
+  const openQr = async (table: TableApi) => {
+    try {
+      const qr = table.qrCode
+        ? table.qrCode
+        : (await api.get(`/tables/${table.id}/qr`)).data?.qrCode
+      if (!qr) {
+        toast.error('Không lấy được QR')
+        return
+      }
+      const win = window.open('', '_blank')
+      if (win) {
+        win.document.write(`<img src="${qr}" alt="Mã QR bàn ${table.number}" style="max-width:100%" />`)
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Không mở được QR')
+    }
+  }
+
+  const downloadQr = async (table: TableApi) => {
+    try {
+      const qr = table.qrCode ? table.qrCode : (await api.get(`/tables/${table.id}/qr`)).data?.qrCode
+      if (!qr) {
+        toast.error('Không lấy được QR')
+        return
+      }
+      const anchor = document.createElement('a')
+      anchor.href = qr
+      anchor.download = `table-${table.number}-qr.png`
+      anchor.click()
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Không tải được QR')
+    }
+  }
+
+  const toggleQrSelection = (tableId: string) => {
+    setSelectedQrTableIds((prev) =>
+      prev.includes(tableId) ? prev.filter((id) => id !== tableId) : [...prev, tableId],
+    )
+  }
+
+  const toggleSelectAllQrs = () => {
+    if (selectedQrTableIds.length === tables.length) {
+      setSelectedQrTableIds([])
+      return
+    }
+    setSelectedQrTableIds(tables.map((table) => table.id))
+  }
+
+  const printSelectedQrs = async () => {
+    if (!selectedQrTableIds.length) {
+      toast.error('Vui lòng chọn bàn để in QR')
+      return
+    }
+
+    setPrintingBatch(true)
+    try {
+      const { data } = await api.post('/tables/qr/batch', { tableIds: selectedQrTableIds })
+      const rows = Array.isArray(data) ? data : []
+      if (!rows.length) {
+        toast.error('Không lấy được danh sách QR để in')
+        return
+      }
+
+      const win = window.open('', '_blank')
+      if (!win) {
+        toast.error('Trình duyệt đã chặn cửa sổ in')
+        return
+      }
+
+      const html = rows
+        .map(
+          (row: any) => `
+            <div style="width: 240px; margin: 12px; text-align: center; page-break-inside: avoid;">
+              <img src="${row.qrCode}" alt="Mã QR bàn ${row.number}" style="width: 220px; height: 220px;" />
+              <div style="font-size: 18px; margin-top: 8px; font-weight: 600;">Bàn ${row.number}</div>
+            </div>
+          `,
+        )
+        .join('')
+
+      win.document.write(`
+        <html>
+          <head>
+            <title>In mã QR bàn</title>
+          </head>
+          <body style="display:flex; flex-wrap:wrap; align-items:flex-start; margin:20px;">
+            ${html}
+            <script>window.onload = function() { window.print(); }</script>
+          </body>
+        </html>
+      `)
+      win.document.close()
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'In QR hàng loạt thất bại')
+    } finally {
+      setPrintingBatch(false)
+    }
+  }
+
+  const activeOrdersByTable = useMemo(() => {
+    const map = new Map<string, OrderApi[]>()
+    orders
+      .filter((order) => activeStatuses.includes(order.status))
+      .forEach((order) => {
+        const current = map.get(order.tableId) || []
+        current.push(order)
+        map.set(order.tableId, current)
+      })
+    return map
+  }, [orders])
+
+  const tableGridState = (table: TableApi): TableGridState => {
+    if (table.status === 'MAINTENANCE') {
+      return 'MAINTENANCE'
+    }
+    const tableOrders = activeOrdersByTable.get(table.id) || []
+    const waitingPayment = tableOrders.some((order) => order.status === 'READY')
+    if (waitingPayment) {
+      return 'WAITING_PAYMENT'
+    }
+    if (tableOrders.length > 0 || table.status === 'OCCUPIED') {
+      return 'OCCUPIED'
+    }
+    return 'AVAILABLE'
+  }
+
+  const stateMeta = (state: TableGridState) => {
+    if (state === 'MAINTENANCE') {
+      return {
+        label: 'Bảo trì',
+        className: 'bg-slate-200 text-slate-700',
+        borderClass: 'border-slate-300',
+      }
+    }
+    if (state === 'WAITING_PAYMENT') {
+      return {
+        label: 'Chờ thanh toán',
+        className: 'bg-rose-100 text-rose-700',
+        borderClass: 'border-rose-200',
+      }
+    }
+    if (state === 'OCCUPIED') {
+      return {
+        label: 'Đang dùng',
+        className: 'bg-amber-100 text-amber-700',
+        borderClass: 'border-amber-200',
+      }
+    }
+    return {
+      label: 'Trống',
+      className: 'bg-emerald-100 text-emerald-700',
+      borderClass: 'border-emerald-200',
+    }
+  }
+
+  const cartTotal = useMemo(
+    () =>
+      Object.entries(orderCart).reduce((sum, [menuItemId, quantity]) => {
+        const item = menuItems.find((entry) => entry.id === menuItemId)
+        return sum + (item ? item.price * quantity : 0)
+      }, 0),
+    [orderCart, menuItems],
+  )
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Quản lý bàn</h1>
+
+      <Card>
+        <form onSubmit={createTable} className="grid grid-cols-1 gap-3 md:grid-cols-5">
+          <input
+            type="number"
+            placeholder="Số bàn"
+            className="rounded border px-3 py-2 text-sm"
+            value={form.number}
+            onChange={(e) => setForm((prev) => ({ ...prev, number: e.target.value }))}
+          />
+          <input
+            type="number"
+            placeholder="Sức chứa"
+            className="rounded border px-3 py-2 text-sm"
+            value={form.capacity}
+            onChange={(e) => setForm((prev) => ({ ...prev, capacity: e.target.value }))}
+          />
+          <input
+            type="text"
+            placeholder="Khu vực (trong nhà / ngoài trời)"
+            className="rounded border px-3 py-2 text-sm"
+            value={form.area}
+            onChange={(e) => setForm((prev) => ({ ...prev, area: e.target.value }))}
+          />
+          <input
+            type="text"
+            placeholder="Mã chi nhánh (tùy chọn)"
+            className="rounded border px-3 py-2 text-sm"
+            value={form.branchId}
+            onChange={(e) => setForm((prev) => ({ ...prev, branchId: e.target.value }))}
+          />
+          <Button type="submit" loading={creating}>
+            Tạo bàn + QR
+          </Button>
+        </form>
+      </Card>
+
+      {editingTableId && (
+        <Card title="M-14 Sửa bàn">
+          <form onSubmit={submitEditTable} className="grid grid-cols-1 gap-3 md:grid-cols-6">
+            <input
+              type="number"
+              placeholder="Số bàn"
+              className="rounded border px-3 py-2 text-sm"
+              value={editForm.number}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, number: e.target.value }))}
+            />
+            <input
+              type="number"
+              placeholder="Sức chứa"
+              className="rounded border px-3 py-2 text-sm"
+              value={editForm.capacity}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, capacity: e.target.value }))}
+            />
+            <input
+              type="text"
+              placeholder="Khu vực"
+              className="rounded border px-3 py-2 text-sm"
+              value={editForm.area}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, area: e.target.value }))}
+            />
+            <input
+              type="text"
+              placeholder="Mã chi nhánh"
+              className="rounded border px-3 py-2 text-sm"
+              value={editForm.branchId}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, branchId: e.target.value }))}
+            />
+            <select
+              className="rounded border px-3 py-2 text-sm"
+              value={editForm.status}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, status: e.target.value as TableStatus }))}
+            >
+              {statuses.map((status) => (
+                <option key={`edit-${status}`} value={status}>
+                  {trangThaiBan(status)}
+                </option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <Button type="submit" loading={updating}>
+                Lưu
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setEditingTableId('')}>
+                Hủy
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      <Card title="Chuyển / Ghép Bàn" subtitle="S-06">
+        <form onSubmit={executeTableAction} className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <select
+            className="rounded border px-3 py-2 text-sm"
+            value={tableAction.fromTableId}
+            onChange={(e) => setTableAction((prev) => ({ ...prev, fromTableId: e.target.value }))}
+          >
+            <option value="">-- Bàn nguồn --</option>
+            {tables.map((table) => (
+              <option key={`from-${table.id}`} value={table.id}>
+                Bàn {table.number}
+              </option>
+            ))}
+          </select>
+          <select
+            className="rounded border px-3 py-2 text-sm"
+            value={tableAction.toTableId}
+            onChange={(e) => setTableAction((prev) => ({ ...prev, toTableId: e.target.value }))}
+          >
+            <option value="">-- Bàn đích --</option>
+            {tables.map((table) => (
+              <option key={`to-${table.id}`} value={table.id}>
+                Bàn {table.number}
+              </option>
+            ))}
+          </select>
+          <select
+            className="rounded border px-3 py-2 text-sm"
+            value={tableAction.mode}
+            onChange={(e) => setTableAction((prev) => ({ ...prev, mode: e.target.value as TableActionMode }))}
+          >
+            <option value="TRANSFER">Chuyển bàn</option>
+            <option value="MERGE">Ghép bàn</option>
+          </select>
+          <Button type="submit" loading={performingTableAction}>
+            Thực hiện
+          </Button>
+        </form>
+      </Card>
+
+      <Card title="Tạo Đơn Hộ Khách" subtitle="S-07">
+        <form onSubmit={createWalkInOrder} className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <select
+              className="rounded border px-3 py-2 text-sm"
+              value={orderTableId}
+              onChange={(e) => setOrderTableId(e.target.value)}
+            >
+              <option value="">-- Chọn bàn --</option>
+              {tables
+                .filter((table) => table.status !== 'MAINTENANCE')
+                .map((table) => (
+                <option key={table.id} value={table.id}>
+                  Bàn {table.number}
+                </option>
+                ))}
+            </select>
+            <div className="rounded border px-3 py-2 text-sm text-gray-600">
+              Tổng tạm tính: <span className="font-semibold text-amber-700">{cartTotal.toLocaleString()}đ</span>
+            </div>
+            <Button type="submit" loading={creatingWalkInOrder}>
+              Tạo đơn cho khách
+            </Button>
+          </div>
+
+          <div className="max-h-72 space-y-2 overflow-y-auto rounded border p-2">
+            {menuItems
+              .filter((item) => item.available)
+              .map((item) => (
+                <div key={item.id} className="flex items-center justify-between text-sm">
+                  <div>
+                    <p className="font-medium">{item.name}</p>
+                    <p className="text-xs text-gray-500">{item.price.toLocaleString()}đ</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button type="button" className="rounded border px-2" onClick={() => decreaseItem(item.id)}>
+                      -
+                    </button>
+                    <span>{orderCart[item.id] || 0}</span>
+                    <button type="button" className="rounded border px-2" onClick={() => increaseItem(item.id)}>
+                      +
+                    </button>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </form>
+      </Card>
+
+      {loading && <RoutePageSkeleton kind="table" />}
+
+      <Card title="M-15 / M-16 QR">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={tables.length > 0 && selectedQrTableIds.length === tables.length}
+              onChange={toggleSelectAllQrs}
+            />
+            Chọn tất cả
+          </label>
+          <span className="text-gray-500">Đã chọn: {selectedQrTableIds.length} bàn</span>
+          <Button size="sm" variant="secondary" onClick={printSelectedQrs} loading={printingBatch}>
+            In QR đã chọn
+          </Button>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {tables.map((table) => (
+          <Card key={table.id} className={`${stateMeta(tableGridState(table)).borderClass}`}>
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">Bàn {table.number}</p>
+                <p className="text-sm text-gray-500">
+                  {table.area || 'Chưa phân khu'} · {table.capacity} chỗ
+                </p>
+                {table.branchId && <p className="text-xs text-gray-400">Chi nhánh: {table.branchId}</p>}
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <label className="inline-flex items-center gap-2 text-xs text-gray-500">
+                  <input
+                    type="checkbox"
+                    checked={selectedQrTableIds.includes(table.id)}
+                    onChange={() => toggleQrSelection(table.id)}
+                  />
+                  QR
+                </label>
+                <select
+                  className="rounded border px-2 py-1 text-xs"
+                  value={table.status}
+                  onChange={(e) => updateStatus(table.id, e.target.value as TableStatus)}
+                >
+                  {statuses.map((status) => (
+                    <option key={status} value={status}>
+                      {trangThaiBan(status)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <span className={`rounded-full px-2 py-1 text-xs font-medium ${stateMeta(tableGridState(table)).className}`}>
+                {stateMeta(tableGridState(table)).label}
+              </span>
+              <span className="text-xs text-gray-500">
+                {(activeOrdersByTable.get(table.id) || []).length} đơn đang xử lý
+              </span>
+            </div>
+            {(activeOrdersByTable.get(table.id) || []).slice(0, 2).map((order) => (
+              <div key={order.id} className="mt-2 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-xs text-gray-600">
+                {order.id} · {trangThaiDonHang(order.status)} · {order.totalAmount.toLocaleString()}đ
+              </div>
+            ))}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" onClick={() => openQr(table)}>
+                Xem / In QR
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => downloadQr(table)}>
+                Tải QR
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => startEditTable(table)}>
+                Sửa
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                loading={deletingTableId === table.id}
+                onClick={() => deleteTable(table)}
+              >
+                Xóa
+              </Button>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  )
+}
