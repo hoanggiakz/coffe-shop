@@ -4,11 +4,12 @@ import { useEffect, useState, useRef } from 'react';
 import { chatApi } from '@/lib/api';
 import { getChatSocket, disconnectSocket } from '@/lib/socket';
 import toast from 'react-hot-toast';
+import { ChatMessage, ChatSession } from '@/types';
 
 export default function StaffChatPage() {
-  const [chats, setChats] = useState<any[]>([]);
-  const [activeChat, setActiveChat] = useState<any>(null);
-  const [messages, setMessages] = useState<any[]>([]);
+  const [chats, setChats] = useState<ChatSession[]>([]);
+  const [activeChat, setActiveChat] = useState<ChatSession | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -29,16 +30,17 @@ export default function StaffChatPage() {
 
     socket.emit('join', { tableId: activeChat.tableId });
 
-    socket.on('joined', (data: any) => {
+    socket.on('joined', (data: { messages?: ChatMessage[] }) => {
       setMessages(data.messages || []);
     });
 
-    socket.on('new-message', (msg: any) => {
+    socket.on('new-message', (msg: ChatMessage) => {
       setMessages((prev) => [...prev, msg]);
     });
 
-    socket.on('error', (err: any) => {
-      toast.error(err.message);
+    socket.on('error', (err: unknown) => {
+      const error = err as { message?: string };
+      toast.error(error.message || 'Lỗi kết nối chat');
     });
 
     return () => {
@@ -53,7 +55,7 @@ export default function StaffChatPage() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const selectChat = async (chat: any) => {
+  const selectChat = async (chat: ChatSession) => {
     setActiveChat(chat);
     try {
       const msgs = await chatApi.getMessages(chat.id);

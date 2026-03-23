@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { orderApi, formatVND } from '@/lib/api';
 import toast from 'react-hot-toast';
+import { Order, OrderItem } from '@/types';
 
 const STATUS_FLOW: Record<string, string[]> = {
   PENDING: ['PREPARING', 'CANCELLED'],
@@ -11,7 +12,7 @@ const STATUS_FLOW: Record<string, string[]> = {
 };
 
 export default function OrdersPage() {
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState('ALL');
 
   const load = () => orderApi.list().then(setOrders).catch(() => toast.error('Lỗi tải đơn'));
@@ -22,8 +23,9 @@ export default function OrdersPage() {
       await orderApi.updateStatus(id, status);
       toast.success('Cập nhật thành công');
       load();
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      toast.error(err.message || 'Lỗi cập nhật trạng thái');
     }
   };
 
@@ -74,7 +76,7 @@ export default function OrdersPage() {
             {/* Items */}
             {order.orderItems && (
               <div className="border-t pt-3 space-y-1">
-                {order.orderItems.map((item: any) => (
+                {order.orderItems.map((item: OrderItem) => (
                   <div key={item.id} className="flex justify-between text-sm">
                     <span>{item.menuItemId?.slice(0, 8)} x{item.quantity}</span>
                     <span className="text-gray-600">{formatVND(item.price * item.quantity)}</span>

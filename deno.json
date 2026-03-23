@@ -1,0 +1,11 @@
+{
+  "lint": {
+    "files": {
+      "include": [
+        "frontend-next",
+        "payment-service/src/modules/payment/providers",
+        "order-service/src/modules/order/order.service.ts"
+      ]
+    }
+  }
+}

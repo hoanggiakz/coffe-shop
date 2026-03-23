@@ -26,7 +26,7 @@ export class MomoProvider implements PaymentProvider {
     };
   }
 
-  verifySignature(body: any, signature: string): boolean {
+  verifySignature(body: Record<string, unknown>, signature: string): boolean {
     const secret = this.configService.get('MOMO_SECRET_KEY');
     if (!secret) {
       this.logger.warn('MOMO_SECRET_KEY is empty, skip signature verification in current environment');
@@ -36,21 +36,24 @@ export class MomoProvider implements PaymentProvider {
     return hash === signature;
   }
 
-  async verifyWebhook(body: any): Promise<{ orderId: string; status: 'PAID' | 'FAILED'; transactionId: string }> {
+  async verifyWebhook(
+    body: Record<string, unknown>,
+  ): Promise<{ orderId: string; status: 'PAID' | 'FAILED'; transactionId: string }> {
     if (body?.orderId && body?.status && body?.transactionId) {
       return {
-        orderId: body.orderId,
-        status: body.status,
-        transactionId: body.transactionId,
+        orderId: String(body.orderId),
+        status: body.status as 'PAID' | 'FAILED',
+        transactionId: String(body.transactionId),
       };
     }
 
     // Mock verification
-    const status = body.resultCode === 0 ? 'PAID' : 'FAILED';
+    const resultCode = body['resultCode'];
+    const status = resultCode === 0 ? 'PAID' : 'FAILED';
     return {
-      orderId: body.orderId,
+      orderId: String(body.orderId ?? ''),
       status,
-      transactionId: body.transId,
+      transactionId: String(body['transId'] ?? ''),
     };
   }
 }

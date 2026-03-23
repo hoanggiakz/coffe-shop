@@ -20,8 +20,9 @@ export default function StaffLoginPage() {
       localStorage.setItem('user', JSON.stringify(res.user));
       toast.success('Đăng nhập thành công');
       router.push('/staff/dashboard');
-    } catch (err: any) {
-      toast.error(err.message || 'Đăng nhập thất bại');
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      toast.error(error.message || 'Đăng nhập thất bại');
     } finally {
       setLoading(false);
     }

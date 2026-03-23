@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -2242,4 +2243,3 @@ export class OrderService {
     }
   }
 }
-
