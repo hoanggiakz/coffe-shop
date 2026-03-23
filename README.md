@@ -72,8 +72,16 @@ Microservices/
 
 ### 4.1 Chạy toàn bộ hệ thống
 
+Chạy bằng Docker Compose (Windows có thể dùng PowerShell, macOS/Linux dùng Bash):
+
 ```powershell
 docker compose up -d --build
+```
+
+Hoặc dùng script dựng sẵn (Linux/macOS):
+
+```bash
+./scripts/deploy.sh
 ```
 
 ### 4.2 Kiểm tra container
