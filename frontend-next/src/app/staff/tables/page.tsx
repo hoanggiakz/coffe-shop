@@ -4,8 +4,16 @@ import { useEffect, useState } from 'react';
 import { tableApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 
+interface Table {
+  id: string;
+  number: number;
+  capacity: number;
+  area?: string;
+  status: string;
+}
+
 export default function TablesPage() {
-  const [tables, setTables] = useState<any[]>([]);
+  const [tables, setTables] = useState<Table[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ number: '', capacity: '4', area: '' });
   const [qrModal, setQrModal] = useState<{ id: string; qr: string } | null>(null);
@@ -21,8 +29,8 @@ export default function TablesPage() {
       setShowCreate(false);
       setForm({ number: '', capacity: '4', area: '' });
       load();
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -31,8 +39,8 @@ export default function TablesPage() {
       await tableApi.updateStatus(id, status);
       toast.success('Cập nhật trạng thái');
       load();
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -40,8 +48,8 @@ export default function TablesPage() {
     try {
       const res = await tableApi.getQr(id);
       setQrModal({ id, qr: res.qrCode });
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   };
 

@@ -6,6 +6,20 @@ import { getSocket, disconnectSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 type PaymentMode = 'POSTPAY' | 'PREPAY'
 type PaymentProvider = 'VNPAY' | 'MOMO' | 'VIETQR'
 
@@ -226,8 +240,8 @@ export default function CustomerMenu() {
           setTableId(matched.id)
           setTableName(`Bàn ${matched.number}`)
         }
-      } catch (error: any) {
-        toast.error(error.response?.data?.message || 'Không xác định được bàn')
+      } catch (error: unknown) {
+        toast.error(getErrMsg(error, 'Không xác định được bàn'))
       } finally {
         if (!ignore) setResolvingTable(false)
       }
@@ -253,8 +267,8 @@ export default function CustomerMenu() {
           customizations: normalizeCustomizations(item.customizations),
         }))
         setMenuItems(normalized)
-      } catch (error: any) {
-        toast.error(error.response?.data?.message || 'Không tải được menu')
+      } catch (error: unknown) {
+        toast.error(getErrMsg(error, 'Không tải được menu'))
       } finally {
         setLoadingMenu(false)
       }
@@ -408,13 +422,13 @@ export default function CustomerMenu() {
       saveCustomerSession(token, profile)
       setCustomerOffers(offers)
       setCustomerOrderHistory(history)
-    } catch (error: any) {
+    } catch (error: unknown) {
       clearCustomerSession()
-      const status = Number(error?.response?.status || 0)
+      const status = Number((error as { response?: { status?: number } })?.response?.status || 0)
       if (status === 401 || status === 403) {
         toast.error('Phiên khách hàng không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.')
       } else {
-        toast.error(error.response?.data?.message || 'Phiên đăng nhập đã hết hạn')
+        toast.error(getErrMsg(error, 'Phiên đăng nhập đã hết hạn'))
       }
     } finally {
       setLoadingCustomerData(false)
@@ -440,8 +454,8 @@ export default function CustomerMenu() {
       } else {
         toast.success('OTP da duoc gui')
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Khong gui duoc OTP')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Khong gui duoc OTP'))
     } finally {
       setRequestingOtp(false)
     }
@@ -492,8 +506,8 @@ export default function CustomerMenu() {
       setAuthOtp('')
       toast.success('Đăng nhập thành công')
       await loadCustomerData(data.accessToken, data.user)
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Đăng nhập hoặc đăng ký thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Đăng nhập hoặc đăng ký thất bại'))
     } finally {
       setAuthSubmitting(false)
     }
@@ -667,9 +681,9 @@ export default function CustomerMenu() {
     try {
       const { data } = await api.get(`/orders/${orderId}`)
       setCurrentOrder(data)
-    } catch (error: any) {
-      if (error.response?.status !== 404) {
-        toast.error(error.response?.data?.message || 'Không tải được trạng thái đơn')
+    } catch (error: unknown) {
+      if ((error as { response?: { status?: number } })?.response?.status !== 404) {
+        toast.error(getErrMsg(error, 'Không tải được trạng thái đơn'))
       }
     } finally {
       setLoadingOrderStatus(false)
@@ -682,11 +696,11 @@ export default function CustomerMenu() {
     try {
       const { data } = await api.get(`/v1/payments/orders/${orderId}`)
       setCurrentPayment(data)
-    } catch (error: any) {
-      if (error.response?.status === 404) {
+    } catch (error: unknown) {
+      if ((error as { response?: { status?: number } })?.response?.status === 404) {
         setCurrentPayment(null)
       } else {
-        toast.error(error.response?.data?.message || 'Khong tai duoc trang thai thanh toan')
+        toast.error(getErrMsg(error, 'Khong tai duoc trang thai thanh toan'))
       }
     } finally {
       setLoadingPaymentStatus(false)
@@ -726,9 +740,9 @@ export default function CustomerMenu() {
         finalAmount: Number(data?.finalAmount || cartTotal),
       })
       toast.success('Đã áp dụng mã khuyến mãi')
-    } catch (error: any) {
+    } catch (error: unknown) {
       setPromoPreview(null)
-      toast.error(error.response?.data?.message || 'Ma khuyen mai khong hop le')
+      toast.error(getErrMsg(error, 'Ma khuyen mai khong hop le'))
     } finally {
       setApplyingPromo(false)
     }
@@ -752,8 +766,8 @@ export default function CustomerMenu() {
       setCurrentPayment(data)
       toast.success('Da gui yeu cau thanh toan tien mat cho nhan vien')
       await fetchPaymentStatus(currentOrder.id)
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Khong tao duoc yeu cau tien mat')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Khong tao duoc yeu cau tien mat'))
     } finally {
       setRequestingCashPayment(false)
     }
@@ -847,8 +861,8 @@ export default function CustomerMenu() {
       if (customerToken && customerSession) {
         loadCustomerData(customerToken, customerSession)
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Đặt món thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Đặt món thất bại'))
     } finally {
       setSubmitting(false)
     }
@@ -906,8 +920,8 @@ export default function CustomerMenu() {
     try {
       await api.post(`/tables/${tableId}/call-staff`, { reason })
       toast.success('Đã gửi yêu cầu gọi phục vụ')
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Gọi phục vụ thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Gọi phục vụ thất bại'))
     } finally {
       setCallingStaff(false)
     }

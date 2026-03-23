@@ -10,6 +10,20 @@ import { trangThaiHoatDong } from '@/utils/display'
 import { disconnectSocket, getSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 type Ingredient = {
   id: string
   branchId?: string | null
@@ -187,8 +201,8 @@ export default function Inventory() {
     try {
       setLoading(true)
       await Promise.all([loadIngredients(), loadMovements(), loadMenuItems()])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không tải được dữ liệu kho', 'Unable to load inventory data'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Không tải được dữ liệu kho', 'Unable to load inventory data')))
     } finally {
       setLoading(false)
     }
@@ -202,8 +216,8 @@ export default function Inventory() {
     const socket = getSocket()
 
     const refreshRealtimeData = () => {
-      void Promise.all([loadIngredients(), loadMovements()]).catch((error: any) => {
-        toast.error(error.response?.data?.message || tv('Không thể đồng bộ lại dữ liệu kho', 'Unable to refresh inventory data'))
+      void Promise.all([loadIngredients(), loadMovements()]).catch((error: unknown) => {
+        toast.error(getErrMsg(error, tv('Không thể đồng bộ lại dữ liệu kho', 'Unable to refresh inventory data')))
       })
     }
 
@@ -246,8 +260,8 @@ export default function Inventory() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      void loadIngredients().catch((error: any) => {
-        toast.error(error.response?.data?.message || tv('Không tải được danh sách nguyên liệu', 'Unable to load ingredients'))
+      void loadIngredients().catch((error: unknown) => {
+        toast.error(getErrMsg(error, tv('Không tải được danh sách nguyên liệu', 'Unable to load ingredients')))
       })
     }, 250)
     return () => clearTimeout(timer)
@@ -255,8 +269,8 @@ export default function Inventory() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      void loadMovements().catch((error: any) => {
-        toast.error(error.response?.data?.message || tv('Không tải được lịch sử kho', 'Unable to load stock history'))
+      void loadMovements().catch((error: unknown) => {
+        toast.error(getErrMsg(error, tv('Không tải được lịch sử kho', 'Unable to load stock history')))
       })
     }, 250)
     return () => clearTimeout(timer)
@@ -292,8 +306,8 @@ export default function Inventory() {
       setIngredientForm(defaultIngredientForm)
       setEditingIngredientId(null)
       await loadIngredients()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Lưu nguyên liệu thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Lưu nguyên liệu thất bại'))
     } finally {
       setSubmitting(false)
     }
@@ -319,8 +333,8 @@ export default function Inventory() {
         setIngredientForm(defaultIngredientForm)
       }
       await loadIngredients()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Xóa nguyên liệu thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Xóa nguyên liệu thất bại'))
     }
   }
 
@@ -345,8 +359,8 @@ export default function Inventory() {
       toast.success('Đã cập nhật kho')
       setQuickMovementForm((prev) => ({ ...prev, quantity: '', note: '', reason: '' }))
       await Promise.all([loadIngredients(), loadMovements()])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Cập nhật kho thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Cập nhật kho thất bại'))
     } finally {
       setSubmitting(false)
     }
@@ -381,8 +395,8 @@ export default function Inventory() {
       setReceiptNote('')
       setReceiptItems([defaultReceiptRow])
       await Promise.all([loadIngredients(), loadMovements()])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Tạo phiếu nhập thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Tạo phiếu nhập thất bại'))
     } finally {
       setSubmitting(false)
     }
@@ -405,8 +419,8 @@ export default function Inventory() {
       toast.success('Đã điều chỉnh tồn kho')
       setAdjustForm((prev) => ({ ...prev, actualStock: '', reason: '' }))
       await Promise.all([loadIngredients(), loadMovements()])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Điều chỉnh tồn kho thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Điều chỉnh tồn kho thất bại'))
     } finally {
       setSubmitting(false)
     }
@@ -421,8 +435,8 @@ export default function Inventory() {
       })
       toast.success('Đã đồng bộ thực đơn sang kho')
       await loadIngredients()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Đồng bộ thực đơn thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Đồng bộ thực đơn thất bại'))
     } finally {
       setSyncing(false)
     }

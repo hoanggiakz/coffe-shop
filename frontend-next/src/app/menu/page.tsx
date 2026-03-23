@@ -65,8 +65,8 @@ function MenuContent() {
       });
       toast.success('Đặt hàng thành công!');
       setCart([]);
-    } catch (e: any) {
-      toast.error(e.message || 'Đặt hàng thất bại');
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Đặt hàng thất bại');
     } finally {
       setOrdering(false);
     }

@@ -6,6 +6,20 @@ import api from '@/utils/api'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { loaiGiamGia, phamViKhuyenMai, trangThaiHoatDong } from '@/utils/display'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 type DiscountType = 'PERCENT' | 'FIXED'
 type PromotionScope = 'ORDER' | 'ITEM'
 
@@ -92,8 +106,8 @@ export default function Promotions() {
       setLoading(true)
       try {
         await Promise.all([loadPromotions(), loadMenuItems()])
-      } catch (error: any) {
-        toast.error(error.response?.data?.message || 'Không tải được dữ liệu khuyến mãi')
+      } catch (error: unknown) {
+        toast.error(getErrMsg(error, 'Không tải được dữ liệu khuyến mãi'))
       } finally {
         setLoading(false)
       }
@@ -180,8 +194,8 @@ export default function Promotions() {
       }
       resetForm()
       await loadPromotions()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Lưu khuyến mãi thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Lưu khuyến mãi thất bại'))
     } finally {
       setSaving(false)
     }
@@ -193,8 +207,8 @@ export default function Promotions() {
       await api.post(`/orders/admin/promotions/${promotion.id}/disable`)
       toast.success(`Đã vô hiệu hóa ${promotion.code}`)
       await loadPromotions()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không vô hiệu hóa được mã')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không vô hiệu hóa được mã'))
     }
   }
 

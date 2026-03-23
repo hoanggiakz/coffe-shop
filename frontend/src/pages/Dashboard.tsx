@@ -9,6 +9,20 @@ import { StatsCardsSkeleton, TableSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 import { trangThaiDonHang } from '@/utils/display'
 import {
+
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
   BellAlertIcon,
   CheckBadgeIcon,
   CurrencyDollarIcon,
@@ -184,8 +198,8 @@ export default function Dashboard() {
 
       setTables(nextTables)
       setOrders(nextOrders)
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không tải được dữ liệu dashboard', 'Unable to load dashboard data'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Không tải được dữ liệu dashboard', 'Unable to load dashboard data')))
     } finally {
       setLoading(false)
     }

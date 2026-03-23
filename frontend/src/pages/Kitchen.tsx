@@ -9,6 +9,20 @@ import { useUiStore } from '@/stores/uiStore'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 interface TableApi {
   id: string
   number: number
@@ -78,8 +92,8 @@ export default function Kitchen() {
       setOrders(normalizedOrders)
       setTables(tablesRes.data || [])
       setMenuItems(menuRes.data || [])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không tải được dữ liệu bếp', 'Unable to load kitchen data'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Không tải được dữ liệu bếp', 'Unable to load kitchen data')))
     } finally {
       setLoading(false)
     }
@@ -141,8 +155,8 @@ export default function Kitchen() {
       await api.patch(`/orders/${orderId}/items/${itemId}/status`, { status })
       await loadData()
       toast.success(tv(`Cập nhật món -> ${status}`, `Item updated -> ${status}`))
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Cập nhật món thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Cập nhật món thất bại'))
     } finally {
       setUpdatingId(null)
     }
@@ -162,8 +176,8 @@ export default function Kitchen() {
       }
       await loadData()
       toast.success(tv(`Đã hoàn thành đơn ${order.id}`, `Order ${order.id} completed`))
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không thể hoàn thành đơn', 'Unable to complete order'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Không thể hoàn thành đơn', 'Unable to complete order')))
     } finally {
       setUpdatingId(null)
     }

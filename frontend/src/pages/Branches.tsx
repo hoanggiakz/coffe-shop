@@ -7,6 +7,20 @@ import api from '@/utils/api'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { trangThaiHoatDong, vaiTroNhanVien } from '@/utils/display'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 type BranchItem = {
   id: string
   name: string
@@ -72,8 +86,8 @@ export default function Branches() {
       ])
       setBranches(Array.isArray(branchesRes.data) ? branchesRes.data : [])
       setStaffs(Array.isArray(staffsRes.data) ? staffsRes.data : [])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không tải được dữ liệu chi nhánh')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không tải được dữ liệu chi nhánh'))
     } finally {
       setLoading(false)
     }
@@ -126,8 +140,8 @@ export default function Branches() {
 
       resetForm()
       await loadData()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Lưu chi nhánh thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Lưu chi nhánh thất bại'))
     } finally {
       setSaving(false)
     }
@@ -142,8 +156,8 @@ export default function Branches() {
         resetForm()
       }
       await loadData()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không vô hiệu hóa được chi nhánh')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không vô hiệu hóa được chi nhánh'))
     }
   }
 

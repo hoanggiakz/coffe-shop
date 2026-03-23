@@ -20,6 +20,20 @@ import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 import { vaiTroNhanVien } from '@/utils/display'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 type TimeGroup = 'day' | 'week' | 'month' | 'year'
 type ExportType = 'revenue' | 'top-items' | 'inventory' | 'staff-performance' | 'dashboard'
 type ExportFormat = 'excel' | 'pdf'
@@ -156,8 +170,8 @@ export default function Reports() {
       setTopItems(Array.isArray(topRes.data) ? (topRes.data as TopItem[]) : [])
       setInventory((inventoryRes.data || null) as InventoryReportResponse | null)
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không tải được dữ liệu báo cáo', 'Unable to load report data'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Không tải được dữ liệu báo cáo', 'Unable to load report data')))
     } finally {
       setLoading(false)
     }
@@ -212,8 +226,8 @@ export default function Reports() {
       link.remove()
       window.URL.revokeObjectURL(url)
       toast.success(tv('Đã tải xong báo cáo', 'Report downloaded'))
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Xuất báo cáo thất bại', 'Export failed'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Xuất báo cáo thất bại', 'Export failed')))
     }
   }
 

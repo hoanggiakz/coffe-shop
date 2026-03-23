@@ -4,8 +4,23 @@ import { useEffect, useState } from 'react';
 import { orderApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 
+interface OrderItem {
+  id: string;
+  menuItemId?: string;
+  quantity: number;
+  status?: string;
+  note?: string;
+}
+
+interface Order {
+  id: string;
+  status: string;
+  customerName?: string;
+  orderItems?: OrderItem[];
+}
+
 export default function KDSPage() {
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
 
   const load = () =>
     orderApi.list().then((all) => {
@@ -23,8 +38,8 @@ export default function KDSPage() {
       await orderApi.updateItemStatus(orderId, itemId, 'DONE');
       toast.success('Món đã xong');
       load();
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -33,8 +48,8 @@ export default function KDSPage() {
       await orderApi.updateStatus(orderId, 'READY');
       toast.success('Đơn sẵn sàng');
       load();
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -55,7 +70,7 @@ export default function KDSPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {orders.map((order) => {
-          const allDone = order.orderItems?.every((i: any) => i.status === 'DONE');
+          const allDone = order.orderItems?.every((i: OrderItem) => i.status === 'DONE');
           return (
             <div
               key={order.id}
@@ -77,7 +92,7 @@ export default function KDSPage() {
 
               {/* Items */}
               <div className="space-y-2">
-                {order.orderItems?.map((item: any) => (
+                {order.orderItems?.map((item: OrderItem) => (
                   <div
                     key={item.id}
                     className={`flex items-center justify-between p-2 rounded-lg ${

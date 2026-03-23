@@ -27,7 +27,7 @@ export class VNPayProvider implements PaymentProvider {
     };
   }
 
-  verifySignature(body: any, signature: string): boolean {
+  verifySignature(body: unknown, signature: string): boolean {
     const secret = this.configService.get('VNPAY_SECRET_KEY');
     if (!secret) {
       this.logger.warn('VNPAY_SECRET_KEY is empty, skip signature verification in current environment');
@@ -37,21 +37,26 @@ export class VNPayProvider implements PaymentProvider {
     return hash === signature;
   }
 
-  async verifyWebhook(body: any): Promise<{ orderId: string; status: 'PAID' | 'FAILED'; transactionId: string }> {
-    if (body?.orderId && body?.status && body?.transactionId) {
-      return {
-        orderId: body.orderId,
-        status: body.status,
-        transactionId: body.transactionId,
-      };
+  verifyWebhook(body: unknown): Promise<{ orderId: string; status: 'PAID' | 'FAILED'; transactionId: string }> {
+    if (typeof body !== 'object' || body === null) {
+      return Promise.reject(new Error('Invalid webhook body'));
+    }
+    // TODO: replace unknown with specific VNPayWebhookBody type
+    const b = body as { orderId?: string; status?: string; transactionId?: string; vnp_ResponseCode?: string; vnp_TxnRef?: string; vnp_TransactionNo?: string };
+    if (b.orderId && b.status && b.transactionId) {
+      return Promise.resolve({
+        orderId: b.orderId,
+        status: b.status as 'PAID' | 'FAILED',
+        transactionId: b.transactionId,
+      });
     }
 
     // Mock verification
-    const status = body.vnp_ResponseCode === '00' ? 'PAID' : 'FAILED';
-    return {
-      orderId: body.vnp_TxnRef,
+    const status = b.vnp_ResponseCode === '00' ? 'PAID' : 'FAILED';
+    return Promise.resolve({
+      orderId: b.vnp_TxnRef ?? '',
       status,
-      transactionId: body.vnp_TransactionNo,
-    };
+      transactionId: b.vnp_TransactionNo ?? '',
+    });
   }
 }

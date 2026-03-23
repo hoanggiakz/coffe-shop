@@ -5,10 +5,25 @@ import { chatApi } from '@/lib/api';
 import { getChatSocket, disconnectSocket } from '@/lib/socket';
 import toast from 'react-hot-toast';
 
+interface ChatSession {
+  id: string;
+  customerName?: string;
+  status: string;
+  tableId?: string;
+  messages?: { content?: string }[];
+}
+
+interface ChatMessage {
+  id?: string;
+  senderType?: string;
+  senderName?: string;
+  content?: string;
+}
+
 export default function StaffChatPage() {
-  const [chats, setChats] = useState<any[]>([]);
-  const [activeChat, setActiveChat] = useState<any>(null);
-  const [messages, setMessages] = useState<any[]>([]);
+  const [chats, setChats] = useState<ChatSession[]>([]);
+  const [activeChat, setActiveChat] = useState<ChatSession | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -29,16 +44,16 @@ export default function StaffChatPage() {
 
     socket.emit('join', { tableId: activeChat.tableId });
 
-    socket.on('joined', (data: any) => {
-      setMessages(data.messages || []);
+    socket.on('joined', (data: unknown) => {
+      setMessages((data as { messages?: ChatMessage[] })?.messages || []);
     });
 
-    socket.on('new-message', (msg: any) => {
-      setMessages((prev) => [...prev, msg]);
+    socket.on('new-message', (msg: unknown) => {
+      setMessages((prev) => [...prev, msg as ChatMessage]);
     });
 
-    socket.on('error', (err: any) => {
-      toast.error(err.message);
+    socket.on('error', (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : String((err as { message?: string })?.message ?? err));
     });
 
     return () => {
@@ -53,7 +68,7 @@ export default function StaffChatPage() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const selectChat = async (chat: any) => {
+  const selectChat = async (chat: ChatSession) => {
     setActiveChat(chat);
     try {
       const msgs = await chatApi.getMessages(chat.id);

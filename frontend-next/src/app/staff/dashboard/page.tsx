@@ -3,9 +3,22 @@
 import { useEffect, useState } from 'react';
 import { orderApi, tableApi, formatVND } from '@/lib/api';
 
+interface Order {
+  id: string;
+  status: string;
+  customerName?: string;
+  totalAmount: number;
+}
+
+interface Table {
+  id: string;
+  number: number;
+  status: string;
+}
+
 export default function DashboardPage() {
-  const [orders, setOrders] = useState<any[]>([]);
-  const [tables, setTables] = useState<any[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [tables, setTables] = useState<Table[]>([]);
 
   useEffect(() => {
     orderApi.list().then(setOrders).catch(() => {});
@@ -17,7 +30,7 @@ export default function DashboardPage() {
   const ready = orders.filter((o) => o.status === 'READY').length;
   const todayRevenue = orders
     .filter((o) => o.status === 'COMPLETED')
-    .reduce((s: number, o: any) => s + o.totalAmount, 0);
+    .reduce((s: number, o: Order) => s + o.totalAmount, 0);
 
   const stats = [
     { label: 'Đơn chờ xác nhận', value: pending, color: 'bg-yellow-100 text-yellow-800' },

@@ -8,6 +8,20 @@ import Button from '@/components/ui/Button'
 import { getDefaultPathForRole, normalizeRole } from '@/utils/rbac'
 import { useI18n } from '@/utils/i18n'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -25,8 +39,8 @@ export default function Login() {
       toast.success(tv('Chào mừng quay lại!', 'Welcome back!'))
       const role = normalizeRole(data.user?.role)
       navigate(getDefaultPathForRole(role))
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || tv('Đăng nhập thất bại', 'Login failed'))
+    } catch (err: unknown) {
+      toast.error(getErrMsg(err, tv('Đăng nhập thất bại', 'Login failed')))
     } finally {
       setLoading(false)
     }

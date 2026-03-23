@@ -37,7 +37,7 @@ export default function PaymentReturn() {
             ? tv('Thanh toán thành công. Cảm ơn bạn!', 'Payment successful. Thank you!')
             : tv('Thanh toán thất bại hoặc bị hủy.', 'Payment failed or cancelled.'),
         )
-      } catch (error: any) {
+      } catch (error: unknown) {
         const fallback = payload.resultCode === '0' || payload.resultCode === '00'
           ? tv('Hệ thống đang xác thực thanh toán, vui lòng thử lại sau.', 'Awaiting payment verification, please retry.')
           : tv('Không thể xác nhận thanh toán. Vui lòng liên hệ nhân viên.', 'Unable to confirm payment. Please contact staff.')

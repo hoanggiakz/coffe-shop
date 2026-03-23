@@ -8,6 +8,20 @@ import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 import { phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 interface TableApi {
   id: string
   number: number
@@ -110,8 +124,8 @@ export default function Orders() {
       if (!selectedTableId && tablesRes.data?.length > 0) {
         setSelectedTableId(tablesRes.data[0].id)
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không tải được dữ liệu order', 'Unable to load order data'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Không tải được dữ liệu order', 'Unable to load order data')))
     } finally {
       setLoading(false)
     }
@@ -172,8 +186,8 @@ export default function Orders() {
       setCart({})
       toast.success(tv('Tạo đơn thành công', 'Order created successfully'))
       await loadData()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Tạo đơn thất bại', 'Failed to create order'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Tạo đơn thất bại', 'Failed to create order')))
     } finally {
       setCreating(false)
     }
@@ -184,8 +198,8 @@ export default function Orders() {
       await api.patch(`/orders/${orderId}/status`, { status })
       await loadData()
       toast.success(`Đơn ${orderId} -> ${trangThaiDonHang(status)}`)
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Cập nhật trạng thái thất bại', 'Failed to update order status'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Cập nhật trạng thái thất bại', 'Failed to update order status')))
     }
   }
 
@@ -230,8 +244,8 @@ export default function Orders() {
       setEditingOrder(null)
       setEditCart({})
       await loadData()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không cập nhật được đơn', 'Unable to update order'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Không cập nhật được đơn', 'Unable to update order')))
     } finally {
       setUpdatingOrder(false)
     }
@@ -245,9 +259,9 @@ export default function Orders() {
       if (payment.status === 'PAID') {
         await updateOrderStatus(orderId, 'COMPLETED')
       }
-    } catch (error: any) {
-      if (error.response?.status !== 404) {
-        toast.error(error.response?.data?.message || tv('Không thể kiểm tra trạng thái thanh toán', 'Unable to verify payment status'))
+    } catch (error: unknown) {
+      if ((error as { response?: { status?: number } })?.response?.status !== 404) {
+        toast.error(getErrMsg(error, tv('Không thể kiểm tra trạng thái thanh toán', 'Unable to verify payment status')))
       }
     }
   }
@@ -300,8 +314,8 @@ export default function Orders() {
       if (selectedMethod !== 'CASH') {
         await refreshPaymentAndCompleteIfPaid(payingOrder.id)
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Thanh toán thất bại', 'Payment failed'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Thanh toán thất bại', 'Payment failed')))
     } finally {
       setProcessingPayment(false)
     }

@@ -6,6 +6,20 @@ import Input from '@/components/ui/Input'
 import api from '@/utils/api'
 import { loaiTuyChonMon, trangThaiHoatDong } from '@/utils/display'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 type MenuCategory = {
   id: string
   name: string
@@ -157,8 +171,8 @@ export default function Menu() {
   const loadAll = async () => {
     try {
       await Promise.all([loadCategories(), loadGroups(), loadItems(), loadIngredients()])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không tải được dữ liệu thực đơn')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không tải được dữ liệu thực đơn'))
     }
   }
 
@@ -195,8 +209,8 @@ export default function Menu() {
       setEditingCategoryId(null)
       setCategoryForm({ name: '', description: '', sortOrder: '0', isActive: true })
       await Promise.all([loadCategories(), loadItems()])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không lưu được danh mục')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không lưu được danh mục'))
     }
   }
 
@@ -214,8 +228,8 @@ export default function Menu() {
       setEditingGroupId(null)
       setGroupForm({ name: '', type: 'SINGLE', sortOrder: '0', isGlobal: true, isActive: true })
       await loadGroups()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không lưu được nhóm tùy chọn')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không lưu được nhóm tùy chọn'))
     }
   }
 
@@ -228,8 +242,8 @@ export default function Menu() {
       toast.success('Đã thêm giá trị tùy chọn')
       setValueForm((prev) => ({ ...prev, value: '', label: '', priceDelta: '0', isDefault: false, isActive: true }))
       await loadGroups()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không thêm được giá trị tùy chọn')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không thêm được giá trị tùy chọn'))
     }
   }
 
@@ -242,8 +256,8 @@ export default function Menu() {
       await api.patch(`/orders/admin/menu/options/values/${valueId}`, { label, priceDelta: Number(priceRaw || 0) })
       toast.success('Đã cập nhật giá trị tùy chọn')
       await loadGroups()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không cập nhật được')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không cập nhật được'))
     }
   }
 
@@ -316,8 +330,8 @@ export default function Menu() {
       toast.success('Đã lưu món')
       resetItemForm()
       await loadItems()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không lưu được món')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không lưu được món'))
     }
   }
 

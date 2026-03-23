@@ -10,6 +10,20 @@ import { showRealtimeNotification } from '@/utils/notifications'
 import { ChatSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 interface ChatItem {
   id: string
   tableId: string
@@ -123,8 +137,8 @@ export default function ChatPage() {
       if (!stillExists) {
         setActiveChatId(nextChats[0].id)
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không tải được danh sách chat', 'Unable to load chat sessions'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Không tải được danh sách chat', 'Unable to load chat sessions')))
     } finally {
       setLoading(false)
     }
@@ -141,8 +155,8 @@ export default function ChatPage() {
       } else {
         markChatSeen(chatId)
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không tải được tin nhắn', 'Unable to load messages'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Không tải được tin nhắn', 'Unable to load messages')))
     }
   }
 
@@ -246,8 +260,8 @@ export default function ChatPage() {
       await loadChats()
       setActiveChatId(data.id)
       toast.success(tv('Tạo phiên chat thành công', 'Chat session created'))
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Tạo chat thất bại', 'Failed to create chat'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Tạo chat thất bại', 'Failed to create chat')))
     }
   }
 
@@ -264,8 +278,8 @@ export default function ChatPage() {
       })
       setMessageText('')
       markChatSeen(activeChat.id)
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Gửi tin nhắn thất bại', 'Failed to send message'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Gửi tin nhắn thất bại', 'Failed to send message')))
     } finally {
       setSending(false)
     }
@@ -284,8 +298,8 @@ export default function ChatPage() {
         return next
       })
       await loadChats()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Đóng chat thất bại', 'Failed to close chat'))
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, tv('Đóng chat thất bại', 'Failed to close chat')))
     }
   }
 

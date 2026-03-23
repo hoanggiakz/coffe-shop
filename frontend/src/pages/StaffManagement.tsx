@@ -14,6 +14,20 @@ import {
 } from '@/utils/display'
 import { normalizeRole } from '@/utils/rbac'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 type StaffRole = 'ADMIN' | 'MANAGER' | 'WAITER' | 'BARISTA' | 'STAFF'
 type ShiftType = 'MORNING' | 'AFTERNOON' | 'EVENING'
 type AttendanceMethod = 'EMPLOYEE_CODE' | 'QR'
@@ -131,8 +145,8 @@ export default function StaffManagement() {
 
       const { data } = await api.get('/users/staff', { params })
       setStaffs(Array.isArray(data) ? data : [])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không tải được danh sách nhân viên')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không tải được danh sách nhân viên'))
     } finally {
       setLoadingStaff(false)
     }
@@ -149,8 +163,8 @@ export default function StaffManagement() {
       const params: Record<string, string> = { weekStart }
       const { data } = await api.get('/users/staff/schedules', { params })
       setSchedules(Array.isArray(data?.shifts) ? data.shifts : [])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không tải được lịch phân ca')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không tải được lịch phân ca'))
     } finally {
       setLoadingSchedule(false)
     }
@@ -167,8 +181,8 @@ export default function StaffManagement() {
         params: { includeInactive: 'true' },
       })
       setBranches(Array.isArray(data) ? data : [])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không tải được danh sách chi nhánh')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không tải được danh sách chi nhánh'))
     }
   }
 
@@ -184,8 +198,8 @@ export default function StaffManagement() {
       }
       const { data } = await api.get('/users/staff/attendance', { params })
       setAttendanceLogs(Array.isArray(data) ? data : [])
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không tải được dữ liệu chấm công')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không tải được dữ liệu chấm công'))
     } finally {
       setLoadingAttendance(false)
     }
@@ -290,8 +304,8 @@ export default function StaffManagement() {
       resetStaffForm()
       await loadStaffs()
       await loadAttendance()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Lưu nhân viên thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Lưu nhân viên thất bại'))
     } finally {
       setSavingStaff(false)
     }
@@ -312,8 +326,8 @@ export default function StaffManagement() {
       await loadStaffs()
       await loadSchedules()
       await loadAttendance()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Xóa nhân viên thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Xóa nhân viên thất bại'))
     }
   }
 
@@ -335,8 +349,8 @@ export default function StaffManagement() {
       toast.success('Đã lưu phân ca')
       setScheduleNote('')
       await loadSchedules()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Phân ca thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Phân ca thất bại'))
     } finally {
       setSavingSchedule(false)
     }
@@ -348,8 +362,8 @@ export default function StaffManagement() {
       await api.delete(`/users/staff/schedules/${shiftId}`)
       toast.success('Đã xóa ca làm')
       await loadSchedules()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Xóa ca làm thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Xóa ca làm thất bại'))
     }
   }
 
@@ -367,8 +381,8 @@ export default function StaffManagement() {
       })
       toast.success(action === 'check-in' ? 'Chấm công vào ca thành công' : 'Chấm công ra ca thành công')
       await loadAttendance()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Chấm công thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Chấm công thất bại'))
     } finally {
       setProcessingAttendance(false)
     }

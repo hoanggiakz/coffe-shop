@@ -7,6 +7,20 @@ import { TableStatus } from '@/types'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { trangThaiBan, trangThaiDonHang } from '@/utils/display'
 
+/** Safely extract error message from unknown errors (typically axios errors). */
+function getErrMsg(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    if ('response' in error) {
+      const resp = (error as { response?: { data?: { message?: string } } }).response
+      if (typeof resp?.data?.message === 'string') return resp.data.message
+    }
+    if (error instanceof Error) return error.message
+  }
+  return fallback
+}
+
+
+
 interface TableApi {
   id: string
   number: number
@@ -99,8 +113,8 @@ export default function Tables() {
       if (!tableAction.toTableId && nextTables.length > 1) {
         setTableAction((prev) => ({ ...prev, toTableId: nextTables[1].id }))
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không tải được danh sách bàn')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không tải được danh sách bàn'))
     } finally {
       setLoading(false)
     }
@@ -132,8 +146,8 @@ export default function Tables() {
       })
       toast.success('Tạo bàn thành công')
       await loadTables()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Tạo bàn thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Tạo bàn thất bại'))
     } finally {
       setCreating(false)
     }
@@ -144,8 +158,8 @@ export default function Tables() {
       await api.patch(`/tables/${id}/status`, { status })
       setTables((prev) => prev.map((table) => (table.id === id ? { ...table, status } : table)))
       toast.success('Cập nhật trạng thái bàn thành công')
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Cập nhật trạng thái thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Cập nhật trạng thái thất bại'))
     }
   }
 
@@ -180,8 +194,8 @@ export default function Tables() {
       toast.success('Đã cập nhật thông tin bàn')
       setEditingTableId('')
       await loadTables()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Cập nhật bàn thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Cập nhật bàn thất bại'))
     } finally {
       setUpdating(false)
     }
@@ -200,8 +214,8 @@ export default function Tables() {
         setEditingTableId('')
       }
       await loadTables()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Xóa bàn thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Xóa bàn thất bại'))
     } finally {
       setDeletingTableId('')
     }
@@ -250,8 +264,8 @@ export default function Tables() {
       toast.success('Đã tạo đơn hộ khách thành công')
       setOrderCart({})
       await loadTables()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Tạo đơn hộ khách thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Tạo đơn hộ khách thất bại'))
     } finally {
       setCreatingWalkInOrder(false)
     }
@@ -273,8 +287,8 @@ export default function Tables() {
       await api.post('/orders/table-actions/transfer', tableAction)
       toast.success(tableAction.mode === 'MERGE' ? 'Đã ghép bàn thành công' : 'Đã chuyển bàn thành công')
       await loadTables()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Thao tác bàn thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Thao tác bàn thất bại'))
     } finally {
       setPerformingTableAction(false)
     }
@@ -293,8 +307,8 @@ export default function Tables() {
       if (win) {
         win.document.write(`<img src="${qr}" alt="Mã QR bàn ${table.number}" style="max-width:100%" />`)
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không mở được QR')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không mở được QR'))
     }
   }
 
@@ -309,8 +323,8 @@ export default function Tables() {
       anchor.href = qr
       anchor.download = `table-${table.number}-qr.png`
       anchor.click()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Không tải được QR')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'Không tải được QR'))
     }
   }
 
@@ -372,8 +386,8 @@ export default function Tables() {
         </html>
       `)
       win.document.close()
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'In QR hàng loạt thất bại')
+    } catch (error: unknown) {
+      toast.error(getErrMsg(error, 'In QR hàng loạt thất bại'))
     } finally {
       setPrintingBatch(false)
     }

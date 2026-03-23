@@ -4,9 +4,9 @@ export interface PaymentProvider {
     transactionId: string;
   }>;
 
-  verifySignature(body: any, signature: string): boolean;
+  verifySignature(body: unknown, signature: string): boolean;
 
-  verifyWebhook(body: any): Promise<{
+  verifyWebhook(body: unknown): Promise<{
     orderId: string;
     status: 'PAID' | 'FAILED';
     transactionId: string;
