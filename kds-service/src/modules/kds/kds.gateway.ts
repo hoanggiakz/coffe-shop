@@ -23,7 +23,7 @@ export class KdsGateway implements OnGatewayConnection {
 
   constructor(private kdsService: KdsService, private redisService: RedisService) {}
 
-  async handleConnection(client: Socket) {
+  handleConnection(client: Socket) {
     // Optional: join room based on tableId from query or auth
     const tableId = client.handshake.query.tableId as string || 'kitchen';
     client.join(`table:${tableId}`);

@@ -1,4 +1,4 @@
-import { IsInt, Min, IsOptional } from 'class-validator';
+import { IsInt, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateTableDto {

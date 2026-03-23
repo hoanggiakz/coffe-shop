@@ -5,10 +5,25 @@ import { chatApi } from '@/lib/api';
 import { getChatSocket, disconnectSocket } from '@/lib/socket';
 import toast from 'react-hot-toast';
 
+interface ChatMessage {
+  id?: string;
+  senderType: string;
+  senderName: string;
+  content: string;
+}
+
+interface Chat {
+  id: string;
+  tableId: string;
+  customerName?: string;
+  status: string;
+  messages?: ChatMessage[];
+}
+
 export default function StaffChatPage() {
-  const [chats, setChats] = useState<any[]>([]);
-  const [activeChat, setActiveChat] = useState<any>(null);
-  const [messages, setMessages] = useState<any[]>([]);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeChat, setActiveChat] = useState<Chat | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -29,15 +44,15 @@ export default function StaffChatPage() {
 
     socket.emit('join', { tableId: activeChat.tableId });
 
-    socket.on('joined', (data: any) => {
+    socket.on('joined', (data: { messages?: ChatMessage[] }) => {
       setMessages(data.messages || []);
     });
 
-    socket.on('new-message', (msg: any) => {
+    socket.on('new-message', (msg: ChatMessage) => {
       setMessages((prev) => [...prev, msg]);
     });
 
-    socket.on('error', (err: any) => {
+    socket.on('error', (err: { message: string }) => {
       toast.error(err.message);
     });
 
@@ -53,7 +68,7 @@ export default function StaffChatPage() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const selectChat = async (chat: any) => {
+  const selectChat = async (chat: Chat) => {
     setActiveChat(chat);
     try {
       const msgs = await chatApi.getMessages(chat.id);

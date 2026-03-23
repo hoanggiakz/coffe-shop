@@ -45,7 +45,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(private chatService: ChatService) {}
 
-  async handleConnection(@ConnectedSocket() client: Socket) {
+  handleConnection(@ConnectedSocket() client: Socket) {
     this.logger.log(`Client ${client.id} connected`);
   }
 
@@ -85,10 +85,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.join(`table:${tableId}`);
       client.data.tableId = tableId;
       client.data.chatId = chat.id;
-      client.emit('joined', { chatId: chat.id, messages: (chat as any).messages ?? [] });
+      client.emit('joined', { chatId: chat.id, messages: chat.messages ?? [] });
 
       const isStaffJoin = data?.senderType === 'STAFF' || client.data.isStaff === true;
-      const hasMessages = Array.isArray((chat as any).messages) && (chat as any).messages.length > 0;
+      const hasMessages = Array.isArray(chat.messages) && chat.messages.length > 0;
       if (!isStaffJoin && !hasMessages) {
         this.emitStaffNotification({
           id: `chat-opened:${chat.id}`,
@@ -102,8 +102,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       this.logger.log(`Client ${client.id} joined table:${tableId} chat:${chat.id}`);
-    } catch (err: any) {
-      client.emit('error', { message: err.message || 'Không thể join phòng' });
+    } catch (err: unknown) {
+      client.emit('error', { message: err instanceof Error ? err.message : 'Không thể join phòng' });
     }
   }
 
@@ -142,12 +142,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Phát tin nhắn đến tất cả trong phòng
       this.emitMessageToTable(String(client.data.tableId || ''), message);
       this.emitStaffNotificationFromMessage(message, String(client.data.tableId || ''));
-    } catch (err: any) {
-      client.emit('error', { message: err.message || 'Gửi tin nhắn thất bại' });
+    } catch (err: unknown) {
+      client.emit('error', { message: err instanceof Error ? err.message : 'Gửi tin nhắn thất bại' });
     }
   }
 
-  emitMessageToTable(tableId: string, message: any) {
+  emitMessageToTable(tableId: string, message: Record<string, unknown>) {
     const normalizedTableId = String(tableId || '').trim();
     if (!normalizedTableId) {
       return;
@@ -155,7 +155,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(`table:${normalizedTableId}`).emit('new-message', message);
   }
 
-  emitStaffNotificationFromMessage(message: any, tableId?: string) {
+  emitStaffNotificationFromMessage(message: Record<string, unknown>, tableId?: string) {
     const payload = this.buildNotificationFromMessage(message, tableId);
     if (!payload) {
       return;
@@ -185,7 +185,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to('staff:global').emit('staff-notification', payload);
   }
 
-  private buildNotificationFromMessage(message: any, tableId?: string): StaffNotificationPayload | null {
+  private buildNotificationFromMessage(message: Record<string, unknown>, tableId?: string): StaffNotificationPayload | null {
     const content = String(message?.content || '').trim();
     if (!content) return null;
 

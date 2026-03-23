@@ -13,7 +13,7 @@ import {
 } from './dto/menu-option.dto';
 import { CreateMenuItemManagementDto, UpdateMenuItemManagementDto } from './dto/menu-item-management.dto';
 import { CreatePromotionDto, QueryPromotionDto, UpdatePromotionDto } from './dto/promotion.dto';
-import { Prisma, PromotionScope } from '@prisma/client';
+import { Prisma, PromotionScope, OrderStatus, ItemStatus } from '@prisma/client';
 
 const ACTIVE_ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY'] as const;
 
@@ -138,7 +138,7 @@ export class OrderService {
     return items.map((item) => this.mapMenuItemForCustomer(item));
   }
 
-  async listMenuCategories(query: { includeInactive?: boolean; branchId?: string }) {
+  listMenuCategories(query: { includeInactive?: boolean; branchId?: string }) {
     const branchId = this.normalizeBranchId(query.branchId);
     return this.prisma.menuCategory.findMany({
       where: {
@@ -253,7 +253,7 @@ export class OrderService {
     return { id, deleted: true };
   }
 
-  async listMenuOptionGroups(query: { includeInactive?: boolean; branchId?: string }) {
+  listMenuOptionGroups(query: { includeInactive?: boolean; branchId?: string }) {
     const branchId = this.normalizeBranchId(query.branchId);
     const includeInactive = query.includeInactive === true;
     return this.prisma.menuOptionGroup.findMany({
@@ -278,7 +278,7 @@ export class OrderService {
     });
   }
 
-  async createMenuOptionGroup(dto: CreateMenuOptionGroupDto) {
+  createMenuOptionGroup(dto: CreateMenuOptionGroupDto) {
     const name = String(dto.name || '').trim();
     if (!name) {
       throw new BadRequestException('Ten nhom tuy chon khong duoc de trong');
@@ -637,7 +637,7 @@ export class OrderService {
     return this.mapMenuItemForAdmin(item);
   }
 
-  private mapMenuItemForCustomer(item: any) {
+  private mapMenuItemForCustomer(item: Record<string, unknown>) {
     return {
       id: item.id,
       branchId: item.branchId || null,
@@ -652,7 +652,7 @@ export class OrderService {
     };
   }
 
-  private mapMenuItemForAdmin(item: any) {
+  private mapMenuItemForAdmin(item: Record<string, unknown>) {
     return {
       id: item.id,
       branchId: item.branchId || null,
@@ -664,15 +664,15 @@ export class OrderService {
       category: item.categoryRef?.name || item.category || 'Khac',
       available: Boolean(item.available),
       customizations: this.resolveCustomizations(item),
-      optionGroups: (item.optionGroups || []).map((binding: any) => ({
-        id: binding.group?.id,
-        name: binding.group?.name,
-        type: binding.group?.type,
+      optionGroups: (item.optionGroups as Record<string, unknown>[] || []).map((binding: Record<string, unknown>) => ({
+        id: (binding.group as Record<string, unknown>)?.id,
+        name: (binding.group as Record<string, unknown>)?.name,
+        type: (binding.group as Record<string, unknown>)?.type,
         required: Boolean(binding.required),
         sortOrder: Number(binding.sortOrder || 0),
-        isGlobal: Boolean(binding.group?.isGlobal),
-        isActive: Boolean(binding.group?.isActive),
-        values: (binding.group?.values || []).map((value: any) => ({
+        isGlobal: Boolean((binding.group as Record<string, unknown>)?.isGlobal),
+        isActive: Boolean((binding.group as Record<string, unknown>)?.isActive),
+        values: ((binding.group as Record<string, unknown>)?.values as Record<string, unknown>[] || []).map((value: Record<string, unknown>) => ({
           id: value.id,
           value: value.value,
           label: value.label,
@@ -682,7 +682,7 @@ export class OrderService {
           sortOrder: Number(value.sortOrder || 0),
         })),
       })),
-      recipe: (item.ingredients || []).map((ingredient: any) => ({
+      recipe: (item.ingredients as Record<string, unknown>[] || []).map((ingredient: Record<string, unknown>) => ({
         id: ingredient.id,
         ingredientId: ingredient.ingredientId,
         ingredientName: ingredient.ingredientName,
@@ -694,22 +694,22 @@ export class OrderService {
     };
   }
 
-  private resolveCustomizations(item: any) {
+  private resolveCustomizations(item: Record<string, unknown>) {
     if (Array.isArray(item.customizations) && item.customizations.length) {
       return item.customizations;
     }
 
-    const bindings = (item.optionGroups || []).map((binding: any) => ({
-      groupId: binding.groupId,
+    const bindings = (item.optionGroups as Record<string, unknown>[] || []).map((binding: Record<string, unknown>) => ({
+      groupId: binding.groupId as string,
       required: Boolean(binding.required),
       sortOrder: Number(binding.sortOrder || 0),
     }));
 
-    const groups = (item.optionGroups || []).map((binding: any) => binding.group).filter(Boolean);
-    return this.buildCustomizations(groups, bindings);
+    const groups = (item.optionGroups as Record<string, unknown>[] || []).map((binding: Record<string, unknown>) => binding.group).filter(Boolean);
+    return this.buildCustomizations(groups as Record<string, unknown>[], bindings);
   }
 
-  private buildCustomizations(groups: any[], bindings: Array<{ groupId: string; required: boolean; sortOrder: number }>) {
+  private buildCustomizations(groups: Record<string, unknown>[], bindings: Array<{ groupId: string; required: boolean; sortOrder: number }>) {
     if (!groups?.length || !bindings?.length) {
       return [];
     }
@@ -732,9 +732,9 @@ export class OrderService {
           type,
           required: binding.required,
           options: values
-            .filter((value: any) => value.isActive !== false)
-            .sort((a: any, b: any) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0))
-            .map((value: any) => ({
+            .filter((value: Record<string, unknown>) => value.isActive !== false)
+            .sort((a: Record<string, unknown>, b: Record<string, unknown>) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0))
+            .map((value: Record<string, unknown>) => ({
               value: value.value,
               label: value.label,
               priceDelta: Number(value.priceDelta || 0),
@@ -1169,7 +1169,7 @@ export class OrderService {
     }
   }
 
-  private mapPromotion(item: any) {
+  private mapPromotion(item: Record<string, unknown>) {
     return {
       ...item,
       menuItemIds: this.parsePromotionMenuItemIds(item.menuItemIds),
@@ -1548,7 +1548,7 @@ export class OrderService {
     const dateFrom = this.parseDateParam(params.dateFrom, 'dateFrom');
     const dateTo = this.parseDateParam(params.dateTo, 'dateTo');
 
-    const where: any = {};
+    const where: Prisma.OrderWhereInput = {};
     if (tableId) {
       where.tableId = tableId;
     }
@@ -1595,7 +1595,7 @@ export class OrderService {
       const sourceOrder = await tx.order.findFirst({
         where: {
           tableId: fromTableId,
-          status: { in: ACTIVE_ORDER_STATUSES as any },
+          status: { in: [...ACTIVE_ORDER_STATUSES] as OrderStatus[] },
         },
         include: { orderItems: true },
         orderBy: { createdAt: 'desc' },
@@ -1608,7 +1608,7 @@ export class OrderService {
       const targetOrder = await tx.order.findFirst({
         where: {
           tableId: toTableId,
-          status: { in: ACTIVE_ORDER_STATUSES as any },
+          status: { in: [...ACTIVE_ORDER_STATUSES] as OrderStatus[] },
         },
         include: { orderItems: true },
         orderBy: { createdAt: 'desc' },
@@ -1676,9 +1676,9 @@ export class OrderService {
               note: sourceItem.note,
               options: sourceItem.options,
               status: sourceItem.status,
-            } as any,
+            },
           });
-          targetItems.push(createdItem as any);
+          targetItems.push(createdItem);
         }
       }
 
@@ -1701,7 +1701,7 @@ export class OrderService {
 
       await tx.order.update({
         where: { id: sourceOrder.id },
-        data: { status: 'CANCELLED' as any },
+        data: { status: OrderStatus.CANCELLED },
       });
 
       const mergedOrder = await tx.order.findUnique({
@@ -1728,7 +1728,7 @@ export class OrderService {
     const phone = String(params.phone || '').trim();
     const limit = Number.isFinite(params.limit) && (params.limit || 0) > 0 ? Math.min(params.limit || 0, 50) : 20;
 
-    const orConditions: any[] = [];
+    const orConditions: Prisma.OrderWhereInput[] = [];
     if (customerId) orConditions.push({ customerId });
     if (email) orConditions.push({ customerEmail: email });
     if (phone) orConditions.push({ customerPhone: phone });
@@ -1763,7 +1763,7 @@ export class OrderService {
 
     await this.prisma.order.update({
       where: { id },
-      data: { status: dto.status as any },
+      data: { status: dto.status as OrderStatus },
     });
 
     if (order.status !== 'COMPLETED' && dto.status === 'COMPLETED' && order.customerId) {
@@ -1872,7 +1872,7 @@ export class OrderService {
           price: item.unitPrice,
           note: item.note,
           options: item.options,
-          status: 'WAITING' as any,
+          status: ItemStatus.WAITING,
         })),
       });
 
@@ -1883,7 +1883,7 @@ export class OrderService {
           discountAmount,
           promotionCode,
           totalAmount,
-          status: order.status === 'READY' ? ('CONFIRMED' as any) : undefined,
+          status: order.status === 'READY' ? OrderStatus.CONFIRMED : undefined,
         },
       });
     });
@@ -1941,7 +1941,7 @@ export class OrderService {
 
     const updated = await this.prisma.orderItem.update({
       where: { id: itemId },
-      data: { status: nextStatus as any },
+      data: { status: nextStatus as ItemStatus },
     });
 
     if (nextStatus === 'PREPARING') {
@@ -2217,7 +2217,7 @@ export class OrderService {
     const count = await this.prisma.order.count({
       where: {
         tableId,
-        status: { in: ACTIVE_ORDER_STATUSES as any },
+        status: { in: [...ACTIVE_ORDER_STATUSES] as OrderStatus[] },
       },
     });
     return count > 0;
