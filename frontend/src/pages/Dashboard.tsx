@@ -184,8 +184,9 @@ export default function Dashboard() {
 
       setTables(nextTables)
       setOrders(nextOrders)
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không tải được dữ liệu dashboard', 'Unable to load dashboard data'))
+    } catch (error: unknown) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message
+      toast.error(message || tv('Không tải được dữ liệu dashboard', 'Unable to load dashboard data'))
     } finally {
       setLoading(false)
     }
@@ -193,10 +194,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadOverview(false)
-    const timer = window.setInterval(() => {
+    const timer = globalThis.setInterval(() => {
       loadOverview(true)
     }, 10000)
-    return () => window.clearInterval(timer)
+    return () => globalThis.clearInterval(timer)
   }, [])
 
   useEffect(() => {

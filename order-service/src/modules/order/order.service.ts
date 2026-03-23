@@ -13,9 +13,9 @@ import {
 } from './dto/menu-option.dto';
 import { CreateMenuItemManagementDto, UpdateMenuItemManagementDto } from './dto/menu-item-management.dto';
 import { CreatePromotionDto, QueryPromotionDto, UpdatePromotionDto } from './dto/promotion.dto';
-import { Prisma, PromotionScope } from '@prisma/client';
+import { Prisma, PromotionScope, OrderStatus, ItemStatus } from '@prisma/client';
 
-const ACTIVE_ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY'] as const;
+const ACTIVE_ORDER_STATUSES: readonly OrderStatus[] = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY'];
 
 type MenuAdminListQuery = {
   keyword?: string;
@@ -1595,7 +1595,7 @@ export class OrderService {
       const sourceOrder = await tx.order.findFirst({
         where: {
           tableId: fromTableId,
-          status: { in: ACTIVE_ORDER_STATUSES as any },
+          status: { in: ACTIVE_ORDER_STATUSES },
         },
         include: { orderItems: true },
         orderBy: { createdAt: 'desc' },
@@ -1608,7 +1608,7 @@ export class OrderService {
       const targetOrder = await tx.order.findFirst({
         where: {
           tableId: toTableId,
-          status: { in: ACTIVE_ORDER_STATUSES as any },
+          status: { in: ACTIVE_ORDER_STATUSES },
         },
         include: { orderItems: true },
         orderBy: { createdAt: 'desc' },
@@ -1883,7 +1883,7 @@ export class OrderService {
           discountAmount,
           promotionCode,
           totalAmount,
-          status: order.status === 'READY' ? ('CONFIRMED' as any) : undefined,
+          status: order.status === 'READY' ? ('CONFIRMED' as OrderStatus) : undefined,
         },
       });
     });
@@ -1941,7 +1941,7 @@ export class OrderService {
 
     const updated = await this.prisma.orderItem.update({
       where: { id: itemId },
-      data: { status: nextStatus as any },
+      data: { status: nextStatus as ItemStatus },
     });
 
     if (nextStatus === 'PREPARING') {
@@ -2217,7 +2217,7 @@ export class OrderService {
     const count = await this.prisma.order.count({
       where: {
         tableId,
-        status: { in: ACTIVE_ORDER_STATUSES as any },
+        status: { in: ACTIVE_ORDER_STATUSES },
       },
     });
     return count > 0;
