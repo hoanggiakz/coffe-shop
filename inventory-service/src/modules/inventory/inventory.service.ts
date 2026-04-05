@@ -65,16 +65,29 @@ export class InventoryService {
   private async fetchWithRetry(
     url: string,
     init?: RequestInit,
-    options?: { attempts?: number; retryDelayMs?: number; retryOnStatuses?: number[] },
+    options?: { attempts?: number; retryDelayMs?: number; retryOnStatuses?: number[]; timeoutMs?: number },
   ) {
     const attempts = Math.max(options?.attempts || 3, 1);
     const retryDelayMs = Math.max(options?.retryDelayMs || 250, 0);
     const retryOnStatuses = options?.retryOnStatuses || [429, 500, 502, 503, 504];
+    const timeoutMs = Math.max(options?.timeoutMs || 0, 0);
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      let timeoutHandle: NodeJS.Timeout | null = null;
       try {
-        const response = await fetch(url, init);
+        const controller = timeoutMs > 0 ? new AbortController() : null;
+        const requestInit: RequestInit = {
+          ...(init || {}),
+          ...(controller ? { signal: controller.signal } : {}),
+        };
+
+        if (controller) {
+          timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+        }
+
+        const response = await fetch(url, requestInit);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
         if (attempt < attempts && retryOnStatuses.includes(response.status)) {
           this.logger.warn(`Retry ${attempt}/${attempts - 1} for ${url} after status ${response.status}`);
           await this.sleep(retryDelayMs * attempt);
@@ -82,6 +95,7 @@ export class InventoryService {
         }
         return response;
       } catch (error) {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
         lastError = error as Error;
         if (attempt >= attempts) {
           throw error;
@@ -519,7 +533,8 @@ export class InventoryService {
     const title = `Canh bao ton kho thap: ${ingredient.name}`;
     const message = `${ingredient.name} con ${stock} ${ingredient.unit}, thap hon/ bang muc toi thieu ${minStock}`;
 
-    await Promise.allSettled([
+    // Fire-and-forget: khong de luong canh bao lam tre request chinh.
+    void Promise.allSettled([
       this.sendInAppLowStockAlert({
         ingredientId: ingredient.id,
         ingredientName: ingredient.name,
@@ -561,7 +576,7 @@ export class InventoryService {
           message: payload.message,
           createdAt: new Date().toISOString(),
         }),
-      });
+      }, { attempts: 1, timeoutMs: 1500, retryOnStatuses: [500, 502, 503, 504] });
       if (!response.ok) {
         const body = await response.text();
         this.logger.warn(`Khong gui duoc in-app low stock: ${response.status} ${body}`);

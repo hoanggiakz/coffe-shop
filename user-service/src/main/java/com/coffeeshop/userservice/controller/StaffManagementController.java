@@ -108,6 +108,26 @@ public class StaffManagementController {
         return ResponseEntity.ok(userService.getAttendance(extractToken(authHeader), staffId, dateFrom, dateTo));
     }
 
+    @GetMapping("/shift-overview")
+    public ResponseEntity<ShiftOverviewResponse> getShiftOverview(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestParam(value = "date", required = false) String date,
+            @RequestParam(value = "staffId", required = false) String staffId,
+            @RequestParam(value = "shiftType", required = false) String shiftType
+    ) {
+        return ResponseEntity.ok(userService.getShiftOverview(extractToken(authHeader), date, staffId, shiftType));
+    }
+
+    @GetMapping("/payroll")
+    public ResponseEntity<PayrollSummaryResponse> getPayroll(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestParam(value = "staffId", required = false) String staffId,
+            @RequestParam(value = "dateFrom", required = false) String dateFrom,
+            @RequestParam(value = "dateTo", required = false) String dateTo
+    ) {
+        return ResponseEntity.ok(userService.getPayroll(extractToken(authHeader), staffId, dateFrom, dateTo));
+    }
+
     private String extractToken(String authHeader) {
         if (authHeader == null) {
             return "";

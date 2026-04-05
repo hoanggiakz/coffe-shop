@@ -20,6 +20,7 @@ type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED'
 
 interface TableApi {
   id: string
+  number?: number | null
   status: 'AVAILABLE' | 'OCCUPIED' | 'RESERVED' | 'CLEANING'
 }
 
@@ -109,7 +110,29 @@ export default function Dashboard() {
     if (order.tableNumber !== null && order.tableNumber !== undefined) {
       return `Bàn ${order.tableNumber}`
     }
+    const matchedTable = tables.find((table) => table.id === order.tableId)
+    if (matchedTable?.number !== null && matchedTable?.number !== undefined) {
+      return `Bàn ${matchedTable.number}`
+    }
     return 'Bàn không xác định'
+  }
+
+  const tableLabelById = (tableId?: string) => {
+    if (!tableId) return 'Bàn không xác định'
+    const matchedTable = tables.find((table) => table.id === tableId)
+    if (matchedTable?.number !== null && matchedTable?.number !== undefined) {
+      return `Bàn ${matchedTable.number}`
+    }
+    return 'Bàn không xác định'
+  }
+
+  const notificationTitle = (item: StaffNotification) => {
+    if (!item.tableId) return item.title
+    const matchedTable = tables.find((table) => table.id === item.tableId)
+    if (matchedTable?.number === null || matchedTable?.number === undefined) {
+      return item.title
+    }
+    return item.title.replace(item.tableId, String(matchedTable.number))
   }
 
   const recentOrderItemsLabel = (order: OrderApi) => {
@@ -169,7 +192,7 @@ export default function Dashboard() {
               {
                 id: `order-poll:${order.id}`,
                 type: 'ORDER_NEW',
-                title: `Đơn mới từ bàn ${order.tableId}`,
+                title: `Đơn mới từ ${orderTableLabel(order)}`,
                 message: `Đơn ${order.id} - ${formatMoney(Number(order.totalAmount || 0))}`,
                 tableId: order.tableId,
                 orderId: order.id,
@@ -348,12 +371,12 @@ export default function Dashboard() {
             {notifications.map((item) => (
               <div key={item.id} className="rounded-lg border border-gray-200 p-3 text-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold text-gray-900">{item.title}</p>
+                  <p className="font-semibold text-gray-900">{notificationTitle(item)}</p>
                   <span className="text-xs text-gray-500">{item.source}</span>
                 </div>
                 <p className="mt-1 text-gray-700">{item.message}</p>
                 <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
-                  <span>{item.tableId ? `Bàn ${item.tableId}` : '---'}</span>
+                  <span>{item.tableId ? tableLabelById(item.tableId) : '---'}</span>
                   <span>{formatDateTime(item.createdAt)}</span>
                 </div>
               </div>

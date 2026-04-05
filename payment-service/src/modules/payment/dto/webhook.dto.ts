@@ -19,7 +19,7 @@ export class WebhookDto {
   @IsString()
   signature?: string;
 
-  @ApiProperty({ example: 'VNPAY', enum: ['VNPAY', 'MOMO', 'VIETQR'] })
+  @ApiProperty({ example: 'VNPAY', enum: ['VNPAY', 'MOMO', 'ZALOPAY', 'VIETQR'] })
   @IsString()
   provider: string;
 

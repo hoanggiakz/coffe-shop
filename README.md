@@ -1,375 +1,265 @@
-# Hệ Thống Quản Lý Quán Cà Phê Theo Kiến Trúc Microservices
+# Hệ thống Quản lý Quán Cà phê (Microservices)
 
-Dự án xây dựng hệ thống quản lý quán cà phê theo mô hình microservices, phục vụ đồng thời 3 nhóm người dùng:
+Hệ thống phục vụ 3 nhóm người dùng:
 
-- Khách hàng: quét QR, xem menu, đặt món, theo dõi đơn, gọi phục vụ, chat hỗ trợ, thanh toán.
-- Nhân viên: nhận đơn, xử lý bàn, vận hành KDS, chat với khách, thu ngân.
-- Quản lý / quản trị: quản lý nhân sự, menu, kho, khuyến mãi, chi nhánh, báo cáo.
+- Khách hàng: quét QR, xem menu, đặt món, theo dõi đơn, gọi phục vụ, chat, thanh toán.
+- Nhân viên: nhận và xử lý đơn, quản lý bàn, KDS, chat với khách, xác nhận thu tiền.
+- Quản lý/Admin: quản lý nhân sự, menu, kho, khuyến mãi, chi nhánh, báo cáo.
 
-Tài liệu chạy BE/FE chi tiết: `HUONG_DAN_CHAY_BE_FE.md`
-
-## 1. Kiến trúc hệ thống
-
-### 1.1 Các service chính
+## 1. Tổng quan kiến trúc
 
 | Service | Công nghệ | Vai trò |
 |---|---|---|
-| `frontend` | React + Vite + Nginx | Giao diện khách hàng và nhân viên |
-| `api-gateway` | NestJS | Điểm vào duy nhất cho API |
-| `user-service` | Spring Boot | Xác thực, JWT, khách hàng, nhân sự, chi nhánh |
-| `table-service` | Spring Boot | Quản lý bàn, QR, gọi phục vụ |
+| `frontend` | React + Vite + Nginx | Giao diện người dùng |
+| `api-gateway` | NestJS | Cổng API tập trung, phân quyền request |
+| `user-service` | Spring Boot | Auth/JWT, khách hàng, nhân sự, chi nhánh |
+| `table-service` | Spring Boot | Bàn, QR bàn, gọi phục vụ |
 | `order-service` | NestJS + Prisma | Menu, đơn hàng, KDS, khuyến mãi |
-| `chat-service` | NestJS + Socket.IO + Prisma | Chat thời gian thực và thông báo realtime |
-| `inventory-service` | NestJS + Prisma | Nguyên liệu, nhập xuất kho, cảnh báo tồn |
-| `payment-service` | NestJS + Prisma | Thanh toán tiền mặt, VNPay, MoMo, VietQR |
-| `report-service` | NestJS + Prisma | Báo cáo doanh thu, tồn kho, hiệu suất |
-| `postgres` | PostgreSQL 15 | Cơ sở dữ liệu |
-| `redis` | Redis 7 | Hỗ trợ realtime và cache |
-| `db-backup` | PostgreSQL tools | Sao lưu PostgreSQL định kỳ |
+| `chat-service` | NestJS + Socket.IO | Chat realtime khách - nhân viên |
+| `inventory-service` | NestJS + Prisma | Kho nguyên liệu, nhập/xuất, cảnh báo |
+| `payment-service` | NestJS + Prisma | Cash, VNPay, MoMo, ZaloPay, VietQR |
+| `report-service` | NestJS + Prisma | Dashboard và báo cáo |
+| `postgres` | PostgreSQL | CSDL |
+| `redis` | Redis | Realtime/cache |
 
-### 1.2 Kết nối hiện tại
+## 2. Truy cập hệ thống
 
-- `http://localhost:3000` tự động chuyển sang HTTPS.
-- `https://localhost:3443` là cổng chính để truy cập hệ thống.
-- API đi qua reverse proxy Nginx tại `/api`.
-- WebSocket chat đi qua cùng domain frontend.
-- Các service backend nội bộ không publish trực tiếp ra host trong cấu hình Docker hiện tại.
+- FE chính: `https://localhost`
+- HTTP: `http://localhost` (redirect sang HTTPS)
+- API qua gateway: `https://localhost/api/...`
+- WebSocket: dùng cùng domain frontend
 
 Lưu ý:
 
-- Frontend đang dùng chứng chỉ tự ký (`self-signed certificate`), trình duyệt có thể cảnh báo ở lần truy cập đầu tiên.
-- `order-service` và `payment-service` được chạy nhiều replica trong gói NFR phase 1.
+- Chứng chỉ local là self-signed nên trình duyệt có thể cảnh báo ở lần mở đầu.
+- Nếu test bằng điện thoại, điện thoại và máy chủ phải cùng mạng LAN.
 
-## 2. Cấu trúc thư mục
+## 3. Chạy hệ thống
 
-```text
-Microservices/
-|- api-gateway/
-|- user-service/
-|- table-service/
-|- order-service/
-|- chat-service/
-|- inventory-service/
-|- payment-service/
-|- report-service/
-|- frontend/
-|- docker-compose.yml
-|- init-db.sh
-|- backups/
-|- scripts/
-|  |- up-nfr.ps1
-|  |- measure-nfr.ps1
-```
+Xem tài liệu chi tiết tại [HUONG_DAN_CHAY_BE_FE.md](HUONG_DAN_CHAY_BE_FE.md).
 
-## 3. Yêu cầu môi trường
-
-- Docker Desktop
-- Docker Compose plugin (`docker compose`)
-- Nếu chạy local từng service:
-  - Node.js 20+
-  - Java 17
-  - npm
-
-## 4. Khởi chạy nhanh bằng Docker
-
-### 4.1 Chạy toàn bộ hệ thống
+Khởi động nhanh:
 
 ```powershell
 docker compose up -d --build
-```
-
-### 4.2 Kiểm tra container
-
-```powershell
 docker compose ps
 ```
 
-Kỳ vọng tối thiểu các container sau ở trạng thái `Up`:
-
-- `frontend`
-- `api-gateway`
-- `user-service`
-- `table-service`
-- `order-service`
-- `chat-service`
-- `inventory-service`
-- `payment-service`
-- `report-service`
-- `postgres`
-- `redis`
-- `db-backup`
-
-### 4.3 Truy cập hệ thống
-
-- Frontend: `https://localhost:3443`
-- HTTP redirect: `http://localhost:3000`
-
-### 4.4 Tài khoản test mặc định
-
-Các tài khoản dưới đây được seed tự động trong `user-service` để phục vụ test:
+## 4. Tài khoản mặc định để test
 
 | Vai trò | Email | Mật khẩu |
 |---|---|---|
-| `ADMIN` | `admin.test@coffeeshop.local` | `Admin@123` |
-| `MANAGER` | `manager.central@coffeeshop.local` | `Manager@123` |
-| `MANAGER` | `manager.riverside@coffeeshop.local` | `Manager@123` |
-| `WAITER` | `waiter.test@coffeeshop.local` | `Waiter@123` |
-| `BARISTA` | `barista.test@coffeeshop.local` | `Barista@123` |
-| `STAFF` | `staff.test@coffeeshop.local` | `Staff@123` |
-| `CUSTOMER` | `customer.test@coffeeshop.local` | `Customer@123` |
-
-Lưu ý:
-
-- Nhân viên thường không được tự đăng ký tài khoản.
-- Chỉ `ADMIN` hoặc `MANAGER` mới được cấp tài khoản nhân viên.
-- `MANAGER` chỉ được tạo và quản lý tài khoản vận hành (`WAITER`, `BARISTA`, `STAFF`), không được tạo hoặc chỉnh sửa tài khoản `ADMIN`.
-
-## 5. Các luồng chức năng đã tích hợp
-
-### 5.1 Khách hàng
-
-- Quét QR bàn và vào đúng menu theo `tableId`.
-- Xem menu, tìm kiếm, lọc, tùy chọn món, giỏ hàng.
-- Đặt món theo luồng trả sau hoặc trả trước.
-- Theo dõi trạng thái đơn.
-- Gọi phục vụ.
-- Chat hỗ trợ thời gian thực.
-- Đăng nhập khách hàng, xem lịch sử đơn, điểm thưởng, ưu đãi.
-
-### 5.2 Nhân viên
-
-- Đăng nhập và phân quyền theo role.
-- Dashboard tổng quan và thông báo thời gian thực.
-- Quản lý bàn, chuyển bàn, ghép bàn.
-- Tạo đơn hộ khách.
-- Quản lý đơn hàng, xác nhận đơn, thanh toán tiền mặt.
-- KDS cho bếp.
-- Chat với khách.
-
-### 5.3 Quản lý / quản trị
-
-- Quản lý nhân viên, phân ca, chấm công.
-- Quản lý danh mục, món, tùy chọn, công thức.
-- Quản lý kho, phiếu nhập, kiểm kê, lịch sử nhập xuất.
-- Tự động trừ kho khi món hoàn thành.
-- Quản lý bàn và QR.
-- Quản lý khuyến mãi.
-- Báo cáo doanh thu, tồn kho, top món, hiệu suất nhân viên.
-- Quản lý chi nhánh.
-
-## 6. Hướng dẫn test nhanh theo giao diện
-
-### 6.1 Đăng nhập nhân viên
-
-1. Mở `https://localhost:3443/login`
-2. Đăng nhập bằng tài khoản nhân viên có sẵn trong dữ liệu seed hoặc tài khoản bạn đã tạo.
-3. Sau khi vào hệ thống, kiểm tra:
-   - `Tổng quan`
-   - `Bàn`
-   - `Đơn hàng / POS`
-   - `Bếp`
-   - `Trò chuyện`
-   - `Kho`
-   - `Khuyến mãi`
-   - `Báo cáo`
-
-### 6.2 Test luồng bàn và QR
-
-1. Vào màn `Bàn`.
-2. Tạo bàn mới với số bàn, khu vực, sức chứa.
-3. Bấm `Xem / In QR` hoặc `Tải QR`.
-4. Mở QR hoặc truy cập URL menu tương ứng.
-5. Kiểm tra khách vào đúng bàn.
-
-### 6.3 Test khách đặt món qua QR
-
-1. Mở trang khách từ QR.
-2. Chọn món, tùy chỉnh món, thêm vào giỏ.
-3. Áp dụng mã khuyến mãi nếu có.
-4. Chọn:
-   - `Trả sau`
-   - hoặc `Trả trước` với `VNPay`, `MoMo`, `VietQR`
-5. Gửi đơn.
-6. Kiểm tra trạng thái đơn ở trang khách và giao diện nhân viên.
-
-### 6.4 Test KDS
-
-1. Vào màn `Bếp`.
-2. Xác nhận một đơn ở màn `Đơn hàng / POS`.
-3. Kiểm tra đơn xuất hiện ở KDS.
-4. Cập nhật món:
-   - `Bắt đầu làm`
-   - `Hoàn thành`
-5. Kiểm tra đơn chuyển trạng thái đồng bộ ở các màn khác.
-
-### 6.5 Test gọi phục vụ và chat
-
-1. Từ giao diện khách, bấm `Gọi phục vụ`.
-2. Kiểm tra nhân viên nhận thông báo realtime.
-3. Mở chat khách hàng.
-4. Gửi tin nhắn từ khách.
-5. Trả lời từ màn `Trò chuyện` phía nhân viên.
-6. Xác nhận hai phía đều nhận tin nhắn realtime.
-
-### 6.6 Test kho
+| Admin | `admin.test@coffeeshop.local` | `Admin@123` |
+| Quản lý | `manager.central@coffeeshop.local` | `Manager@123` |
+| Quản lý | `manager.riverside@coffeeshop.local` | `Manager@123` |
+| Phục vụ | `waiter.test@coffeeshop.local` | `Waiter@123` |
+| Pha chế | `barista.test@coffeeshop.local` | `Barista@123` |
+| Nhân viên | `staff.test@coffeeshop.local` | `Staff@123` |
+| Khách hàng | `customer.test@coffeeshop.local` | `Customer@123` |
 
-1. Vào màn `Kho`.
-2. Tạo nguyên liệu.
-3. Tạo phiếu nhập.
-4. Điều chỉnh tồn kho.
-5. Kiểm tra lịch sử nhập xuất.
-6. Cho một món có công thức hoàn thành ở KDS và kiểm tra tồn kho bị trừ tự động.
+Phân quyền chính:
 
-### 6.7 Test khuyến mãi
+- Chỉ `ADMIN`/`MANAGER` được tạo tài khoản nhân viên.
+- Nhân viên thường chỉ có quyền xem hoặc thao tác nghiệp vụ theo role, không có quyền quản trị nhân sự toàn phần.
 
-1. Vào màn `Khuyến mãi`.
-2. Tạo mã giảm giá.
-3. Chọn phạm vi:
-   - toàn đơn
-   - món cụ thể
-4. Quay lại trang khách để nhập mã và xác nhận tiền giảm.
+## 5. Hướng dẫn sử dụng chi tiết theo vai trò
 
-### 6.8 Test báo cáo
+## 5.1 Khách hàng (Customer)
 
-1. Vào màn `Báo cáo`.
-2. Chọn khoảng ngày và kiểu nhóm dữ liệu.
-3. Kiểm tra:
-   - doanh thu
-   - top món
-   - tồn kho
-   - hiệu suất nhân viên
-4. Thử xuất Excel hoặc PDF.
+### Bước 1: vào menu bằng QR
 
-## 7. Test nhanh bằng API
+1. Quét mã QR dán tại bàn.
+2. Hệ thống mở trang `/menu?tableId=...&tableNumber=...&branchId=...`.
+3. Nếu QR hợp lệ, header sẽ hiển thị đúng số bàn.
 
-Toàn bộ API đi qua:
+### Bước 2: chọn món và tùy chỉnh
 
-```text
-https://localhost:3443/api
-```
+1. Tìm món theo danh mục/từ khóa.
+2. Chọn size/topping/ghi chú nếu món hỗ trợ.
+3. Thêm món vào giỏ.
 
-Ví dụ:
+### Bước 3: đặt đơn
 
-- `POST /api/users/login`
-- `GET /api/tables`
-- `POST /api/orders`
-- `PATCH /api/orders/:id/status`
-- `GET /api/chats`
-- `GET /api/v1/ingredients`
-- `POST /api/v1/payments`
-- `GET /api/reports/dashboard`
+1. Chọn hình thức:
+   - `Trả sau` (post-pay): gửi đơn trước, thanh toán sau.
+   - `Trả trước` (prepay): tạo đơn và chuyển sang cổng thanh toán.
+2. (Tuỳ chọn) nhập mã khuyến mãi.
+3. Bấm đặt món.
 
-## 8. Gói NFR phase 1 đã triển khai
+### Bước 4: theo dõi đơn và thanh toán
 
-Các hạng mục đã được thêm vào:
+1. Xem trạng thái đơn theo thời gian thực.
+2. Nếu prepay:
+   - `VNPay`, `MoMo`, `ZaloPay`: mở link cổng thanh toán.
+   - `VietQR`: quét mã chuyển khoản hiển thị trên màn hình.
+3. Có thể bấm “Thanh toán tiền mặt” để gửi yêu cầu đến nhân viên.
 
-- JWT guard thật cho các service nội bộ quan trọng.
-- Đóng port backend nội bộ khỏi host.
-- TLS reverse proxy bằng Nginx.
-- Retry policy cho một số lời gọi liên service.
-- Replica cho `order-service` và `payment-service`.
-- Backup PostgreSQL định kỳ vào thư mục `backups/`.
+### Bước 5: gọi phục vụ và chat
 
-## 9. Chạy bộ đo NFR
+1. Bấm `Gọi phục vụ`, chọn lý do.
+2. Mở `Chat hỗ trợ` để nhắn tin trực tiếp với nhân viên.
 
-### 9.1 Khởi động stack NFR
+## 5.2 Nhân viên (Staff)
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\up-nfr.ps1
-```
+### Đăng nhập
 
-### 9.2 Đo lại
+1. Vào `https://localhost/login`.
+2. Đăng nhập bằng tài khoản role tương ứng.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\measure-nfr.ps1
-```
+### Dashboard
 
-Kết quả đo sẽ dùng để kiểm tra nhanh:
+- Xem số bàn đang dùng, đơn chờ xử lý, doanh thu tạm tính.
+- Nhận thông báo realtime khi có đơn mới/gọi phục vụ/chat.
 
-- độ trễ health endpoint
-- độ trễ menu/order
-- độ trễ WebSocket cơ bản
-- trạng thái redirect HTTP -> HTTPS
-- backup file sinh ra trong `backups/`
+### Quản lý bàn (S-05/S-06/S-07)
 
-## 10. Chạy local từng service
+1. Vào trang `Bàn`.
+2. Theo dõi trạng thái bàn theo màu.
+3. Thực hiện:
+   - tạo đơn hộ khách,
+   - chuyển bàn,
+   - ghép bàn.
 
-Nếu không dùng Docker toàn phần, có thể chạy riêng từng service. Ví dụ:
+### Quản lý đơn (S-08/S-09/S-10/S-11)
 
-### `order-service`
+1. Vào `Đơn hàng/POS`.
+2. Lọc theo trạng thái, bàn, thời gian.
+3. Xác nhận đơn hoặc cập nhật món (theo quyền).
+4. Xác nhận thanh toán tiền mặt khi khách trả tại quầy.
 
-```powershell
-cd order-service
-npm install
-npx prisma db push
-npx prisma db seed
-npm run start:dev
-```
+### KDS cho bếp (S-12/S-13/S-14/S-15)
 
-### `chat-service`
+1. Vào `Bếp/KDS`.
+2. Xử lý theo luồng:
+   - bắt đầu làm,
+   - hoàn thành món,
+   - hoàn thành đơn.
+3. Màn hình tự cập nhật realtime.
 
-```powershell
-cd chat-service
-npm install
-npx prisma db push
-npm run start:dev
-```
+### Chat với khách (S-16/S-17/S-18)
 
-### `user-service`
+1. Vào `Chat`.
+2. Chọn phiên chat theo bàn.
+3. Trả lời và đóng chat khi kết thúc.
 
-```powershell
-cd user-service
-./gradlew bootRun
-```
+### Chấm công và ca làm
 
-### `table-service`
+- Nhân viên có thể vào ca/ra ca bằng mã nhân viên hoặc QR cá nhân.
+- Xem lịch sử chấm công của chính mình.
 
-```powershell
-cd table-service
-./gradlew bootRun
-```
+## 5.3 Quản lý / Admin
 
-### `frontend`
+### Nhân sự (M-01/M-02/M-03)
 
-```powershell
-cd frontend
-npm install
-npm run dev
-```
+1. Vào `Quản lý nhân sự`.
+2. Tạo/sửa/xóa tài khoản nhân viên (theo quyền).
+3. Phân ca, xem ca làm, theo dõi chấm công.
+4. In thẻ nhân viên có mã QR cá nhân.
 
-## 11. Xử lý lỗi thường gặp
+### Menu (M-04/M-05/M-06)
 
-### Docker build lỗi ở `npm ci`
+1. Tạo danh mục món.
+2. Tạo món: tên, mô tả, giá, ảnh.
+3. Cấu hình size/topping và công thức nguyên liệu cho món.
 
-- Kiểm tra file `package-lock.json` có đồng bộ với `package.json` không.
-- Nếu image Alpine gây lỗi Prisma/OpenSSL, dùng base image Debian hoặc cài đúng `openssl`.
+### Kho (M-07 đến M-13)
 
-### Frontend mở không lên do TLS
+1. Tạo nguyên liệu và định mức tồn tối thiểu.
+2. Lập phiếu nhập kho.
+3. Kiểm kê/điều chỉnh tồn.
+4. Khi món hoàn thành ở KDS, hệ thống tự trừ kho theo công thức.
 
-- Truy cập `https://localhost:3443`
-- Chấp nhận cảnh báo chứng chỉ tự ký ở lần đầu.
+### Bàn và QR (M-14/M-15/M-16)
 
-### QR hoặc frontend báo sai upstream
+1. Tạo bàn mới.
+2. Sinh QR cho từng bàn.
+3. Tải hoặc in hàng loạt QR.
 
-- Kiểm tra `frontend/nginx.conf`
-- Kiểm tra `docker compose ps`
-- Kiểm tra container `api-gateway` và `chat-service` đã `Up`
+### Khuyến mãi (M-17/M-18)
 
-### Không thấy dữ liệu
+1. Tạo mã giảm giá theo `%` hoặc số tiền.
+2. Cấu hình thời gian hiệu lực, giới hạn lượt dùng, phạm vi áp dụng.
+3. Bật/tắt chương trình.
 
-- Kiểm tra seed của `order-service`
-- Kiểm tra database đã được tạo qua `init-db.sh`
-- Kiểm tra log:
+### Báo cáo (M-19 đến M-23)
 
-```powershell
-docker compose logs -f order-service
-docker compose logs -f user-service
-docker compose logs -f table-service
-docker compose logs -f frontend
-```
+1. Vào `Báo cáo`.
+2. Chọn khoảng thời gian.
+3. Xem:
+   - doanh thu,
+   - top món,
+   - tồn kho,
+   - hiệu suất nhân viên.
+4. Xuất file Excel/PDF (nếu endpoint tương ứng được bật).
 
-## 12. Ghi chú hiện trạng
+### Chi nhánh (M-24/M-25)
 
-- UI đã được chuẩn hóa theo tiếng Việt cho shell và các màn nghiệp vụ chính.
-- Hạ tầng đa ngôn ngữ vẫn được giữ lại để mở rộng sau.
-- Một số báo cáo và dữ liệu demo vẫn dựa trên seed/mock khi chưa có dữ liệu thực tế đủ lớn.
+- Admin tạo chi nhánh, quản lý phạm vi menu/kho/nhân sự theo chi nhánh.
+
+## 6. Danh sách link UI để test nhanh
+
+- Đăng nhập: `https://localhost/login`
+- Dashboard: `https://localhost/`
+- Bàn: `https://localhost/tables`
+- Đơn hàng/POS: `https://localhost/orders`
+- Kho: `https://localhost/inventory`
+- Khuyến mãi: `https://localhost/promotions`
+- Báo cáo: `https://localhost/reports`
+- Chat staff: `https://localhost/chat`
+- Bếp/KDS: `https://localhost/kitchen`
+
+## 7. API quan trọng để kiểm tra nhanh
+
+Base URL: `https://localhost/api`
+
+- `POST /users/login`
+- `GET /users/health`
+- `GET /tables`
+- `POST /tables/{id}/call-staff`
+- `GET /orders`
+- `POST /orders`
+- `GET /chats`
+- `GET /v1/ingredients/health`
+- `POST /v1/payments`
+- `GET /reports/health`
+
+## 8. NFR phase 1 đã tích hợp
+
+- JWT guard và kiểm soát quyền ở gateway/service.
+- Đóng port nội bộ backend, chỉ expose qua reverse proxy.
+- TLS reverse proxy tại frontend (Nginx).
+- Retry policy cho một số gọi liên service.
+- Backup PostgreSQL định kỳ qua `db-backup`.
+
+## 9. Lỗi thường gặp và cách xử lý
+
+### `docker compose ps` báo không kết nối daemon
+
+- Docker Desktop chưa chạy.
+- Mở Docker Desktop, chờ `Engine running`, chạy lại.
+
+### Quét QR trên điện thoại bị lỗi
+
+- QR có thể đang trỏ host/IP cũ.
+- Tạo/in lại QR mới từ trang `Bàn`.
+- Đảm bảo điện thoại cùng mạng LAN với máy chủ.
+
+### `403 Forbidden` trên trang khách
+
+- Thường do xung đột token staff/customer hoặc session cũ.
+- Mở tab ẩn danh hoặc xóa site data rồi quét lại QR.
+
+### `429 Too Many Requests`
+
+- Hệ thống có rate-limit bảo vệ API.
+- Chờ hết window hoặc giảm tần suất gọi liên tục.
+
+### Lỗi cổng thanh toán
+
+- Kiểm tra biến môi trường cổng thanh toán trong `docker-compose.yml`.
+- Kiểm tra `returnUrl` đúng domain/host đang truy cập.
+
+## 10. Ghi chú phát triển
+
+- Repo có tài liệu chạy riêng: [HUONG_DAN_CHAY_BE_FE.md](HUONG_DAN_CHAY_BE_FE.md).
+- Cấu hình FE local dev đã chuẩn hóa cho cổng hiện tại (`http://localhost` / `https://localhost`).

@@ -1,0 +1,2788 @@
+{
+  "version": "1.0.0",
+  "producer": "Java AppCAT CLI",
+  "metadata": {
+    "analysisStartTime": "2026-03-18T15:17:25.1228836Z",
+    "analysisEndTime": "2026-03-18T16:40:18.3208844Z",
+    "status": "completed",
+    "privacyMode": "Protected",
+    "privacyModeHelpUrl": "https://aka.ms/appcat-privacy-mode",
+    "targetIds": [
+      "azure-aks",
+      "azure-appservice",
+      "azure-container-apps"
+    ],
+    "targetDisplayNames": [
+      "Azure Kubernetes Service",
+      "Azure App Service",
+      "Azure Container Apps"
+    ],
+    "capabilities": [],
+    "os": [],
+    "id": "20260318221725",
+    "name": "Report_20260318221725",
+    "domains": [
+      "cloud-readiness",
+      "java-upgrade"
+    ],
+    "mode": "issue-only"
+  },
+  "summary": {
+    "totalProjects": 1,
+    "totalIssues": 10,
+    "totalIncidents": 95,
+    "totalEffort": 262,
+    "charts": {
+      "severity": {
+        "mandatory": 53,
+        "optional": 21,
+        "potential": 21,
+        "information": 0
+      },
+      "category": {
+        "database-migration": 9,
+        "local-credential": 4,
+        "local-resource-access": 17,
+        "region-configuration": 37,
+        "remote-communication": 20,
+        "spring-migration": 8
+      }
+    },
+    "security": {}
+  },
+  "projects": [
+    {
+      "path": ".",
+      "issues": 10,
+      "storyPoints": 262,
+      "properties": {
+        "appName": "Microservices",
+        "jdkVersion": "17",
+        "frameworks": [
+          "Spring Boot",
+          "Spring",
+          "Express",
+          "React",
+          "Next",
+          "Next.js"
+        ],
+        "languages": [
+          "JavaScript",
+          "Java",
+          "TypeScript"
+        ],
+        "tools": [
+          "NodeJs",
+          "Gradle"
+        ]
+      },
+      "incidents": [
+        {
+          "ruleId": "azure-database-postgresql-02000",
+          "incidentId": "3524b2cf-528f-4d30-9c38-2aba6d8385c8",
+          "location": "user-service/build.gradle",
+          "locationKind": "File",
+          "line": 26,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-database-postgresql-02000",
+          "incidentId": "f865de2a-b4f2-4954-8774-500bbf58fe05",
+          "location": "table-service/build.gradle",
+          "locationKind": "File",
+          "line": 25,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-database-postgresql-02000",
+          "incidentId": "9fb84a95-c432-4699-9ea2-cd07e7632104",
+          "location": "table-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 4,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-database-postgresql-02000",
+          "incidentId": "e592892a-d019-4c1b-9416-ee7cbafb9521",
+          "location": "user-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 4,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-database-postgresql-02000",
+          "incidentId": "d68f2453-0714-44dd-afa2-ceff27cdebff",
+          "location": "table-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 4,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-database-postgresql-02000",
+          "incidentId": "1e09adc7-27c4-4902-aee3-e8d1a6f631f3",
+          "location": "user-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 4,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-database-postgresql-02000",
+          "incidentId": "7ebd6833-ead4-41d2-9572-a44624928e61",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 54,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-database-postgresql-02000",
+          "incidentId": "df9f67bb-0eaa-4a7d-a1d6-f08798a24c6f",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 72,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-database-postgresql-02000",
+          "incidentId": "a4872ce2-cdb8-4969-bdc2-1da4688ae21f",
+          "location": "",
+          "locationKind": "",
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-password-01000",
+          "incidentId": "fd6ba46a-af9c-46f7-ad6a-b4952126de70",
+          "location": "user-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 6,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-password-01000",
+          "incidentId": "13ebce6e-4259-4f83-a714-c9b68cf575fa",
+          "location": "table-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 6,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-password-01000",
+          "incidentId": "014dbc7b-cf38-4bc9-9c9c-acd2eb464b5c",
+          "location": "user-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 6,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-password-01000",
+          "incidentId": "31406103-efaf-4f74-bf6b-d71f04d7f884",
+          "location": "table-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 6,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "spring-boot-to-azure-port-01000",
+          "incidentId": "12dc820e-aea7-458b-86f7-f745ce34feca",
+          "location": "user-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 1,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 1,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 1,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 1,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "spring-boot-to-azure-port-01000",
+          "incidentId": "6a4a0fe1-f70f-4a59-8100-275e009a3f93",
+          "location": "table-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 1,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 1,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 1,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 1,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "spring-boot-to-azure-port-01000",
+          "incidentId": "ae441ca8-05d3-4188-8e61-8f906e24d7d3",
+          "location": "user-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 1,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 1,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 1,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 1,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "spring-boot-to-azure-port-01000",
+          "incidentId": "0c68943a-8d59-42ba-a5af-b55cbe7b648a",
+          "location": "table-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 1,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 1,
+              "severity": "potential"
+            },
+            "azure-appservice": {
+              "effort": 1,
+              "severity": "potential"
+            },
+            "azure-container-apps": {
+              "effort": 1,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "spring-boot-to-azure-restricted-config-01000",
+          "incidentId": "5e26ace5-baeb-45e5-bbbe-f04feb2e9c59",
+          "location": "user-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 1,
+          "column": 0,
+          "targets": {
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "spring-boot-to-azure-restricted-config-01000",
+          "incidentId": "b5f25417-9f8c-4db5-bb2d-c21134475763",
+          "location": "table-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 1,
+          "column": 0,
+          "targets": {
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "spring-boot-to-azure-restricted-config-01000",
+          "incidentId": "cce4adf6-0c03-436b-a45d-335081fefe5e",
+          "location": "table-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 1,
+          "column": 0,
+          "targets": {
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "spring-boot-to-azure-restricted-config-01000",
+          "incidentId": "67ece4fc-25be-4e72-9c6d-c4b4d08c06a0",
+          "location": "user-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 1,
+          "column": 0,
+          "targets": {
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "potential"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "33f85f4f-add6-4ef6-a513-7fd142844135",
+          "location": "chat-service/node_modules/.prisma/client/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "beebcea4-8a57-4d23-9f4d-e67ee0d5bd15",
+          "location": "chat-service/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/libquery-engine",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "035b57a7-fea1-4e77-b592-85651f763287",
+          "location": "chat-service/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/schema-engine",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "4f6389a2-65d2-4e86-99f3-1eeee5e014e8",
+          "location": "chat-service/node_modules/@prisma/engines/schema-engine-windows.exe",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "30d3afe7-3b03-4863-bd01-c880062a6ea5",
+          "location": "chat-service/node_modules/@prisma/engines/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/schema-engine",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "0373a14f-9fae-426b-a52d-b67718e57d11",
+          "location": "chat-service/node_modules/@prisma/engines/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "fe8a11ae-ba2c-4eb2-845e-a08a7c3c2111",
+          "location": "chat-service/node_modules/@prisma/engines/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/libquery-engine",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "84ebea0e-b826-4486-bf34-f777ef193efb",
+          "location": "chat-service/node_modules/prisma/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "0794c864-ebde-4f2e-b00c-e81c0e398dc5",
+          "location": "inventory-service/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/schema-engine",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "efe41900-87b4-4595-980d-8e664467daaf",
+          "location": "inventory-service/node_modules/.prisma/client/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "726910ec-d47f-4b1d-82d5-a6c0a1a6c6f8",
+          "location": "inventory-service/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/libquery-engine",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "3f36fa4a-7c48-4f1f-a68c-271cb8e97f4c",
+          "location": "inventory-service/node_modules/@prisma/engines/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/schema-engine",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "7fdb3a1d-21b5-4cc8-9a29-6936c1d67ff0",
+          "location": "inventory-service/node_modules/@prisma/engines/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "d7502691-7a90-47b7-9206-370dbfb5a3d1",
+          "location": "inventory-service/node_modules/@prisma/engines/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/libquery-engine",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "fcf968bc-3465-4776-adea-a5bb995d1d0b",
+          "location": "inventory-service/node_modules/@prisma/engines/schema-engine-windows.exe",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "b889485f-28b1-4ee9-89a7-6cc4d7fc5b63",
+          "location": "inventory-service/node_modules/prisma/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "d2134ed3-67b9-4444-bcd8-ee3c14bfc3e5",
+          "location": "notification-service/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/libquery-engine",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "d12c3a3c-f103-4012-9df0-3d1883cbc38b",
+          "location": "notification-service/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/schema-engine",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "7f94a8e6-109a-4902-90b7-dac3ae1be19a",
+          "location": "notification-service/node_modules/@prisma/engines/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/schema-engine",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "806d4207-e9a8-4c48-b224-0c32f6ffe34b",
+          "location": "notification-service/node_modules/@prisma/engines/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "946b6349-52ae-4939-869c-97d30626c409",
+          "location": "notification-service/node_modules/@prisma/engines/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/libquery-engine",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "9e01ebe3-250e-4b25-90c5-379756e8f561",
+          "location": "notification-service/node_modules/@prisma/engines/schema-engine-windows.exe",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "7eb096a8-ad21-4659-9f0a-a5ee333962a8",
+          "location": "order-service/node_modules/.prisma/client/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "05b62a53-90f0-4f6f-b82a-5dc27742ce73",
+          "location": "order-service/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/libquery-engine",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "5b3b7631-16c9-4623-a53f-5d4a03694ba6",
+          "location": "order-service/node_modules/@prisma/engines/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "45fc7f1e-23ce-483d-a06e-39f3e00aaf9c",
+          "location": "order-service/node_modules/@prisma/engines/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/libquery-engine",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "93aafd2d-7ad2-423d-921a-5709039010b1",
+          "location": "order-service/node_modules/@prisma/engines/schema-engine-windows.exe",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "deac3379-7593-4bd2-b478-4d611fe87bcc",
+          "location": "order-service/node_modules/@prisma/engines/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/schema-engine",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "43fdf469-7e63-4adf-8dfd-65dada3bbfcd",
+          "location": "order-service/node_modules/prisma/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "a2378919-60db-4b6e-8176-21ae177114c1",
+          "location": "payment-service/node_modules/.prisma/client/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "e1838e4c-40ee-4d64-af8d-4ed1ecf0f2f0",
+          "location": "payment-service/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/libquery-engine",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "4718e85e-b7ab-46ee-aa45-2555642c92ce",
+          "location": "payment-service/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/schema-engine",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "8c6f5e0b-ffb9-4b80-80cf-732a6e779f7a",
+          "location": "payment-service/node_modules/@prisma/engines/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/libquery-engine",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "af158e20-5c39-41cc-9f81-037c2fa4f82a",
+          "location": "payment-service/node_modules/@prisma/engines/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "e34a4c04-5154-48d9-bffe-57d91499bf87",
+          "location": "payment-service/node_modules/@prisma/engines/node_modules/.cache/prisma/master/605197351a3c8bdd595af2d2a9bc3025bca48ea2/windows/schema-engine",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "315b04b6-6d66-4e06-81b9-2dc46c101b8e",
+          "location": "payment-service/node_modules/@prisma/engines/schema-engine-windows.exe",
+          "locationKind": "File",
+          "line": 25032,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "azure-aws-config-region-02000",
+          "incidentId": "1130d1d2-9b7c-4b12-83eb-4cbd6b9f2047",
+          "location": "payment-service/node_modules/prisma/query_engine-windows.dll.node",
+          "locationKind": "File",
+          "line": 31080,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 2,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 2,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=azure/springboot"
+          ]
+        },
+        {
+          "ruleId": "unsecure-network-protocol-00000",
+          "incidentId": "4f0e2b9d-0c3e-40c3-89c4-da0b516bb093",
+          "location": "table-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 15,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "unsecure-network-protocol-00000",
+          "incidentId": "70a8f143-7ac4-49a6-806b-9c9ce2b83ff0",
+          "location": "api-gateway/docker-compose.yml",
+          "locationKind": "File",
+          "line": 17,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "unsecure-network-protocol-00000",
+          "incidentId": "3e79a8a9-9a6d-4e98-b6c9-2bdb31f7767e",
+          "location": "api-gateway/docker-compose.yml",
+          "locationKind": "File",
+          "line": 18,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "unsecure-network-protocol-00000",
+          "incidentId": "e3de3364-a063-43ab-903c-6449a5974454",
+          "location": "table-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 15,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "unsecure-network-protocol-00000",
+          "incidentId": "0a9498c3-b201-418d-a0f9-5d6495ebdbd3",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 38,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "unsecure-network-protocol-00000",
+          "incidentId": "d541bf78-6afe-4b1d-a7f6-7f78737728cc",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 39,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "unsecure-network-protocol-00000",
+          "incidentId": "d80e4d64-cf8e-4d60-82f6-272acfd273a5",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 40,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "unsecure-network-protocol-00000",
+          "incidentId": "9875ab61-88b4-4422-b2ec-8b28b8646236",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 41,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "unsecure-network-protocol-00000",
+          "incidentId": "33341528-e643-4dd8-b231-a7e182c0e407",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 76,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "unsecure-network-protocol-00000",
+          "incidentId": "5b9aa85d-0424-4bd9-8785-c0b581c42169",
+          "location": "notification-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 13,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "d2d9a7be-7f8f-4e1e-9748-00fa38950cf2",
+          "location": "table-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 35,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "a13a4ff6-d5fb-4434-a2a7-edcf805ada3c",
+          "location": "table-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 37,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "3ec4ac4d-96d8-4a13-8315-386109113f4e",
+          "location": "user-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 36,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "b92de90c-4cbf-4544-a2ee-a480e7dba6d6",
+          "location": "user-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 38,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "b080e502-e254-4d8a-8e46-255c0c541100",
+          "location": "report-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 10,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "70a0a375-5084-4d49-a68c-d9048884478e",
+          "location": "report-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 42,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "940bb83f-0ce3-41fb-b6e3-b9f2317b60f9",
+          "location": "menu-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 35,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "9cc050f8-306f-465c-b382-762a973e739d",
+          "location": "menu-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 37,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "b6ba38f8-f744-4dcf-92c9-1b1eeedf4046",
+          "location": "payment-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 35,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "80bf6f4d-2621-4e00-b380-49dd02898cf4",
+          "location": "payment-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 37,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-00004",
+          "incidentId": "71cb0f3e-bd87-4447-b959-eaed01228740",
+          "location": "notification-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 32,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-http-00001",
+          "incidentId": "38833778-e3c5-4232-ac12-fc9a187c7203",
+          "location": "table-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 15,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-http-00001",
+          "incidentId": "fedae2c9-7a3f-42d5-aeef-f12999b783ad",
+          "location": "table-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 15,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-jdbc-00002",
+          "incidentId": "dc0916c3-b746-48c7-8e3d-e2cf4260289c",
+          "location": "user-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 4,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-jdbc-00002",
+          "incidentId": "de3fd386-2d98-48f9-8936-a4d01852c7cf",
+          "location": "user-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 4,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-jdbc-00002",
+          "incidentId": "13b5ee13-9f21-4fa5-9bd7-a86de4228afd",
+          "location": "table-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 4,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "localhost-jdbc-00002",
+          "incidentId": "b9319d2a-b2d0-4e7f-a321-cbf4bd0768f9",
+          "location": "table-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 4,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 5,
+              "severity": "mandatory"
+            },
+            "azure-appservice": {
+              "effort": 5,
+              "severity": "mandatory"
+            },
+            "azure-container-apps": {
+              "effort": 5,
+              "severity": "mandatory"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "hardcoded-urls-00001",
+          "incidentId": "7bfb2e9d-6bd1-4234-a04b-49a66d59845c",
+          "location": "table-service/bin/main/application.properties",
+          "locationKind": "File",
+          "line": 15,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "hardcoded-urls-00001",
+          "incidentId": "de77ed94-fa5f-4948-b51a-00ad6ad9c99f",
+          "location": "table-service/src/main/resources/application.properties",
+          "locationKind": "File",
+          "line": 15,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "hardcoded-urls-00001",
+          "incidentId": "c16e2209-eb83-4e14-bb05-0721fce04e4e",
+          "location": "api-gateway/docker-compose.yml",
+          "locationKind": "File",
+          "line": 17,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "hardcoded-urls-00001",
+          "incidentId": "75c07ee2-e4a3-43eb-a2fd-7ced781dbd03",
+          "location": "api-gateway/docker-compose.yml",
+          "locationKind": "File",
+          "line": 18,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "hardcoded-urls-00001",
+          "incidentId": "fa291b03-4904-401e-8d65-efe6e0f0ddf0",
+          "location": "notification-service/docker-compose.yml",
+          "locationKind": "File",
+          "line": 13,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "hardcoded-urls-00001",
+          "incidentId": "d1fc1ce1-9796-46e4-aaf5-f4b201190ab1",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 38,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "hardcoded-urls-00001",
+          "incidentId": "88a07763-a83d-49c2-8bbc-26210fa58081",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 39,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "hardcoded-urls-00001",
+          "incidentId": "4b075c93-cbd9-444c-9097-f8518e232643",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 40,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "hardcoded-urls-00001",
+          "incidentId": "dd330445-6d69-41d3-8f46-d94484e936e5",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 41,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        },
+        {
+          "ruleId": "hardcoded-urls-00001",
+          "incidentId": "9c8b963b-9a6e-4a05-86d1-3ba0164cf4d8",
+          "location": "docker-compose.yml",
+          "locationKind": "File",
+          "line": 76,
+          "column": 0,
+          "targets": {
+            "azure-aks": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-appservice": {
+              "effort": 3,
+              "severity": "optional"
+            },
+            "azure-container-apps": {
+              "effort": 3,
+              "severity": "optional"
+            }
+          },
+          "labels": [
+            "type=violation",
+            "ruleset=cloud-readiness"
+          ]
+        }
+      ]
+    }
+  ],
+  "rules": {
+    "azure-aws-config-region-02000": {
+      "id": "azure-aws-config-region-02000",
+      "description": "The application contains AWS region configuration.\n\n * Identify **Azure regions**: Determine the Azure regions that align with your application's requirements for availability, latency, compliance, and data residency. Azure provides a wide range of regions globally.\n\n * Update **configuration settings**: Modify the Java application's configuration to replace the AWS region configuration with the corresponding Azure region configuration. Update the code or configuration files to reflect the Azure region names or identifiers.",
+      "title": "AWS region configuration",
+      "severity": "mandatory",
+      "effort": 2,
+      "links": [
+        {
+          "url": "https://azure.microsoft.com/explore/global-infrastructure/geographies",
+          "title": "Azure geographies"
+        }
+      ],
+      "labels": [
+        "target=azure-appservice",
+        "target=azure-aks",
+        "target=azure-container-apps",
+        "source",
+        "domain=cloud-readiness",
+        "category=region-configuration",
+        "AWS",
+        "os=windows",
+        "os=linux"
+      ]
+    },
+    "azure-database-postgresql-02000": {
+      "id": "azure-database-postgresql-02000",
+      "description": "To migrate a Java application that uses a PostgreSQL database to Azure, you can follow these recommendations:\n\n * Use a managed **Azure Database for PostgreSQL Flexible Server**: For that create a managed PostgreSQL Flexible Server database in Azure and choose the appropriate pricing tier based on your application's requirements for performance, storage, and availability.\n\n * **Migrate** the existing PostgreSQL database: For that you can use the Azure Database Migration Service (DMS) to perform an online migration with minimal downtime.\n\n * Update the application's **database connection** details: Modify the Java application's configuration to point to the newly provisioned Azure Database for PostgreSQL. Update the connection string, hostname, port, username, and password information accordingly.\n\n * Enable **monitoring and diagnostics**: Utilize Azure Monitor to gain insights into the performance and health of your Java application and the underlying PostgreSQL database. Set up metrics, alerts, and log analytics to proactively identify and resolve issues.\n\n * Implement **security** measures: Apply security best practices to protect your Java application and the PostgreSQL database. This includes implementing authentication and authorization mechanisms with passwordless connections and leveraging Microsoft Defender for Cloud for threat detection and vulnerability assessments.\n\n * **Backup** your data: Azure Database for PostgreSQL provides automated backups by default. You can configure the retention period for backups based on your requirements. You can also enable geo-redundant backups, if needed, to enhance data durability and availability.",
+      "title": "PostgreSQL database found",
+      "severity": "potential",
+      "effort": 5,
+      "links": [
+        {
+          "url": "https://learn.microsoft.com/azure/postgresql/flexible-server",
+          "title": "Azure PostgreSQL Flexible Server documentation"
+        },
+        {
+          "url": "https://learn.microsoft.com/azure/dms",
+          "title": "Azure Database Migration Service documentation"
+        },
+        {
+          "url": "https://learn.microsoft.com/azure/azure-monitor",
+          "title": "Azure Monitor documentation"
+        },
+        {
+          "url": "https://learn.microsoft.com/azure/defender-for-cloud",
+          "title": "Microsoft Defender for Cloud"
+        },
+        {
+          "url": "https://learn.microsoft.com/azure/postgresql/single-server/concepts-backup",
+          "title": "Backup and restore in Azure Database for PostgreSQL"
+        }
+      ],
+      "labels": [
+        "target=azure-appservice",
+        "target=azure-aks",
+        "target=azure-container-apps",
+        "source",
+        "domain=cloud-readiness",
+        "category=database-migration",
+        "database",
+        "postgresql",
+        "os=windows",
+        "os=linux"
+      ]
+    },
+    "azure-password-01000": {
+      "id": "azure-password-01000",
+      "description": "Using clear passwords in property files is a security risk, as they can be easily compromised if the files are accessed by unauthorized individuals. To enhance the security of your application, it is recommended to employ secure credential management practices.\n\n * **Azure Key Vault**: Utilize Azure Key Vault to securely store and manage your application's passwords and other sensitive credentials. Azure Key Vault provides a centralized and highly secure location for storing secrets, keys, and certificates.\n\n * **Passwordless connections**: You can provide an additional layer of security and convenience for accessing resources in Azure by eliminating the need for passwords. This way you can reduce the risk of password-related vulnerabilities, such as weak passwords or password theft.",
+      "title": "Password found in configuration file",
+      "severity": "potential",
+      "effort": 3,
+      "links": [
+        {
+          "url": "https://learn.microsoft.com/azure/key-vault",
+          "title": "Azure Key Vault documentation"
+        },
+        {
+          "url": "https://learn.microsoft.com/azure/developer/intro/passwordless-overview",
+          "title": "Passwordless connections for Azure services"
+        },
+        {
+          "url": "https://learn.microsoft.com/azure/developer/java/migration/migrate-spring-boot-to-azure-container-apps#inventory-configuration-sources-and-secrets",
+          "title": "Password found in configuration file"
+        },
+        {
+          "url": "https://docs.microsoft.com/azure/developer/java/spring-framework/configure-spring-boot-starter-java-app-with-azure-key-vault",
+          "title": "Read a secret from Azure Key Vault in a Spring Boot application"
+        },
+        {
+          "url": "https://search.maven.org/artifact/com.azure.spring/azure-spring-boot-starter-keyvault-secrets",
+          "title": "Azure Spring Boot Starter for Azure Key Vault Secrets"
+        }
+      ],
+      "labels": [
+        "source",
+        "target=azure-appservice",
+        "target=azure-aks",
+        "target=azure-container-apps",
+        "domain=cloud-readiness",
+        "category=local-credential",
+        "password",
+        "security",
+        "os=windows",
+        "os=linux"
+      ]
+    },
+    "hardcoded-urls-00001": {
+      "id": "hardcoded-urls-00001",
+      "description": "This patterns verifies in source code and configuration files the presence of hardcoded URLs using the HTTP protocol (HTTP/HTTPS). This URL would need to be replaced by the new resource's URL during the Cloud migration, if any change occured.",
+      "title": "Avoid using hardcoded URLs (HTTP protocol) in source code",
+      "severity": "optional",
+      "effort": 3,
+      "labels": [
+        "target=azure-aks",
+        "target=azure-container-apps",
+        "target=azure-appservice",
+        "source",
+        "domain=cloud-readiness",
+        "category=remote-communication",
+        "os=windows",
+        "os=linux"
+      ]
+    },
+    "localhost-00004": {
+      "id": "localhost-00004",
+      "description": "The app is trying to use localhost, please try to migrate the resource to cloud",
+      "title": "Localhost Usage",
+      "severity": "optional",
+      "effort": 3,
+      "labels": [
+        "target=azure-aks",
+        "target=azure-container-apps",
+        "target=azure-appservice",
+        "capability=containerization",
+        "source",
+        "domain=cloud-readiness",
+        "category=local-resource-access",
+        "localhost",
+        "containerization",
+        "os=windows",
+        "os=linux"
+      ]
+    },
+    "localhost-http-00001": {
+      "id": "localhost-http-00001",
+      "description": "The app is trying to access local resource by HTTP, please try to migrate the resource to cloud",
+      "title": "Local HTTP Calls",
+      "severity": "mandatory",
+      "effort": 3,
+      "labels": [
+        "target=azure-aks",
+        "target=azure-container-apps",
+        "target=azure-appservice",
+        "capability=containerization",
+        "source",
+        "domain=cloud-readiness",
+        "category=local-resource-access",
+        "localhost",
+        "containerization",
+        "os=windows",
+        "os=linux"
+      ]
+    },
+    "localhost-jdbc-00002": {
+      "id": "localhost-jdbc-00002",
+      "description": "The app is trying to access local resource by JDBC, please try to migrate the resource to cloud",
+      "title": "Local JDBC Calls",
+      "severity": "mandatory",
+      "effort": 5,
+      "labels": [
+        "target=azure-aks",
+        "target=azure-container-apps",
+        "target=azure-appservice",
+        "capability=containerization",
+        "source",
+        "domain=cloud-readiness",
+        "category=local-resource-access",
+        "localhost",
+        "containerization",
+        "os=windows",
+        "os=linux"
+      ]
+    },
+    "spring-boot-to-azure-port-01000": {
+      "id": "spring-boot-to-azure-port-01000",
+      "description": "The application is setting the server port. To migrate a Java application that sets the server port to Azure Container Apps:\n\n * **Azure Container Apps allows you to expose port according to your Azure Container Apps resource configuration. For instance, a Spring Boot application listens to port of 8080 by default, but it can be set with server.port or environment variable SERVER_PORT as you need.",
+      "title": "Server port configuration found",
+      "severity": "potential",
+      "effort": 1,
+      "links": [
+        {
+          "url": "https://learn.microsoft.com/azure/developer/java/migration/migrate-spring-boot-to-azure-container-apps#identify-any-clients-relying-on-a-non-standard-port",
+          "title": "Identify any clients relying on a non-standard port"
+        }
+      ],
+      "labels": [
+        "source=springboot",
+        "target=azure-aks",
+        "target=azure-appservice",
+        "target=azure-container-apps",
+        "domain=cloud-readiness",
+        "category=spring-migration",
+        "port",
+        "server port",
+        "os=windows",
+        "os=linux"
+      ]
+    },
+    "spring-boot-to-azure-restricted-config-01000": {
+      "id": "spring-boot-to-azure-restricted-config-01000",
+      "description": "The application uses restricted configurations for Azure Container Apps.\n These properties can be automatically injected into your application environment by Azure Container Apps to access managed Config Server and managed Eureka Server.\n Please remove them from your application, including configuration files, config server files, command line parameters, Java system attributes, and environment variables.\n\n If configured in **configuration files**: they will be ignored and overrided by Azure Container Apps.\n \n If configured in **Config Server files**, **command line parameters**, **Java system attribute**, **environment variable**: they need to be removed or you might experience conflicts and unexpected behavior.",
+      "title": "Restricted configurations found",
+      "severity": "potential",
+      "effort": 2,
+      "links": [
+        {
+          "url": "https://learn.microsoft.com/azure/developer/java/migration/migrate-spring-cloud-to-azure-container-apps#remove-restricted-configurations",
+          "title": "Migrate Spring Boot applications to Azure Container Apps - Remove restricted configurations"
+        },
+        {
+          "url": "https://learn.microsoft.com/azure/container-apps/java-config-server?tabs=azure-cli",
+          "title": "Connect to a managed Config Server for Spring in Azure Container Apps"
+        },
+        {
+          "url": "https://learn.microsoft.com/azure/container-apps/java-eureka-server?tabs=azure-cli",
+          "title": "Connect to a managed Eureka Server for Spring in Azure Container Apps"
+        }
+      ],
+      "labels": [
+        "target=azure-container-apps",
+        "source=springboot",
+        "domain=cloud-readiness",
+        "category=spring-migration",
+        "os=windows",
+        "os=linux"
+      ]
+    },
+    "unsecure-network-protocol-00000": {
+      "id": "unsecure-network-protocol-00000",
+      "description": "Using secured protocols such as HTTPS and SFTP (over HTTP and FTP) should now be the norm as applications are more and more exposed and interconnected. \nThis CloudReady patterns looks for unescured URI in the source code or deprecated URI libraries. \nIdeally, URLs should be replaced in your source code by secured protocols HTTPS and SFTP (and ensure the infrastructure implements these protocols for the resources your application calls, uses or references).",
+      "title": "Use of unsecured network protocols or URI libraries",
+      "severity": "mandatory",
+      "effort": 3,
+      "links": [
+        {
+          "url": "https://developers.google.com/web/fundamentals/security/encrypt-in-transit/why-https",
+          "title": "Why HTTPS matters"
+        },
+        {
+          "url": "https://www.ssh.com/ssh/sftp/",
+          "title": "SSH File Transfer Protocol (SFTP): Get SFTP client & server"
+        }
+      ],
+      "labels": [
+        "target=azure-aks",
+        "target=azure-container-apps",
+        "target=azure-appservice",
+        "capability=containerization",
+        "source",
+        "domain=cloud-readiness",
+        "category=remote-communication",
+        "containerization",
+        "os=windows",
+        "os=linux"
+      ]
+    }
+  },
+  "security": []
+}

@@ -2,9 +2,9 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class PaymentReturnDto {
-  @ApiProperty({ enum: ['MOMO', 'VNPAY', 'VIETQR', 'CASH'], example: 'MOMO' })
+  @ApiProperty({ enum: ['MOMO', 'VNPAY', 'ZALOPAY', 'VIETQR', 'CASH'], example: 'MOMO' })
   @IsString()
-  @IsEnum(['MOMO', 'VNPAY', 'VIETQR', 'CASH'])
+  @IsEnum(['MOMO', 'VNPAY', 'ZALOPAY', 'VIETQR', 'CASH'])
   provider: string;
 
   @ApiProperty({ example: 'order_123' })

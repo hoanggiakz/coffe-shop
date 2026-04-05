@@ -7,7 +7,7 @@ import { showRealtimeNotification } from '@/utils/notifications'
 import { phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 
 type PaymentMode = 'POSTPAY' | 'PREPAY'
-type PaymentProvider = 'VNPAY' | 'MOMO' | 'VIETQR'
+type PaymentProvider = 'VNPAY' | 'MOMO' | 'ZALOPAY' | 'VIETQR'
 
 interface CustomizationOption {
   value: string
@@ -53,6 +53,9 @@ interface OrderItemStatus {
   menuItemId: string
   quantity: number
   status: string
+  note?: string | null
+  options?: string | null
+  menuItemName?: string | null
 }
 
 interface OrderStatusResponse {
@@ -69,7 +72,7 @@ interface PaymentStatusResponse {
   paymentId: string
   orderId: string
   status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED'
-  provider: 'VNPAY' | 'MOMO' | 'VIETQR' | 'CASH'
+  provider: 'VNPAY' | 'MOMO' | 'ZALOPAY' | 'VIETQR' | 'CASH'
   paymentUrl?: string | null
   transferContent?: string | null
   vietQr?: {
@@ -160,6 +163,7 @@ export default function CustomerMenu() {
 
   const [currentOrderId, setCurrentOrderId] = useState('')
   const [currentOrder, setCurrentOrder] = useState<OrderStatusResponse | null>(null)
+  const [editingCurrentOrder, setEditingCurrentOrder] = useState(false)
   const [loadingOrderStatus, setLoadingOrderStatus] = useState(false)
   const [currentPayment, setCurrentPayment] = useState<PaymentStatusResponse | null>(null)
   const [loadingPaymentStatus, setLoadingPaymentStatus] = useState(false)
@@ -199,10 +203,30 @@ export default function CustomerMenu() {
     const resolveTable = async () => {
       setResolvingTable(true)
       if (qrTableId) {
-        if (!ignore) {
-          setTableId(qrTableId)
-          setTableName(qrTableNumber ? `Bàn ${qrTableNumber}` : qrTableId)
-          setResolvingTable(false)
+        try {
+          const { data } = await api.get(`/tables/${qrTableId}`)
+          if (!data?.id) {
+            toast.error('Không tìm thấy bàn từ QR')
+            if (!ignore) {
+              setTableId('')
+              setTableName('Không xác định')
+            }
+            return
+          }
+          if (!ignore) {
+            setTableId(String(data.id))
+            setTableName(`Bàn ${data.number ?? qrTableNumber ?? qrTableId}`)
+          }
+        } catch (error: any) {
+          if (!ignore) {
+            setTableId('')
+            setTableName('Không xác định')
+          }
+          toast.error(error.response?.data?.message || 'Không tìm thấy bàn từ QR')
+        } finally {
+          if (!ignore) {
+            setResolvingTable(false)
+          }
         }
         return
       }
@@ -661,6 +685,52 @@ export default function CustomerMenu() {
     })
   }
 
+  const parseOrderItemSelections = (rawOptions?: string | null): Record<string, string | string[]> => {
+    if (!rawOptions) return {}
+    try {
+      const parsed = JSON.parse(rawOptions) as { selections?: Record<string, string | string[]> }
+      return parsed?.selections && typeof parsed.selections === 'object' ? parsed.selections : {}
+    } catch {
+      return {}
+    }
+  }
+
+  const populateCartFromCurrentOrder = () => {
+    if (!currentOrder || currentOrder.status !== 'PENDING') {
+      toast.error('Chỉ có thể sửa đơn đang chờ xác nhận')
+      return
+    }
+
+    if (currentPayment) {
+      toast.error('Đơn đã có giao dịch thanh toán, không thể sửa')
+      return
+    }
+
+    const nextCart = currentOrder.orderItems.reduce<Record<string, CartItem>>((acc, item) => {
+      acc[item.menuItemId] = {
+        quantity: Number(item.quantity || 0),
+        note: String(item.note || ''),
+        selections: parseOrderItemSelections(item.options),
+      }
+      return acc
+    }, {})
+
+    setCart(nextCart)
+    setEditingCurrentOrder(true)
+    setPromoCode(currentOrder.promotionCode || '')
+    setPromoPreview(
+      currentOrder.promotionCode && Number(currentOrder.discountAmount || 0) > 0
+        ? {
+            code: String(currentOrder.promotionCode || ''),
+            discountAmount: Number(currentOrder.discountAmount || 0),
+            finalAmount: Number(currentOrder.totalAmount || 0),
+          }
+        : null,
+    )
+    scrollToCart()
+    toast.success('Đã nạp đơn hiện tại vào giỏ hàng để chỉnh sửa')
+  }
+
   const fetchOrderStatus = async (orderId: string) => {
     if (!orderId) return
     setLoadingOrderStatus(true)
@@ -747,7 +817,7 @@ export default function CustomerMenu() {
           tableId,
           customerName: customerSession?.name || tableName,
         },
-        { headers: { Authorization: `Bearer ${customerToken || 'customer-token'}` } },
+        customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
       )
       setCurrentPayment(data)
       toast.success('Da gui yeu cau thanh toan tien mat cho nhan vien')
@@ -802,51 +872,64 @@ export default function CustomerMenu() {
 
     setSubmitting(true)
     try {
-      const { data: order } = await api.post('/orders', {
-        tableId,
-        branchId: qrBranchId || undefined,
-        customerId: customerSession?.id || undefined,
-        customerEmail: customerSession?.email || undefined,
-        customerName: customerSession?.name || chatCustomerName || tableName,
-        customerPhone: customerSession?.phone || chatCustomerPhone || undefined,
-        promoCode: promoPreview?.code || promoCode.trim() || undefined,
-        items,
-      })
-      const newOrderId = String(order.id)
-      setCurrentOrderId(newOrderId)
-      if (orderStorageKey) localStorage.setItem(orderStorageKey, newOrderId)
-
-      if (paymentMode === 'PREPAY') {
-        const { data: payment } = await api.post(
-          '/v1/payments',
-          {
-            orderId: newOrderId,
-            amount: Number(order.totalAmount),
-            provider: paymentProvider,
-            tableId,
-            customerName: customerSession?.name || tableName,
-          },
-          { headers: { Authorization: `Bearer ${customerToken || 'customer-token'}` } },
-        )
-        setCurrentPayment(payment)
-        if (paymentProvider === 'VNPAY' || paymentProvider === 'MOMO') {
-          if (payment?.paymentUrl) window.open(payment.paymentUrl, '_blank')
-          toast.success('Da tao don va chuyen sang cong thanh toan')
-        } else {
-          toast.success('Da tao don. Vui long chuyen khoan theo ma VietQR ben duoi')
-        }
+      if (editingCurrentOrder && currentOrderId) {
+        const { data: updatedOrder } = await api.patch(`/orders/${currentOrderId}/customer-items`, {
+          tableId,
+          items,
+        })
+        setCurrentOrder(updatedOrder)
+        setEditingCurrentOrder(false)
+        toast.success('Đã cập nhật món trong đơn')
+        await fetchOrderStatus(currentOrderId)
+        await fetchPaymentStatus(currentOrderId)
       } else {
-        toast.success(`Đặt món thành công. Mã đơn: ${newOrderId}`)
+        const { data: order } = await api.post('/orders', {
+          tableId,
+          branchId: qrBranchId || undefined,
+          customerId: customerSession?.id || undefined,
+          customerEmail: customerSession?.email || undefined,
+          customerName: customerSession?.name || chatCustomerName || tableName,
+          customerPhone: customerSession?.phone || chatCustomerPhone || undefined,
+          promoCode: promoPreview?.code || promoCode.trim() || undefined,
+          items,
+        })
+        const newOrderId = String(order.id)
+        setCurrentOrderId(newOrderId)
+        if (orderStorageKey) localStorage.setItem(orderStorageKey, newOrderId)
+
+        if (paymentMode === 'PREPAY') {
+          const { data: payment } = await api.post(
+            '/v1/payments',
+            {
+              orderId: newOrderId,
+              amount: Number(order.totalAmount),
+              provider: paymentProvider,
+              tableId,
+              customerName: customerSession?.name || tableName,
+            },
+            customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
+          )
+          setCurrentPayment(payment)
+          if (paymentProvider === 'VNPAY' || paymentProvider === 'MOMO' || paymentProvider === 'ZALOPAY') {
+            if (payment?.paymentUrl) window.open(payment.paymentUrl, '_blank')
+            toast.success('Da tao don va chuyen sang cong thanh toan')
+          } else {
+            toast.success('Da tao don. Vui long chuyen khoan theo ma VietQR ben duoi')
+          }
+        } else {
+          toast.success(`Đặt món thành công. Mã đơn: ${newOrderId}`)
+        }
+
+        fetchOrderStatus(newOrderId)
+        fetchPaymentStatus(newOrderId)
+        if (customerToken && customerSession) {
+          loadCustomerData(customerToken, customerSession)
+        }
       }
 
       setCart({})
       setPromoCode('')
       setPromoPreview(null)
-      fetchOrderStatus(newOrderId)
-      fetchPaymentStatus(newOrderId)
-      if (customerToken && customerSession) {
-        loadCustomerData(customerToken, customerSession)
-      }
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Đặt món thất bại')
     } finally {
@@ -1186,10 +1269,16 @@ export default function CustomerMenu() {
 
             <div className="mt-3 rounded border border-gray-100 p-3">
               <p className="text-xs font-semibold uppercase text-gray-500">Hình thức thanh toán</p>
+              {editingCurrentOrder && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Đơn hiện tại đã được tạo. Bạn chỉ đang cập nhật lại món trong đơn chờ xác nhận.
+                </p>
+              )}
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
                   onClick={() => setPaymentMode('POSTPAY')}
+                  disabled={editingCurrentOrder}
                   className={`rounded px-3 py-1 text-sm ${paymentMode === 'POSTPAY' ? 'bg-gray-900 text-white' : 'border'}`}
                 >
                   Trả sau
@@ -1197,6 +1286,7 @@ export default function CustomerMenu() {
                 <button
                   type="button"
                   onClick={() => setPaymentMode('PREPAY')}
+                  disabled={editingCurrentOrder}
                   className={`rounded px-3 py-1 text-sm ${paymentMode === 'PREPAY' ? 'bg-gray-900 text-white' : 'border'}`}
                 >
                   Trả trước
@@ -1206,10 +1296,12 @@ export default function CustomerMenu() {
                 <select
                   value={paymentProvider}
                   onChange={(e) => setPaymentProvider(e.target.value as PaymentProvider)}
+                  disabled={editingCurrentOrder}
                   className="mt-2 w-full rounded border px-3 py-2 text-sm"
                 >
                   <option value="VNPAY">VNPAY</option>
                   <option value="MOMO">MOMO</option>
+                  <option value="ZALOPAY">ZALOPAY</option>
                   <option value="VIETQR">VIETQR</option>
                 </select>
               )}
@@ -1259,8 +1351,36 @@ export default function CustomerMenu() {
               className="mt-4 w-full rounded bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
               disabled={submitting || resolvingTable}
             >
-              {submitting ? 'Đang gửi...' : paymentMode === 'PREPAY' ? 'Đặt món và thanh toán' : 'Gửi đơn chờ xác nhận'}
+              {submitting
+                ? 'Đang gửi...'
+                : editingCurrentOrder
+                  ? 'Cập nhật đơn hàng'
+                  : paymentMode === 'PREPAY'
+                    ? 'Đặt món và thanh toán'
+                    : 'Gửi đơn chờ xác nhận'}
             </button>
+            {editingCurrentOrder && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingCurrentOrder(false)
+                  setCart({})
+                  setPromoCode(currentOrder?.promotionCode || '')
+                  setPromoPreview(
+                    currentOrder?.promotionCode && Number(currentOrder.discountAmount || 0) > 0
+                      ? {
+                          code: String(currentOrder.promotionCode || ''),
+                          discountAmount: Number(currentOrder.discountAmount || 0),
+                          finalAmount: Number(currentOrder.totalAmount || 0),
+                        }
+                      : null,
+                  )
+                }}
+                className="mt-2 w-full rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700"
+              >
+                Hủy sửa đơn
+              </button>
+            )}
           </form>
 
           <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -1303,11 +1423,20 @@ export default function CustomerMenu() {
                 <p>
                   Tổng thanh toán: <span className="font-semibold">{currentOrder.totalAmount.toLocaleString()}đ</span>
                 </p>
+                {currentOrder.status === 'PENDING' && !currentPayment && !loadingPaymentStatus && (
+                  <button
+                    type="button"
+                    onClick={populateCartFromCurrentOrder}
+                    className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
+                  >
+                    Sửa món trong đơn
+                  </button>
+                )}
                 <div className="mt-2 space-y-1">
                   {currentOrder.orderItems.map((item) => (
                     <div key={item.id} className="flex justify-between rounded bg-gray-50 px-2 py-1 text-xs">
                       <span>
-                        {item.quantity}x {menuMap.get(item.menuItemId)?.name || item.menuItemId}
+                        {item.quantity}x {item.menuItemName || menuMap.get(item.menuItemId)?.name || 'Món không xác định'}
                       </span>
                       <span className="font-semibold">{item.status === 'WAITING' ? 'Chờ làm' : item.status === 'PREPARING' ? 'Đang chuẩn bị' : item.status === 'DONE' ? 'Hoàn thành' : item.status}</span>
                     </div>
@@ -1341,7 +1470,9 @@ export default function CustomerMenu() {
                           </p>
                         </div>
                       )}
-                      {(currentPayment.provider === 'VNPAY' || currentPayment.provider === 'MOMO') &&
+                      {(currentPayment.provider === 'VNPAY' ||
+                        currentPayment.provider === 'MOMO' ||
+                        currentPayment.provider === 'ZALOPAY') &&
                         currentPayment.paymentUrl && (
                           <button
                             type="button"

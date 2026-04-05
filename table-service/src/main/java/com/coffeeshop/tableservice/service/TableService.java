@@ -137,18 +137,15 @@ public class TableService {
         return tableRepository.save(table);
     }
 
-    public String getQrCode(String id) {
+    public String getQrCode(String id, String baseUrl) {
         CoffeeTable table = findById(id);
-        if (table.getQrCode() == null) {
-            String qr = qrCodeService.generateQrBase64(table);
-            table.setQrCode(qr);
-            tableRepository.save(table);
-            return qr;
-        }
-        return table.getQrCode();
+        String qr = qrCodeService.generateQrBase64(table, baseUrl);
+        table.setQrCode(qr);
+        tableRepository.save(table);
+        return qr;
     }
 
-    public List<Map<String, String>> getQrBatch(List<String> tableIds) {
+    public List<Map<String, String>> getQrBatch(List<String> tableIds, String baseUrl) {
         List<CoffeeTable> tables;
         if (tableIds == null || tableIds.isEmpty()) {
             tables = tableRepository.findAll();
@@ -162,12 +159,9 @@ public class TableService {
 
         List<Map<String, String>> payload = new ArrayList<>();
         for (CoffeeTable table : sortedTables) {
-            String qrCode = table.getQrCode();
-            if (qrCode == null || qrCode.isBlank()) {
-                qrCode = qrCodeService.generateQrBase64(table);
-                table.setQrCode(qrCode);
-                tableRepository.save(table);
-            }
+            String qrCode = qrCodeService.generateQrBase64(table, baseUrl);
+            table.setQrCode(qrCode);
+            tableRepository.save(table);
             payload.add(Map.of(
                     "id", table.getId(),
                     "number", String.valueOf(table.getNumber()),

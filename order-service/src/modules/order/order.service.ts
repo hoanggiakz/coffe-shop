@@ -4,6 +4,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { TableActionDto, TableActionMode } from './dto/table-action.dto';
 import { StaffUpdateOrderItemsDto } from './dto/staff-update-order-items.dto';
+import { CustomerUpdateOrderItemsDto } from './dto/customer-update-order-items.dto';
 import { CreateMenuCategoryDto, UpdateMenuCategoryDto } from './dto/menu-category.dto';
 import {
   CreateMenuOptionGroupDto,
@@ -55,6 +56,10 @@ export class OrderService {
 
   private get chatServiceApiUrl() {
     return process.env.CHAT_SERVICE_URL || 'http://chat-service:3007/api/chats';
+  }
+
+  private get paymentServiceUrl() {
+    return process.env.PAYMENT_SERVICE_URL || 'http://payment-service:3004';
   }
 
   private get tableServiceUrl() {
@@ -1537,8 +1542,9 @@ export class OrderService {
     this.logger.log(
       `Tạo đơn ${order.id} cho bàn ${dto.tableId} – subtotal ${subtotalAmount.toLocaleString()}₫, discount ${discountAmount.toLocaleString()}₫, total ${totalAmount.toLocaleString()}₫`,
     );
-    await this.notifyNewOrder(order);
-    return this.enrichOrder(order);
+    const enrichedOrder = await this.enrichOrder(order);
+    await this.notifyNewOrder(enrichedOrder);
+    return enrichedOrder;
   }
 
   async findAll(params: { tableId?: string; status?: string; dateFrom?: string; dateTo?: string; branchId?: string }) {
@@ -1901,6 +1907,37 @@ export class OrderService {
     return this.enrichOrder(updated);
   }
 
+  async updateCustomerOrderItems(orderId: string, dto: CustomerUpdateOrderItemsDto) {
+    const tableId = String(dto.tableId || '').trim();
+    if (!tableId) {
+      throw new BadRequestException('tableId la bat buoc khi khach sua don');
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { orderItems: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Không tìm thấy đơn ${orderId}`);
+    }
+
+    if (String(order.tableId || '').trim() !== tableId) {
+      throw new BadRequestException('Khong the sua don cua ban khac');
+    }
+
+    if (order.status !== 'PENDING') {
+      throw new BadRequestException('Chi duoc sua don khi don dang cho xac nhan');
+    }
+
+    const payment = await this.findPaymentByOrderId(orderId);
+    if (payment) {
+      throw new BadRequestException('Khong the sua don da co giao dich thanh toan');
+    }
+
+    return this.updateOrderItems(orderId, dto);
+  }
+
   // ── KDS: cập nhật trạng thái từng món ──────────────────
   async updateItemStatus(orderId: string, itemId: string, status: string) {
     const nextStatus = String(status || '').trim().toUpperCase();
@@ -2084,14 +2121,44 @@ export class OrderService {
   private async notifyNewOrder(order: {
     id: string;
     tableId: string;
+    tableNumber?: number | null;
     totalAmount: number;
-    orderItems?: Array<unknown>;
+    orderItems?: Array<{ quantity?: number; menuItemId?: string; menuItemName?: string | null }>;
     customerName?: string | null;
   }) {
     try {
       const chatId = await this.getOrCreateOpenChatId(order.tableId, order.customerName || undefined);
-      const itemCount = Array.isArray(order.orderItems) ? order.orderItems.length : 0;
-      const content = `[ORDER_NEW] orderId=${order.id}; tableId=${order.tableId}; items=${itemCount}; total=${order.totalAmount}`;
+      const items = Array.isArray(order.orderItems) ? order.orderItems : [];
+      const itemCount = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      const tableLabel =
+        order.tableNumber !== null && order.tableNumber !== undefined
+          ? `Bàn ${order.tableNumber}`
+          : 'Bàn không xác định';
+      const itemSummary = items
+        .slice(0, 4)
+        .map((item) => {
+          const itemName = String(item.menuItemName || item.menuItemId || 'Món không xác định').trim();
+          return `${Number(item.quantity || 0)}x ${itemName}`;
+        })
+        .join(', ');
+      const remainingItems = Math.max(items.length - 4, 0);
+      const billSummary = [
+        tableLabel,
+        itemSummary || 'Chưa có món',
+        `Tổng tiền ${Number(order.totalAmount || 0).toLocaleString('vi-VN')}đ`,
+        remainingItems > 0 ? `+ ${remainingItems} món khác` : '',
+      ]
+        .filter(Boolean)
+        .join(' | ');
+      const encodedSummary = encodeURIComponent(billSummary);
+      const content =
+        `[ORDER_NEW] ` +
+        `orderId=${order.id}; ` +
+        `tableId=${order.tableId}; ` +
+        `tableNumber=${order.tableNumber ?? ''}; ` +
+        `items=${itemCount}; ` +
+        `total=${order.totalAmount}; ` +
+        `summary=${encodedSummary}`;
 
       const response = await this.fetchWithRetry(`${this.chatServiceApiUrl}/${chatId}/messages`, {
         method: 'POST',
@@ -2239,6 +2306,29 @@ export class OrderService {
       }
     } catch (error) {
       this.logger.warn(`Table service khong san sang de dong bo ban ${tableId}: ${(error as Error).message}`);
+    }
+  }
+
+  private async findPaymentByOrderId(orderId: string) {
+    try {
+      const response = await this.fetchWithRetry(`${this.paymentServiceUrl}/api/v1/payments/orders/${orderId}`);
+      if (response.status === 404) {
+        return null;
+      }
+
+      if (!response.ok) {
+        const body = await response.text();
+        this.logger.warn(`Khong kiem tra duoc thanh toan cua don ${orderId}: ${response.status} ${body}`);
+        throw new BadRequestException('Khong the xac minh trang thai thanh toan cua don');
+      }
+
+      return (await response.json()) as { paymentId?: string; status?: string } | null;
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      this.logger.warn(`Payment service khong san sang khi kiem tra don ${orderId}: ${(error as Error).message}`);
+      throw new BadRequestException('Khong the xac minh trang thai thanh toan cua don');
     }
   }
 }

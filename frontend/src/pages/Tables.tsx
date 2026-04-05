@@ -40,6 +40,7 @@ type TableGridState = 'AVAILABLE' | 'OCCUPIED' | 'WAITING_PAYMENT' | 'MAINTENANC
 
 const statuses: TableStatus[] = ['AVAILABLE', 'OCCUPIED', 'RESERVED', 'CLEANING', 'MAINTENANCE']
 const activeStatuses: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY']
+const localhostHosts = new Set(['localhost', '127.0.0.1', '::1'])
 
 export default function Tables() {
   const [tables, setTables] = useState<TableApi[]>([])
@@ -282,9 +283,8 @@ export default function Tables() {
 
   const openQr = async (table: TableApi) => {
     try {
-      const qr = table.qrCode
-        ? table.qrCode
-        : (await api.get(`/tables/${table.id}/qr`)).data?.qrCode
+      const currentBaseUrl = localhostHosts.has(window.location.hostname) ? undefined : window.location.origin
+      const qr = (await api.get(`/tables/${table.id}/qr`, { params: { baseUrl: currentBaseUrl } })).data?.qrCode
       if (!qr) {
         toast.error('Không lấy được QR')
         return
@@ -300,7 +300,8 @@ export default function Tables() {
 
   const downloadQr = async (table: TableApi) => {
     try {
-      const qr = table.qrCode ? table.qrCode : (await api.get(`/tables/${table.id}/qr`)).data?.qrCode
+      const currentBaseUrl = localhostHosts.has(window.location.hostname) ? undefined : window.location.origin
+      const qr = (await api.get(`/tables/${table.id}/qr`, { params: { baseUrl: currentBaseUrl } })).data?.qrCode
       if (!qr) {
         toast.error('Không lấy được QR')
         return
@@ -336,7 +337,11 @@ export default function Tables() {
 
     setPrintingBatch(true)
     try {
-      const { data } = await api.post('/tables/qr/batch', { tableIds: selectedQrTableIds })
+      const currentBaseUrl = localhostHosts.has(window.location.hostname) ? undefined : window.location.origin
+      const payload = currentBaseUrl
+        ? { tableIds: selectedQrTableIds, baseUrl: currentBaseUrl }
+        : { tableIds: selectedQrTableIds }
+      const { data } = await api.post('/tables/qr/batch', payload)
       const rows = Array.isArray(data) ? data : []
       if (!rows.length) {
         toast.error('Không lấy được danh sách QR để in')
