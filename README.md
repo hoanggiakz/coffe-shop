@@ -36,7 +36,10 @@ Lưu ý:
 
 ## 3. Chạy hệ thống
 
-Xem tài liệu chi tiết tại [HUONG_DAN_CHAY_BE_FE.md](HUONG_DAN_CHAY_BE_FE.md).
+Xem tài liệu chi tiết:
+
+- Chạy local/dev: [HUONG_DAN_CHAY_BE_FE.md](HUONG_DAN_CHAY_BE_FE.md)
+- Deploy production: [README_DEPLOY.md](README_DEPLOY.md)
 
 Khởi động nhanh:
 
