@@ -46,7 +46,7 @@ interface PaymentApi {
   paymentId: string
   orderId: string
   status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED'
-  provider: 'CASH' | 'MOMO' | 'VNPAY' | 'VIETQR'
+  provider: 'CASH' | 'MOMO' | 'VNPAY' | 'ZALOPAY' | 'VIETQR'
   paymentUrl?: string | null
   amountReceived?: number | null
   changeDue?: number | null
@@ -56,7 +56,7 @@ interface PaymentApi {
   } | null
 }
 
-const paymentMethods: PaymentMethod[] = ['CASH', 'MOMO', 'VNPAY', 'VIETQR']
+const paymentMethods: PaymentMethod[] = ['CASH', 'MOMO', 'VNPAY', 'ZALOPAY', 'VIETQR']
 const orderStatuses: Array<OrderApi['status']> = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
 
 export default function Orders() {
@@ -252,30 +252,61 @@ export default function Orders() {
     }
   }
 
+  const fetchExistingPayment = async (orderId: string) => {
+    try {
+      const { data } = await api.get(`/v1/payments/orders/${orderId}`)
+      return data as PaymentApi
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        return null
+      }
+      throw error
+    }
+  }
+
   const confirmPayment = async () => {
     if (!payingOrder) return
 
-    if (selectedMethod === 'CASH') {
-      const paidAmount = Math.round(Number(cashReceived || '0'))
-      if (!Number.isFinite(paidAmount) || paidAmount < payingOrder.totalAmount) {
-        toast.error(tv(`Số tiền khách đưa phải >= ${payingOrder.totalAmount.toLocaleString()}đ`, `Amount received must be >= ${payingOrder.totalAmount.toLocaleString()}đ`))
-        return
-      }
-    }
-
     setProcessingPayment(true)
     try {
-      const { data } = await api.post('/v1/payments', {
-        orderId: payingOrder.id,
-        amount: payingOrder.totalAmount,
-        provider: selectedMethod,
-        tableId: payingOrder.tableId,
-      })
-      const payment = data as PaymentApi
+      const existingPayment = await fetchExistingPayment(payingOrder.id)
+
+      if (existingPayment && existingPayment.provider !== selectedMethod) {
+        setCreatedPayment(existingPayment)
+        setSelectedMethod(existingPayment.provider)
+        toast.error(
+          tv(
+            `Đơn đã có phương thức ${phuongThucThanhToan(existingPayment.provider)}. Không thể đổi sang ${phuongThucThanhToan(selectedMethod)}.`,
+            `Order already uses ${phuongThucThanhToan(existingPayment.provider)}. Cannot switch to ${phuongThucThanhToan(selectedMethod)}.`,
+          ),
+        )
+        return
+      }
+
+      let payment = existingPayment
+      if (!payment) {
+        const { data } = await api.post('/v1/payments', {
+          orderId: payingOrder.id,
+          amount: payingOrder.totalAmount,
+          provider: selectedMethod,
+          tableId: payingOrder.tableId,
+        })
+        payment = data as PaymentApi
+      }
+
+      if (!payment) {
+        throw new Error('Payment creation failed')
+      }
+
       setCreatedPayment(payment)
 
-      if (selectedMethod === 'CASH') {
+      if (payment.provider === 'CASH') {
         const paidAmount = Math.round(Number(cashReceived || '0'))
+        if (!Number.isFinite(paidAmount) || paidAmount < payingOrder.totalAmount) {
+          toast.error(tv(`Số tiền khách đưa phải >= ${payingOrder.totalAmount.toLocaleString()}đ`, `Amount received must be >= ${payingOrder.totalAmount.toLocaleString()}đ`))
+          return
+        }
+
         const { data: paid } = await api.post(
           `/v1/payments/${payment.paymentId}/confirm-cash`,
           { confirmedBy: 'POS Staff', amountReceived: paidAmount },
@@ -288,16 +319,16 @@ export default function Orders() {
           toast.success(tv(`Tiền thừa: ${changeDue.toLocaleString()}đ`, `Change due: ${changeDue.toLocaleString()}đ`))
         }
         setPayingOrder(null)
-      } else if (selectedMethod === 'VNPAY' || selectedMethod === 'MOMO') {
+      } else if (payment.provider === 'VNPAY' || payment.provider === 'MOMO' || payment.provider === 'ZALOPAY') {
         if (payment.paymentUrl) {
           window.open(payment.paymentUrl, '_blank')
         }
         toast.success(tv('Đã tạo giao dịch online. Chờ webhook hoặc đối soát thanh toán', 'Online payment created. Waiting for webhook or reconciliation'))
-      } else if (selectedMethod === 'VIETQR') {
+      } else if (payment.provider === 'VIETQR') {
         toast.success(tv('Đã tạo mã VietQR. Chờ khách chuyển khoản và đối soát', 'VietQR generated. Waiting for transfer reconciliation'))
       }
 
-      if (selectedMethod !== 'CASH') {
+      if (payment.provider !== 'CASH') {
         await refreshPaymentAndCompleteIfPaid(payingOrder.id)
       }
     } catch (error: any) {
@@ -306,6 +337,31 @@ export default function Orders() {
       setProcessingPayment(false)
     }
   }
+
+  useEffect(() => {
+    if (!payingOrder) return
+
+    let cancelled = false
+    const loadExistingPayment = async () => {
+      try {
+        const existing = await fetchExistingPayment(payingOrder.id)
+        if (cancelled) return
+        if (existing) {
+          setCreatedPayment(existing)
+          setSelectedMethod(existing.provider)
+        }
+      } catch (error: any) {
+        if (!cancelled) {
+          toast.error(error.response?.data?.message || tv('Không thể tải thông tin thanh toán hiện tại', 'Unable to load current payment info'))
+        }
+      }
+    }
+
+    void loadExistingPayment()
+    return () => {
+      cancelled = true
+    }
+  }, [payingOrder?.id])
 
   const tableLabel = (tableId: string) => {
     const table = tables.find((t) => t.id === tableId)
@@ -346,6 +402,8 @@ export default function Orders() {
     if (!Number.isFinite(paid)) return 0
     return Math.max(paid - payingOrder.totalAmount, 0)
   }, [cashReceived, payingOrder, selectedMethod])
+
+  const lockedProvider = payingOrder && createdPayment?.orderId === payingOrder.id ? createdPayment.provider : null
 
   return (
     <div className="space-y-6">
@@ -537,12 +595,19 @@ export default function Orders() {
                   className={`rounded border px-3 py-2 text-sm ${
                     selectedMethod === method ? 'border-amber-500 bg-amber-50' : ''
                   }`}
+                  disabled={Boolean(lockedProvider && lockedProvider !== method)}
                   onClick={() => setSelectedMethod(method)}
                 >
                   {phuongThucThanhToan(method)}
                 </button>
               ))}
             </div>
+
+            {lockedProvider && (
+              <p className="mt-2 text-xs text-amber-700">
+                Đơn này đã có phương thức thanh toán: <span className="font-semibold">{phuongThucThanhToan(lockedProvider)}</span>. Không thể đổi phương thức.
+              </p>
+            )}
 
             {selectedMethod === 'CASH' && (
               <div className="mt-4 space-y-2 rounded border border-gray-200 bg-gray-50 p-3 text-sm">

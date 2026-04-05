@@ -8,9 +8,10 @@ import { PaymentReturnDto } from './dto/return.dto';
 import { PaymentStatus } from '@prisma/client';
 import { VNPayProvider } from './providers/vnpay.provider';
 import { MomoProvider } from './providers/momo.provider';
+import { ZaloPayProvider } from './providers/zalopay.provider';
 import * as crypto from 'crypto';
 
-type SupportedProvider = 'VNPAY' | 'MOMO' | 'VIETQR' | 'CASH';
+type SupportedProvider = 'VNPAY' | 'MOMO' | 'ZALOPAY' | 'VIETQR' | 'CASH';
 
 @Injectable()
 export class PaymentService {
@@ -24,6 +25,7 @@ export class PaymentService {
   ) {
     this.providers.set('VNPAY', new VNPayProvider(this.config));
     this.providers.set('MOMO', new MomoProvider(this.config));
+    this.providers.set('ZALOPAY', new ZaloPayProvider(this.config));
   }
 
   private get chatServiceUrl() {
@@ -68,7 +70,7 @@ export class PaymentService {
 
   private normalizeProvider(provider: string): SupportedProvider {
     const normalized = String(provider || '').toUpperCase();
-    if (!['VNPAY', 'MOMO', 'VIETQR', 'CASH'].includes(normalized)) {
+    if (!['VNPAY', 'MOMO', 'ZALOPAY', 'VIETQR', 'CASH'].includes(normalized)) {
       throw new BadRequestException(`Unsupported provider: ${provider}`);
     }
     return normalized as SupportedProvider;

@@ -32,17 +32,6 @@ export default function Login() {
     }
   }
 
-  const handleDemoLogin = () => {
-    login('demo-token', {
-      id: 'demo-1',
-      email: 'admin@coffeeshop.com',
-      name: 'Admin Demo',
-      role: 'ADMIN',
-    })
-    toast.success(tv('Chào mừng! (Chế độ demo)', 'Welcome! (Demo mode)'))
-    navigate('/')
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50">
       <div className="max-w-md w-full space-y-8 p-8 bg-white/90 backdrop-blur-lg rounded-2xl shadow-2xl">
@@ -74,13 +63,6 @@ export default function Login() {
             {tv('Đăng nhập', 'Sign in')}
           </Button>
         </form>
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>
-          <div className="relative flex justify-center text-xs"><span className="bg-white px-2 text-gray-400">{tv('hoặc', 'or')}</span></div>
-        </div>
-        <Button variant="secondary" onClick={handleDemoLogin} className="w-full" size="lg">
-          {tv('Đăng nhập demo (không cần backend)', 'Demo Login (no backend needed)')}
-        </Button>
         <p className="text-center text-sm text-gray-500">
           {tv(
             'Tai khoan nhan vien do ADMIN hoac MANAGER cap. Neu chua co tai khoan, vui long lien he quan ly.',

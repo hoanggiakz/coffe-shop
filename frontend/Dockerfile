@@ -11,7 +11,7 @@ FROM nginx:alpine
 RUN apk add --no-cache openssl \
     && mkdir -p /etc/nginx/certs \
     && openssl req -x509 -nodes -days 365 \
-      -subj "/CN=localhost" \
+      -subj "/CN=coffee.example.com" \
       -newkey rsa:2048 \
       -keyout /etc/nginx/certs/localhost.key \
       -out /etc/nginx/certs/localhost.crt

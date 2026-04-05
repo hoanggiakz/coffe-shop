@@ -103,6 +103,14 @@ export class ProxyController {
       return;
     }
 
+    if (
+      method === 'GET' &&
+      (path.startsWith('/api/users/staff/shift-overview') || path.startsWith('/api/users/staff/payroll'))
+    ) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
+      return;
+    }
+
     // Staff attendance check in/out can be done by any staff role
     if (
       method === 'POST' &&

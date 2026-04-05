@@ -1,5 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
+import QRCode from 'qrcode/lib/browser'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
@@ -61,6 +62,51 @@ interface AttendanceItem {
   workingMinutes?: number | null
 }
 
+interface ShiftCoworkerItem {
+  staffId: string
+  staffName: string
+  role: StaffRole
+  employeeCode?: string | null
+  branchId?: string | null
+  branchName?: string | null
+}
+
+interface ShiftOverviewItem {
+  date: string
+  staffId: string
+  staffName: string
+  branchId?: string | null
+  branchName?: string | null
+  selectedShiftType?: ShiftType | null
+  assignedShifts: StaffShiftItem[]
+  sameShiftStaffs: ShiftCoworkerItem[]
+}
+
+interface PayrollItem {
+  staffId: string
+  staffName: string
+  employeeCode?: string | null
+  role: StaffRole
+  branchId?: string | null
+  branchName?: string | null
+  hourlyRate: number
+  totalWorkingMinutes: number
+  totalWorkingHours: number
+  attendanceDays: number
+  completedShifts: number
+  estimatedPay: number
+}
+
+interface PayrollSummary {
+  dateFrom: string
+  dateTo: string
+  totalWorkingMinutes: number
+  totalWorkingHours: number
+  completedShifts: number
+  totalEstimatedPay: number
+  items: PayrollItem[]
+}
+
 function getMondayDateString(date = new Date()): string {
   const current = new Date(date)
   const day = current.getDay()
@@ -69,8 +115,15 @@ function getMondayDateString(date = new Date()): string {
   return current.toISOString().split('T')[0]
 }
 
+function getMonthStartDateString(date = new Date()): string {
+  const current = new Date(date)
+  current.setDate(1)
+  return current.toISOString().split('T')[0]
+}
+
 export default function StaffManagement() {
-  const currentRole = normalizeRole(useAuthStore((state) => state.user?.role))
+  const currentUser = useAuthStore((state) => state.user)
+  const currentRole = normalizeRole(currentUser?.role)
   const canManageAccounts = currentRole === 'ADMIN' || currentRole === 'MANAGER'
   const canManagePrivilegedAccounts = currentRole === 'ADMIN'
   const [staffs, setStaffs] = useState<StaffItem[]>([])
@@ -113,9 +166,40 @@ export default function StaffManagement() {
   const [attendanceDateTo, setAttendanceDateTo] = useState(new Date().toISOString().split('T')[0])
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceItem[]>([])
   const [loadingAttendance, setLoadingAttendance] = useState(true)
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const [scannerAction, setScannerAction] = useState<'check-in' | 'check-out' | null>(null)
+  const [scannerError, setScannerError] = useState('')
+  const scannerVideoRef = useRef<HTMLVideoElement | null>(null)
+  const scannerStreamRef = useRef<MediaStream | null>(null)
+  const scannerTimerRef = useRef<number | null>(null)
+  const scannerLockRef = useRef(false)
+  const [shiftOverviewDate, setShiftOverviewDate] = useState(new Date().toISOString().split('T')[0])
+  const [shiftOverviewStaffId, setShiftOverviewStaffId] = useState('')
+  const [shiftOverview, setShiftOverview] = useState<ShiftOverviewItem | null>(null)
+  const [loadingShiftOverview, setLoadingShiftOverview] = useState(true)
+  const [payrollStaffId, setPayrollStaffId] = useState('ALL')
+  const [payrollDateFrom, setPayrollDateFrom] = useState(getMonthStartDateString())
+  const [payrollDateTo, setPayrollDateTo] = useState(new Date().toISOString().split('T')[0])
+  const [payrollSummary, setPayrollSummary] = useState<PayrollSummary | null>(null)
+  const [loadingPayroll, setLoadingPayroll] = useState(true)
+  const [staffQrImages, setStaffQrImages] = useState<Record<string, string>>({})
 
   const activeStaffs = useMemo(
     () => staffs.filter((item) => item.isActive),
+    [staffs],
+  )
+  const currentStaffEntry = useMemo(
+    () => staffs.find((item) => item.id === currentUser?.id) || null,
+    [staffs, currentUser?.id],
+  )
+  const employeeCodeByStaffId = useMemo(
+    () =>
+      staffs.reduce<Record<string, string>>((acc, item) => {
+        if (item.id) {
+          acc[item.id] = item.employeeCode?.trim() || '-'
+        }
+        return acc
+      }, {}),
     [staffs],
   )
 
@@ -191,6 +275,49 @@ export default function StaffManagement() {
     }
   }
 
+  const loadShiftOverview = async () => {
+    setLoadingShiftOverview(true)
+    try {
+      const params: Record<string, string> = {
+        date: shiftOverviewDate,
+      }
+      if (canManageAccounts) {
+        if (shiftOverviewStaffId) params.staffId = shiftOverviewStaffId
+      } else if (currentUser?.id) {
+        params.staffId = currentUser.id
+      }
+
+      const { data } = await api.get('/users/staff/shift-overview', { params })
+      setShiftOverview(data || null)
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Không tải được ca làm hiện tại')
+    } finally {
+      setLoadingShiftOverview(false)
+    }
+  }
+
+  const loadPayroll = async () => {
+    setLoadingPayroll(true)
+    try {
+      const params: Record<string, string> = {
+        dateFrom: payrollDateFrom,
+        dateTo: payrollDateTo,
+      }
+      if (canManageAccounts) {
+        if (payrollStaffId !== 'ALL') params.staffId = payrollStaffId
+      } else if (currentUser?.id) {
+        params.staffId = currentUser.id
+      }
+
+      const { data } = await api.get('/users/staff/payroll', { params })
+      setPayrollSummary(data || null)
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Không tải được bảng lương')
+    } finally {
+      setLoadingPayroll(false)
+    }
+  }
+
   useEffect(() => {
     loadStaffs()
   }, [staffKeyword, staffRoleFilter, staffBranchFilter, includeInactive])
@@ -204,8 +331,53 @@ export default function StaffManagement() {
   }, [attendanceStaffId, attendanceDateFrom, attendanceDateTo])
 
   useEffect(() => {
+    loadShiftOverview()
+  }, [shiftOverviewDate, shiftOverviewStaffId, canManageAccounts, currentUser?.id])
+
+  useEffect(() => {
+    loadPayroll()
+  }, [payrollStaffId, payrollDateFrom, payrollDateTo, canManageAccounts, currentUser?.id])
+
+  useEffect(() => {
     void loadBranches()
   }, [canManageAccounts])
+
+  useEffect(() => {
+    let cancelled = false
+    const generateStaffQrImages = async () => {
+      try {
+        const qrTargets = staffs.filter((staff) => staff.personalQrCode && staff.personalQrCode.trim().length > 0)
+        if (!qrTargets.length) {
+          setStaffQrImages({})
+          return
+        }
+
+        const pairs = await Promise.all(
+          qrTargets.map(async (staff) => {
+            const qrDataUrl = await QRCode.toDataURL(staff.personalQrCode as string, {
+              errorCorrectionLevel: 'M',
+              margin: 1,
+              width: 220,
+            })
+            return [staff.id, qrDataUrl] as const
+          }),
+        )
+
+        if (!cancelled) {
+          setStaffQrImages(Object.fromEntries(pairs))
+        }
+      } catch {
+        if (!cancelled) {
+          setStaffQrImages({})
+        }
+      }
+    }
+
+    void generateStaffQrImages()
+    return () => {
+      cancelled = true
+    }
+  }, [staffs])
 
   const resetStaffForm = () => {
     setEditingStaffId(null)
@@ -280,7 +452,7 @@ export default function StaffManagement() {
           phone: staffForm.phone || null,
           role: staffForm.role,
           employeeCode: staffForm.employeeCode || null,
-          personalQrCode: staffForm.personalQrCode || null,
+          personalQrCode: null,
           preferredShift: staffForm.preferredShift,
           branchId: staffForm.branchId || null,
         })
@@ -353,8 +525,14 @@ export default function StaffManagement() {
     }
   }
 
-  const handleAttendanceAction = async (action: 'check-in' | 'check-out') => {
-    if (!attendanceIdentifier.trim()) {
+  const handleAttendanceAction = async (
+    action: 'check-in' | 'check-out',
+    payload?: { identifier: string; method: AttendanceMethod },
+  ) => {
+    const identifier = (payload?.identifier ?? attendanceIdentifier).trim()
+    const method = payload?.method ?? attendanceMethod
+
+    if (!identifier) {
       toast.error('Nhập mã nhân viên hoặc mã QR')
       return
     }
@@ -362,17 +540,129 @@ export default function StaffManagement() {
     setProcessingAttendance(true)
     try {
       await api.post(`/users/staff/attendance/${action}`, {
-        identifier: attendanceIdentifier.trim(),
-        method: attendanceMethod,
+        identifier,
+        method,
       })
       toast.success(action === 'check-in' ? 'Chấm công vào ca thành công' : 'Chấm công ra ca thành công')
       await loadAttendance()
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Chấm công thất bại')
+      const status = Number(error?.response?.status || 0)
+      const serverMessage = error?.response?.data?.message
+      if (serverMessage) {
+        toast.error(serverMessage)
+      } else if (status === 400) {
+        toast.error(
+          action === 'check-in'
+            ? 'Không thể vào ca. Có thể bạn đang trong ca hoặc mã chưa hợp lệ.'
+            : 'Không thể ra ca. Có thể bạn chưa vào ca hoặc đã ra ca rồi.',
+        )
+      } else {
+        toast.error('Chấm công thất bại')
+      }
     } finally {
       setProcessingAttendance(false)
     }
   }
+
+  const releaseScannerResources = () => {
+    if (scannerTimerRef.current !== null) {
+      window.clearInterval(scannerTimerRef.current)
+      scannerTimerRef.current = null
+    }
+    if (scannerStreamRef.current) {
+      scannerStreamRef.current.getTracks().forEach((track) => track.stop())
+      scannerStreamRef.current = null
+    }
+    if (scannerVideoRef.current) {
+      scannerVideoRef.current.pause()
+      scannerVideoRef.current.srcObject = null
+    }
+    scannerLockRef.current = false
+  }
+
+  const closeQrScanner = () => {
+    releaseScannerResources()
+    setScannerOpen(false)
+    setScannerAction(null)
+    setScannerError('')
+  }
+
+  const openQrScanner = (action: 'check-in' | 'check-out') => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+      toast.error('Thiết bị không hỗ trợ quét QR trực tiếp')
+      return
+    }
+    if (!('BarcodeDetector' in window)) {
+      toast.error('Trình duyệt chưa hỗ trợ quét QR trực tiếp, vui lòng nhập mã QR thủ công')
+      return
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast.error('Không truy cập được camera của thiết bị')
+      return
+    }
+
+    setScannerError('')
+    setScannerAction(action)
+    setScannerOpen(true)
+  }
+
+  useEffect(() => {
+    if (!scannerOpen || !scannerAction) return
+
+    let cancelled = false
+    const startScanner = async () => {
+      try {
+        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] })
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        })
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+
+        scannerStreamRef.current = stream
+        const videoEl = scannerVideoRef.current
+        if (!videoEl) {
+          setScannerError('Không khởi tạo được vùng camera')
+          releaseScannerResources()
+          return
+        }
+
+        videoEl.srcObject = stream
+        await videoEl.play()
+
+        scannerTimerRef.current = window.setInterval(async () => {
+          if (scannerLockRef.current) return
+          if (!scannerVideoRef.current || scannerVideoRef.current.readyState < 2) return
+          try {
+            const codes = await detector.detect(scannerVideoRef.current)
+            const scannedText = codes
+              .map((code: any) => String(code?.rawValue || '').trim())
+              .find((value: string) => value.length > 0)
+            if (!scannedText) return
+
+            scannerLockRef.current = true
+            setAttendanceMethod('QR')
+            setAttendanceIdentifier(scannedText)
+            await handleAttendanceAction(scannerAction, { identifier: scannedText, method: 'QR' })
+            closeQrScanner()
+          } catch {
+            // Ignore per-frame detect errors and keep scanning.
+          }
+        }, 300)
+      } catch (error: any) {
+        setScannerError(error?.message || 'Không truy cập được camera. Kiểm tra quyền camera rồi thử lại.')
+      }
+    }
+
+    void startScanner()
+    return () => {
+      cancelled = true
+      releaseScannerResources()
+    }
+  }, [scannerOpen, scannerAction])
 
   const canManageTargetRole = (role: StaffRole) => {
     if (!canManageAccounts) return false
@@ -381,6 +671,49 @@ export default function StaffManagement() {
   }
 
   const canManageTargetStaff = (staff: StaffItem) => canManageTargetRole(staff.role)
+
+  const printStaffCard = (staff: StaffItem) => {
+    const qrImage = staffQrImages[staff.id]
+    if (!qrImage) {
+      toast.error('Chưa tạo được mã QR cho nhân viên này')
+      return
+    }
+
+    const popup = window.open('', '_blank', 'width=420,height=640')
+    if (!popup) {
+      toast.error('Không mở được cửa sổ in thẻ')
+      return
+    }
+
+    popup.document.write(`
+      <html>
+        <head>
+          <title>Thẻ nhân viên - ${staff.name}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 0; padding: 24px; background: #f5f5f5; }
+            .card { background: #fff; border-radius: 16px; border: 1px solid #ddd; padding: 20px; width: 320px; }
+            .meta { font-size: 13px; color: #555; margin-top: 8px; }
+            .name { font-size: 20px; font-weight: 700; margin: 0; }
+            .qr { margin-top: 16px; width: 220px; height: 220px; border: 1px solid #e5e5e5; border-radius: 12px; }
+            .id { margin-top: 12px; font-size: 12px; color: #666; word-break: break-all; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <p class="name">${staff.name}</p>
+            <div class="meta">Mã NV: ${staff.employeeCode || '-'}</div>
+            <div class="meta">Vai trò: ${vaiTroNhanVien(staff.role)}</div>
+            <div class="meta">Chi nhánh: ${staff.branchName || staff.branchId || '-'}</div>
+            <img class="qr" src="${qrImage}" alt="QR ${staff.personalQrCode || ''}" />
+            <div class="meta">Mã QR: ${staff.personalQrCode || '-'}</div>
+            <div class="id">ID: ${staff.id}</div>
+          </div>
+          <script>window.onload = () => window.print();</script>
+        </body>
+      </html>
+    `)
+    popup.document.close()
+  }
 
   return (
     <div className="space-y-6">
@@ -483,11 +816,17 @@ export default function StaffManagement() {
               value={staffForm.employeeCode}
               onChange={(e) => setStaffForm((prev) => ({ ...prev, employeeCode: e.target.value }))}
             />
-            <Input
-              placeholder="Mã QR cá nhân (để trống tự sinh)"
-              value={staffForm.personalQrCode}
-              onChange={(e) => setStaffForm((prev) => ({ ...prev, personalQrCode: e.target.value }))}
-            />
+            {editingStaffId ? (
+              <Input
+                placeholder="Mã QR cá nhân (để trống tự sinh lại)"
+                value={staffForm.personalQrCode}
+                onChange={(e) => setStaffForm((prev) => ({ ...prev, personalQrCode: e.target.value }))}
+              />
+            ) : (
+              <div className="rounded-lg border border-dashed px-3 py-2 text-sm text-gray-600">
+                Mã QR cá nhân sẽ được hệ thống tự sinh sau khi tạo nhân viên
+              </div>
+            )}
             <select
               className="rounded-lg border px-3 py-2 text-sm"
               value={staffForm.branchId}
@@ -524,7 +863,7 @@ export default function StaffManagement() {
         )}
 
         <div className="mt-4 overflow-x-auto">
-          {loadingStaff && <TableSkeleton cols={8} rows={5} />}
+          {loadingStaff && <TableSkeleton cols={9} rows={5} />}
           {!loadingStaff && (
             <table className="min-w-full text-sm">
               <thead>
@@ -534,6 +873,7 @@ export default function StaffManagement() {
                   <th className="py-2 pr-3">Vai trò</th>
                   <th className="py-2 pr-3">Chi nhánh</th>
                   <th className="py-2 pr-3">Mã NV</th>
+                  <th className="py-2 pr-3">Mã QR cá nhân</th>
                   <th className="py-2 pr-3">Ca mặc định</th>
                   <th className="py-2 pr-3">Trạng thái</th>
                   <th className="py-2">Thao tác</th>
@@ -547,6 +887,7 @@ export default function StaffManagement() {
                     <td className="py-2 pr-3">{vaiTroNhanVien(staff.role)}</td>
                     <td className="py-2 pr-3">{staff.branchName || staff.branchId || '-'}</td>
                     <td className="py-2 pr-3">{staff.employeeCode || '-'}</td>
+                    <td className="py-2 pr-3">{staff.personalQrCode || '-'}</td>
                     <td className="py-2 pr-3">{caLamViec(staff.preferredShift)}</td>
                     <td className="py-2 pr-3">{trangThaiHoatDong(staff.isActive)}</td>
                     <td className="py-2">
@@ -569,6 +910,46 @@ export default function StaffManagement() {
             </table>
           )}
         </div>
+
+        {canManageAccounts && (
+          <div className="mt-6">
+            <h2 className="text-base font-semibold text-gray-900">Thẻ nhân viên (ID + QR cá nhân)</h2>
+            <p className="mt-1 text-sm text-gray-600">In thẻ cho nhân viên để quét QR vào ca/ra ca nhanh hơn.</p>
+            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {staffs.map((staff) => (
+                <div key={`card-${staff.id}`} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                  <p className="text-base font-semibold text-gray-900">{staff.name}</p>
+                  <p className="mt-1 text-sm text-gray-600">Mã NV: {staff.employeeCode || '-'}</p>
+                  <p className="text-sm text-gray-600">Vai trò: {vaiTroNhanVien(staff.role)}</p>
+                  <p className="text-sm text-gray-600">Chi nhánh: {staff.branchName || staff.branchId || '-'}</p>
+                  <p className="mt-1 text-xs text-gray-500 break-all">ID: {staff.id}</p>
+                  <div className="mt-3 flex justify-center rounded-lg border bg-gray-50 p-2">
+                    {staffQrImages[staff.id] ? (
+                      <img
+                        src={staffQrImages[staff.id]}
+                        alt={`QR ${staff.personalQrCode || ''}`}
+                        className="h-40 w-40 rounded-md border bg-white p-1"
+                      />
+                    ) : (
+                      <span className="py-14 text-xs text-gray-500">Chưa có mã QR</span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500 break-all">Mã QR: {staff.personalQrCode || '-'}</p>
+                  <div className="mt-3">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={!staffQrImages[staff.id]}
+                      onClick={() => printStaffCard(staff)}
+                    >
+                      In thẻ nhân viên
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </Card>
 
       {canManageAccounts && (
@@ -594,7 +975,7 @@ export default function StaffManagement() {
             <option value="">-- Chọn nhân viên --</option>
             {activeStaffs.map((staff) => (
               <option key={staff.id} value={staff.id}>
-                {staff.name} ({vaiTroNhanVien(staff.role)})
+                {staff.name} - {staff.employeeCode || 'N/A'} ({vaiTroNhanVien(staff.role)})
               </option>
             ))}
           </select>
@@ -655,6 +1036,14 @@ export default function StaffManagement() {
       )}
 
       <Card title="M-03 Chấm công" subtitle="Chấm công vào ca / ra ca bằng mã nhân viên hoặc mã QR cá nhân">
+        <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-lg border px-3 py-2 text-sm text-gray-700">
+            Mã NV của bạn: <span className="font-semibold">{currentStaffEntry?.employeeCode || '-'}</span>
+          </div>
+          <div className="rounded-lg border px-3 py-2 text-sm text-gray-700 md:col-span-2">
+            Mã QR cá nhân: <span className="font-semibold">{currentStaffEntry?.personalQrCode || '-'}</span>
+          </div>
+        </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <Input
             placeholder="Mã nhân viên hoặc mã QR"
@@ -676,6 +1065,40 @@ export default function StaffManagement() {
             Ra ca
           </Button>
         </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <Button
+            variant="secondary"
+            disabled={processingAttendance || scannerOpen}
+            onClick={() => openQrScanner('check-in')}
+          >
+            Quét QR vào ca
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={processingAttendance || scannerOpen}
+            onClick={() => openQrScanner('check-out')}
+          >
+            Quét QR ra ca
+          </Button>
+          {scannerOpen ? (
+            <Button variant="danger" onClick={closeQrScanner}>
+              Tắt camera quét
+            </Button>
+          ) : (
+            <div className="rounded-lg border px-3 py-2 text-sm text-gray-600">
+              Quét mã QR cá nhân để tự động điền mã và chấm công
+            </div>
+          )}
+        </div>
+        {scannerOpen && (
+          <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-sm text-gray-700">
+              Đưa mã QR cá nhân vào khung hình để {scannerAction === 'check-out' ? 'ra ca' : 'vào ca'}.
+            </p>
+            <video ref={scannerVideoRef} className="mt-2 w-full max-w-md rounded-lg border bg-black" muted playsInline />
+            {scannerError && <p className="mt-2 text-sm text-red-600">{scannerError}</p>}
+          </div>
+        )}
 
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
           {canManageAccounts ? (
@@ -684,13 +1107,13 @@ export default function StaffManagement() {
               value={attendanceStaffId}
               onChange={(e) => setAttendanceStaffId(e.target.value)}
             >
-              <option value="ALL">Tất cả nhân viên</option>
-              {staffs.map((staff) => (
-                <option key={staff.id} value={staff.id}>
-                  {staff.name}
-                </option>
-              ))}
-            </select>
+                <option value="ALL">Tất cả nhân viên</option>
+                {staffs.map((staff) => (
+                  <option key={staff.id} value={staff.id}>
+                    {staff.name} - {staff.employeeCode || 'N/A'}
+                  </option>
+                ))}
+              </select>
           ) : (
             <div className="rounded-lg border px-3 py-2 text-sm text-gray-600">
               Chỉ hiển thị lịch sử chấm công của chính bạn
@@ -704,35 +1127,220 @@ export default function StaffManagement() {
         </div>
 
         <div className="mt-4 overflow-x-auto">
-          {loadingAttendance && <TableSkeleton cols={7} rows={5} />}
-          {!loadingAttendance && (
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b text-left">
-                  <th className="py-2 pr-3">Ngày</th>
-                  <th className="py-2 pr-3">Nhân viên</th>
-                  <th className="py-2 pr-3">Ca</th>
-                  <th className="py-2 pr-3">Vào ca</th>
-                  <th className="py-2 pr-3">Ra ca</th>
-                  <th className="py-2 pr-3">Giờ công (phút)</th>
-                  <th className="py-2 pr-3">Phương thức</th>
+            {loadingAttendance && <TableSkeleton cols={8} rows={5} />}
+            {!loadingAttendance && (
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="py-2 pr-3">Ngày</th>
+                    <th className="py-2 pr-3">Nhân viên</th>
+                    <th className="py-2 pr-3">Mã NV</th>
+                    <th className="py-2 pr-3">Ca</th>
+                    <th className="py-2 pr-3">Vào ca</th>
+                    <th className="py-2 pr-3">Ra ca</th>
+                    <th className="py-2 pr-3">Giờ công (phút)</th>
+                    <th className="py-2 pr-3">Phương thức</th>
                 </tr>
               </thead>
               <tbody>
-                {attendanceLogs.map((log) => (
-                  <tr key={log.id} className="border-b">
-                    <td className="py-2 pr-3">{log.workDate}</td>
-                    <td className="py-2 pr-3">{log.staffName}</td>
-                    <td className="py-2 pr-3">{caLamViec(log.scheduledShift)}</td>
-                    <td className="py-2 pr-3">{new Date(log.checkInAt).toLocaleString()}</td>
-                    <td className="py-2 pr-3">{log.checkOutAt ? new Date(log.checkOutAt).toLocaleString() : '-'}</td>
-                    <td className="py-2 pr-3">{log.workingMinutes ?? '-'}</td>
+                  {attendanceLogs.map((log) => (
+                    <tr key={log.id} className="border-b">
+                      <td className="py-2 pr-3">{log.workDate}</td>
+                      <td className="py-2 pr-3">{log.staffName}</td>
+                      <td className="py-2 pr-3">{employeeCodeByStaffId[log.staffId] || '-'}</td>
+                      <td className="py-2 pr-3">{caLamViec(log.scheduledShift)}</td>
+                      <td className="py-2 pr-3">{new Date(log.checkInAt).toLocaleString()}</td>
+                      <td className="py-2 pr-3">{log.checkOutAt ? new Date(log.checkOutAt).toLocaleString() : '-'}</td>
+                      <td className="py-2 pr-3">{log.workingMinutes ?? '-'}</td>
                     <td className="py-2 pr-3">
                       {phuongThucChamCong(log.checkInMethod)}
                       {log.checkOutMethod ? ` / ${phuongThucChamCong(log.checkOutMethod)}` : ''}
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
+
+      <Card title="Ca làm & đồng ca" subtitle="Xem ca hiện tại và nhân sự làm cùng ca">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <Input type="date" value={shiftOverviewDate} onChange={(e) => setShiftOverviewDate(e.target.value)} />
+          {canManageAccounts ? (
+            <select
+              className="rounded-lg border px-3 py-2 text-sm"
+              value={shiftOverviewStaffId}
+              onChange={(e) => setShiftOverviewStaffId(e.target.value)}
+            >
+                <option value="">-- Xem theo tài khoản của bạn --</option>
+                {activeStaffs.map((staff) => (
+                  <option key={staff.id} value={staff.id}>
+                    {staff.name} - {staff.employeeCode || 'N/A'} ({vaiTroNhanVien(staff.role)})
+                  </option>
+                ))}
+              </select>
+          ) : (
+            <div className="rounded-lg border px-3 py-2 text-sm text-gray-600">
+              Đang xem theo tài khoản: {currentUser?.name || 'Nhân viên hiện tại'}
+            </div>
+          )}
+          <Button variant="secondary" onClick={loadShiftOverview}>
+            Tải lại ca làm
+          </Button>
+          <div className="rounded-lg border px-3 py-2 text-sm text-gray-600">
+            {shiftOverview?.selectedShiftType ? `Ca đang chọn: ${caLamViec(shiftOverview.selectedShiftType)}` : 'Chưa có ca được phân'}
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-semibold uppercase text-gray-500">Nhân sự đang xem</p>
+            <p className="mt-2 text-lg font-bold text-gray-900">{shiftOverview?.staffName || currentUser?.name || '-'}</p>
+            <p className="mt-1 text-sm text-gray-600">{shiftOverview?.branchName || 'Chưa gán chi nhánh'}</p>
+            <p className="mt-2 text-sm text-gray-700">
+              {shiftOverview?.selectedShiftType ? caLamViec(shiftOverview.selectedShiftType) : 'Chưa có ca trong ngày'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-semibold uppercase text-gray-500">Ca được phân trong ngày</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {shiftOverview?.assignedShifts?.length ? (
+                shiftOverview.assignedShifts.map((shift) => (
+                  <span key={shift.id} className="rounded-full bg-white px-3 py-1 text-sm font-medium text-gray-700 ring-1 ring-gray-200">
+                    {caLamViec(shift.shiftType)}
+                  </span>
+                ))
+              ) : (
+                <span className="text-sm text-gray-500">Không có ca được phân</span>
+              )}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-semibold uppercase text-gray-500">Nhân sự cùng ca</p>
+            <p className="mt-2 text-2xl font-bold text-gray-900">{shiftOverview?.sameShiftStaffs?.length || 0}</p>
+            <p className="mt-1 text-sm text-gray-600">Bao gồm cả người đang xem nếu có lịch phân ca khớp</p>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          {loadingShiftOverview && <TableSkeleton cols={4} rows={4} />}
+          {!loadingShiftOverview && (
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="py-2 pr-3">Tên</th>
+                  <th className="py-2 pr-3">Vai trò</th>
+                  <th className="py-2 pr-3">Mã NV</th>
+                  <th className="py-2 pr-3">Chi nhánh</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(shiftOverview?.sameShiftStaffs || []).map((staff) => (
+                  <tr key={staff.staffId} className="border-b">
+                    <td className="py-2 pr-3">{staff.staffName}</td>
+                    <td className="py-2 pr-3">{vaiTroNhanVien(staff.role)}</td>
+                    <td className="py-2 pr-3">{staff.employeeCode || '-'}</td>
+                    <td className="py-2 pr-3">{staff.branchName || staff.branchId || '-'}</td>
+                  </tr>
+                ))}
+                {!shiftOverview?.sameShiftStaffs?.length && (
+                  <tr>
+                    <td className="py-3 text-sm text-gray-500" colSpan={4}>
+                      Chưa có nhân sự cùng ca trong ngày đã chọn
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
+
+      <Card title="Lương tạm tính" subtitle="Tổng hợp số phút công và tiền công theo vai trò">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          {canManageAccounts ? (
+            <select
+              className="rounded-lg border px-3 py-2 text-sm"
+              value={payrollStaffId}
+              onChange={(e) => setPayrollStaffId(e.target.value)}
+            >
+                <option value="ALL">Tất cả nhân viên</option>
+                {activeStaffs.map((staff) => (
+                  <option key={staff.id} value={staff.id}>
+                    {staff.name} - {staff.employeeCode || 'N/A'}
+                  </option>
+                ))}
+              </select>
+          ) : (
+            <div className="rounded-lg border px-3 py-2 text-sm text-gray-600">
+              Đang tính lương cho: {currentUser?.name || 'Tài khoản hiện tại'}
+            </div>
+          )}
+          <Input type="date" value={payrollDateFrom} onChange={(e) => setPayrollDateFrom(e.target.value)} />
+          <Input type="date" value={payrollDateTo} onChange={(e) => setPayrollDateTo(e.target.value)} />
+          <Button variant="secondary" onClick={loadPayroll}>
+            Tải lại lương
+          </Button>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-4">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-semibold uppercase text-gray-500">Tổng tiền lương</p>
+            <p className="mt-2 text-xl font-bold text-gray-900">{Number(payrollSummary?.totalEstimatedPay || 0).toLocaleString()}đ</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-semibold uppercase text-gray-500">Tổng giờ công</p>
+            <p className="mt-2 text-xl font-bold text-gray-900">{payrollSummary?.totalWorkingHours ?? 0} giờ</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-semibold uppercase text-gray-500">Tổng phút công</p>
+            <p className="mt-2 text-xl font-bold text-gray-900">{payrollSummary?.totalWorkingMinutes ?? 0} phút</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-semibold uppercase text-gray-500">Ca hoàn tất</p>
+            <p className="mt-2 text-xl font-bold text-gray-900">{payrollSummary?.completedShifts ?? 0}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          {loadingPayroll && <TableSkeleton cols={9} rows={5} />}
+          {!loadingPayroll && (
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="py-2 pr-3">Nhân viên</th>
+                  <th className="py-2 pr-3">Mã NV</th>
+                  <th className="py-2 pr-3">Vai trò</th>
+                  <th className="py-2 pr-3">Chi nhánh</th>
+                  <th className="py-2 pr-3">Đơn giá giờ</th>
+                  <th className="py-2 pr-3">Giờ công</th>
+                  <th className="py-2 pr-3">Ngày chấm công</th>
+                  <th className="py-2 pr-3">Ca hoàn tất</th>
+                  <th className="py-2 pr-3">Lương tạm tính</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(payrollSummary?.items || []).map((item) => (
+                  <tr key={item.staffId} className="border-b">
+                    <td className="py-2 pr-3">{item.staffName}</td>
+                    <td className="py-2 pr-3">{item.employeeCode || employeeCodeByStaffId[item.staffId] || '-'}</td>
+                    <td className="py-2 pr-3">{vaiTroNhanVien(item.role)}</td>
+                    <td className="py-2 pr-3">{item.branchName || item.branchId || '-'}</td>
+                    <td className="py-2 pr-3">{Number(item.hourlyRate || 0).toLocaleString()}đ</td>
+                    <td className="py-2 pr-3">{item.totalWorkingHours} giờ</td>
+                    <td className="py-2 pr-3">{item.attendanceDays}</td>
+                    <td className="py-2 pr-3">{item.completedShifts}</td>
+                    <td className="py-2 pr-3 font-semibold text-emerald-700">{Number(item.estimatedPay || 0).toLocaleString()}đ</td>
+                  </tr>
+                ))}
+                {!payrollSummary?.items?.length && (
+                  <tr>
+                    <td className="py-3 text-sm text-gray-500" colSpan={9}>
+                      Chưa có dữ liệu lương trong khoảng thời gian đã chọn
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           )}

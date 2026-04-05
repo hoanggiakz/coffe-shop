@@ -4,6 +4,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { TableActionDto } from './dto/table-action.dto';
 import { StaffUpdateOrderItemsDto } from './dto/staff-update-order-items.dto';
+import { CustomerUpdateOrderItemsDto } from './dto/customer-update-order-items.dto';
 import { CreateMenuCategoryDto, UpdateMenuCategoryDto } from './dto/menu-category.dto';
 import {
   CreateMenuOptionGroupDto,
@@ -237,6 +238,11 @@ export class OrderController {
   @Patch(':id/items')
   updateItems(@Param('id') id: string, @Body() dto: StaffUpdateOrderItemsDto) {
     return this.orderService.updateOrderItems(id, dto);
+  }
+
+  @Patch(':id/customer-items')
+  updateCustomerItems(@Param('id') id: string, @Body() dto: CustomerUpdateOrderItemsDto) {
+    return this.orderService.updateCustomerOrderItems(id, dto);
   }
 
   // ── KDS: cập nhật trạng thái từng món ──────────────────

@@ -18,6 +18,11 @@ interface ChatItem {
   updatedAt?: string
 }
 
+interface TableApi {
+  id: string
+  number?: number | null
+}
+
 interface ChatMessage {
   id: string
   chatId: string
@@ -65,10 +70,38 @@ function persistLastSeenMap(map: Record<string, string>) {
   localStorage.setItem(LAST_SEEN_STORAGE_KEY, JSON.stringify(map))
 }
 
+function parseTaggedMeta(content: string, tag: string): Record<string, string> {
+  const prefix = `[${tag}]`
+  const raw = content.startsWith(prefix) ? content.slice(prefix.length).trim() : content
+  return raw
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .reduce<Record<string, string>>((acc, pair) => {
+      const index = pair.indexOf('=')
+      if (index <= 0) return acc
+      const key = pair.slice(0, index).trim()
+      const value = pair.slice(index + 1).trim()
+      if (key) acc[key] = value
+      return acc
+    }, {})
+}
+
+interface FormattedMessage {
+  preview: string
+  detail: string
+  type?: 'ORDER_NEW' | 'CALL_STAFF' | 'PLAIN'
+  tableText?: string
+  totalText?: string
+  itemsText?: string
+  orderId?: string
+}
+
 export default function ChatPage() {
   const user = useAuthStore((state) => state.user)
   const { tv } = useI18n()
   const [chats, setChats] = useState<ChatItem[]>([])
+  const [tables, setTables] = useState<TableApi[]>([])
   const [activeChatId, setActiveChatId] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [messageText, setMessageText] = useState('')
@@ -102,10 +135,71 @@ export default function ChatPage() {
     return new Date(latest.createdAt).getTime() > new Date(lastSeen).getTime()
   }
 
+  const tableLabel = (tableId?: string) => {
+    if (!tableId) return tv('Bàn không xác định', 'Unknown table')
+    const matchedTable = tables.find((table) => table.id === tableId)
+    if (matchedTable?.number !== null && matchedTable?.number !== undefined) {
+      return `${tv('Bàn', 'Table')} ${matchedTable.number}`
+    }
+    return tv('Bàn không xác định', 'Unknown table')
+  }
+
+  const formatSystemMessage = (message: ChatMessage): FormattedMessage => {
+    const content = String(message.content || '').trim()
+    if (!content.startsWith('[')) {
+      return {
+        preview: `${message.senderName}: ${content}`,
+        detail: content,
+        type: 'PLAIN',
+      }
+    }
+
+    if (content.startsWith('[ORDER_NEW]')) {
+      const meta = parseTaggedMeta(content, 'ORDER_NEW')
+      const tableText =
+        meta.tableNumber && meta.tableNumber !== 'null' && meta.tableNumber !== 'undefined'
+          ? `${tv('Bàn', 'Table')} ${meta.tableNumber}`
+          : tableLabel(meta.tableId)
+      const summary = meta.summary ? decodeURIComponent(meta.summary) : ''
+      const total = Number(meta.total || 0)
+      const items = Number(meta.items || 0)
+      const preview = summary || `${tableText} • ${total.toLocaleString('vi-VN')}đ`
+      return {
+        preview: `${tv('Hệ thống', 'System')}: ${preview}`,
+        detail: summary || `${tableText}\n${tv('Tổng tiền', 'Total')}: ${total.toLocaleString('vi-VN')}đ`,
+        type: 'ORDER_NEW',
+        tableText,
+        totalText: `${total.toLocaleString('vi-VN')}đ`,
+        itemsText: items > 0 ? `${items} ${tv('món', 'items')}` : undefined,
+        orderId: meta.orderId || undefined,
+      }
+    }
+
+    if (content.startsWith('[CALL_STAFF]')) {
+      const reason = content.replace('[CALL_STAFF]', '').trim() || tv('Khách cần hỗ trợ tại bàn', 'Customer needs help at table')
+      return {
+        preview: `${tv('Hệ thống', 'System')}: ${reason}`,
+        detail: reason,
+        type: 'CALL_STAFF',
+      }
+    }
+
+    return {
+      preview: `${message.senderName}: ${content.replace(/\[[A-Z_]+\]\s*/, '')}`,
+      detail: content.replace(/\[[A-Z_]+\]\s*/, ''),
+      type: 'PLAIN',
+    }
+  }
+
   const loadChats = async () => {
     try {
-      const { data } = await api.get('/chats')
-      const nextChats: ChatItem[] = Array.isArray(data) ? data : []
+      const [chatRes, tableRes] = await Promise.all([
+        api.get('/chats'),
+        api.get('/tables'),
+      ])
+      const nextChats: ChatItem[] = Array.isArray(chatRes.data) ? chatRes.data : []
+      const nextTables: TableApi[] = Array.isArray(tableRes.data) ? tableRes.data : []
+      setTables(nextTables)
       setChats(nextChats)
 
       if (!nextChats.length) {
@@ -199,7 +293,11 @@ export default function ChatPage() {
         setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]))
         markChatSeen(message.chatId, message.createdAt)
       } else if (message.senderType === 'CUSTOMER') {
-        showRealtimeNotification(tv(`Chat bàn ${message.chatId}`, `Table chat ${message.chatId}`), message.content)
+        const relatedChat = chats.find((chat) => chat.id === message.chatId)
+        showRealtimeNotification(
+          relatedChat ? tv(`Chat ${tableLabel(relatedChat.tableId)}`, `Chat ${tableLabel(relatedChat.tableId)}`) : tv('Chat mới từ khách', 'New customer chat'),
+          message.content,
+        )
       }
     }
 
@@ -336,11 +434,13 @@ export default function ChatPage() {
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium text-gray-900">{tv('Bàn', 'Table')} {chat.tableId}</p>
+                    <p className="font-medium text-gray-900">{tableLabel(chat.tableId)}</p>
                     {unread && <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-semibold text-white">{tv('Mới', 'New')}</span>}
                   </div>
                   <p className="mt-1 text-xs text-gray-500">{chat.status}</p>
-                  <p className="mt-1 line-clamp-1 text-xs text-gray-600">{latest ? `${latest.senderName}: ${latest.content}` : tv('Chưa có tin nhắn', 'No messages yet')}</p>
+                  <p className="mt-1 line-clamp-1 text-xs text-gray-600">
+                    {latest ? formatSystemMessage(latest).preview : tv('Chưa có tin nhắn', 'No messages yet')}
+                  </p>
                 </button>
               )
             })}
@@ -352,28 +452,69 @@ export default function ChatPage() {
           {activeChat && (
             <>
               <div className="flex items-center justify-between border-b border-gray-200 pb-3 dark:border-gray-700">
-                <p className="font-semibold text-gray-900 dark:text-white">{tv('Bàn', 'Table')} {activeChat.tableId}</p>
+                <p className="font-semibold text-gray-900 dark:text-white">{tableLabel(activeChat.tableId)}</p>
                 <Button size="sm" variant="secondary" onClick={() => closeChat(activeChat.id)}>
                   {tv('Đóng chat', 'Close chat')}
                 </Button>
               </div>
 
               <div className="flex-1 space-y-2 overflow-y-auto py-4">
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`rounded-2xl p-3 text-sm ${
-                      msg.senderType === 'STAFF'
-                        ? 'ml-auto max-w-[85%] bg-amber-50 text-amber-950'
-                        : 'max-w-[85%] bg-gray-50'
-                    }`}
-                  >
-                    <p className="font-medium">
-                      {msg.senderName} ({msg.senderType})
-                    </p>
-                    <p>{msg.content}</p>
-                  </div>
-                ))}
+                {messages.map((msg) => {
+                  const formatted = formatSystemMessage(msg)
+                  const isOrderCard = msg.senderName === 'System' && formatted.type === 'ORDER_NEW'
+
+                  if (isOrderCard) {
+                    return (
+                      <div
+                        key={msg.id}
+                        className="ml-auto max-w-[90%] rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-4 text-sm text-amber-950 shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                              {tv('Đơn mới', 'New order')}
+                            </p>
+                            <p className="mt-1 text-base font-bold text-gray-900">{formatted.tableText || tv('Bàn không xác định', 'Unknown table')}</p>
+                          </div>
+                          <div className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                            {formatted.totalText || '0đ'}
+                          </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          {formatted.itemsText && (
+                            <span className="rounded-full bg-white px-2.5 py-1 font-medium text-gray-700 ring-1 ring-amber-200">
+                              {formatted.itemsText}
+                            </span>
+                          )}
+                          {formatted.orderId && (
+                            <span className="rounded-full bg-white px-2.5 py-1 font-medium text-gray-700 ring-1 ring-amber-200">
+                              {tv('Mã đơn', 'Order')}: {formatted.orderId.slice(-8)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-3 rounded-xl bg-white/80 p-3 text-sm leading-6 text-gray-700 ring-1 ring-amber-100">
+                          <p className="whitespace-pre-line">{formatted.detail}</p>
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`rounded-2xl p-3 text-sm ${
+                        msg.senderType === 'STAFF'
+                          ? 'ml-auto max-w-[85%] bg-amber-50 text-amber-950'
+                          : 'max-w-[85%] bg-gray-50'
+                      }`}
+                    >
+                      <p className="font-medium">
+                        {msg.senderName === 'System' ? tv('Hệ thống', 'System') : msg.senderName} ({msg.senderType})
+                      </p>
+                      <p className="whitespace-pre-line">{formatted.detail}</p>
+                    </div>
+                  )
+                })}
                 <div ref={messageEndRef} />
               </div>
 

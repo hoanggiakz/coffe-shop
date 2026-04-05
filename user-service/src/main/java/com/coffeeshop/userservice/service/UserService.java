@@ -42,6 +42,13 @@ public class UserService {
     private static final List<User.Role> STAFF_ROLES = List.of(
             User.Role.ADMIN, User.Role.MANAGER, User.Role.WAITER, User.Role.BARISTA, User.Role.STAFF
     );
+    private static final Map<User.Role, Long> DEFAULT_HOURLY_RATES = Map.of(
+            User.Role.ADMIN, 120_000L,
+            User.Role.MANAGER, 80_000L,
+            User.Role.BARISTA, 45_000L,
+            User.Role.WAITER, 40_000L,
+            User.Role.STAFF, 38_000L
+    );
 
     private final UserRepository userRepository;
     private final BranchRepository branchRepository;
@@ -394,7 +401,8 @@ public class UserService {
 
         String normalizedBranchId = resolveBranchAssignment(req.getBranchId());
         String employeeCode = resolveEmployeeCode(req.getEmployeeCode(), null);
-        String personalQrCode = resolvePersonalQrCode(req.getPersonalQrCode(), employeeCode, null);
+        // Always auto-generate personal QR code when creating a new staff account.
+        String personalQrCode = resolvePersonalQrCode(null, employeeCode, null);
 
         User user = User.builder()
                 .name(req.getName().trim())
@@ -563,12 +571,11 @@ public class UserService {
         User staff = findStaffByIdentifier(req);
         LocalDate today = LocalDate.now();
 
-        AttendanceRecord existing = attendanceRecordRepository.findByStaffIdAndWorkDate(staff.getId(), today).orElse(null);
-        if (existing != null && existing.getCheckOutAt() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nhan vien da check-in cho hom nay");
-        }
-        if (existing != null && existing.getCheckOutAt() != null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nhan vien da check-out cho hom nay");
+        AttendanceRecord openRecord = attendanceRecordRepository
+                .findFirstByStaffIdAndWorkDateAndCheckOutAtIsNullOrderByCheckInAtDesc(staff.getId(), today)
+                .orElse(null);
+        if (openRecord != null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nhan vien dang trong ca va chua ra ca");
         }
 
         ShiftType scheduledShift = staffShiftRepository.findByStaffIdAndShiftDateBetweenOrderByShiftDateAsc(
@@ -597,11 +604,9 @@ public class UserService {
         User staff = findStaffByIdentifier(req);
         LocalDate today = LocalDate.now();
 
-        AttendanceRecord record = attendanceRecordRepository.findByStaffIdAndWorkDate(staff.getId(), today)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nhan vien chua check-in hom nay"));
-        if (record.getCheckOutAt() != null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nhan vien da check-out hom nay");
-        }
+        AttendanceRecord record = attendanceRecordRepository
+                .findFirstByStaffIdAndWorkDateAndCheckOutAtIsNullOrderByCheckInAtDesc(staff.getId(), today)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nhan vien chua vao ca hoac da ra ca"));
 
         record.setCheckOutAt(LocalDateTime.now());
         record.setCheckOutMethod(req.getMethod());
@@ -632,6 +637,112 @@ public class UserService {
         return records.stream().map(AttendanceResponse::from).collect(Collectors.toList());
     }
 
+    public ShiftOverviewResponse getShiftOverview(String token, String dateRaw, String staffId, String shiftTypeRaw) {
+        User actor = requireAnyStaff(token);
+        User target = resolveVisibleTargetStaff(actor, staffId);
+        LocalDate date = parseDateOrDefault(dateRaw, LocalDate.now());
+
+        List<StaffShift> assignedShifts = staffShiftRepository.findByStaffIdAndShiftDateBetweenOrderByShiftDateAsc(
+                target.getId(),
+                date,
+                date
+        );
+
+        ShiftType selectedShiftType = resolveSelectedShiftType(assignedShifts, shiftTypeRaw, target.getPreferredShift());
+        List<ShiftCoworkerResponse> sameShiftStaffs = new ArrayList<>();
+
+        if (selectedShiftType != null) {
+            List<StaffShift> sameShiftAssignments = staffShiftRepository.findByShiftDateAndShiftTypeOrderByStaffNameAsc(date, selectedShiftType);
+            Map<String, User> usersById = userRepository.findAllById(
+                    sameShiftAssignments.stream()
+                            .map(StaffShift::getStaffId)
+                            .filter(Objects::nonNull)
+                            .distinct()
+                            .toList()
+            ).stream()
+                    .filter(candidate -> isVisibleToActor(actor, target, candidate))
+                    .collect(Collectors.toMap(User::getId, user -> user));
+
+            sameShiftStaffs = sameShiftAssignments.stream()
+                    .map(shift -> usersById.get(shift.getStaffId()))
+                    .filter(Objects::nonNull)
+                    .map(user -> ShiftCoworkerResponse.from(user, resolveBranchName(user.getBranchId())))
+                    .toList();
+        }
+
+        return new ShiftOverviewResponse(
+                date,
+                target.getId(),
+                target.getName(),
+                target.getBranchId(),
+                resolveBranchName(target.getBranchId()),
+                selectedShiftType != null ? selectedShiftType.name() : null,
+                assignedShifts.stream().map(StaffShiftResponse::from).toList(),
+                sameShiftStaffs
+        );
+    }
+
+    public PayrollSummaryResponse getPayroll(String token, String staffId, String dateFrom, String dateTo) {
+        User actor = requireAnyStaff(token);
+        LocalDate from = parseDateOrDefault(dateFrom, LocalDate.now().withDayOfMonth(1));
+        LocalDate to = parseDateOrDefault(dateTo, LocalDate.now());
+        if (from.isAfter(to)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "dateFrom phai <= dateTo");
+        }
+
+        List<AttendanceRecord> records;
+        if (MANAGER_ROLES.contains(actor.getRole())) {
+            if (staffId != null && !staffId.isBlank()) {
+                User target = resolveVisibleTargetStaff(actor, staffId);
+                records = attendanceRecordRepository.findByStaffIdAndWorkDateBetweenOrderByWorkDateDescCheckInAtDesc(target.getId(), from, to);
+            } else {
+                records = attendanceRecordRepository.findByWorkDateBetweenOrderByWorkDateDescCheckInAtDesc(from, to);
+            }
+        } else {
+            records = attendanceRecordRepository.findByStaffIdAndWorkDateBetweenOrderByWorkDateDescCheckInAtDesc(actor.getId(), from, to);
+        }
+
+        Map<String, User> usersById = userRepository.findAllById(
+                records.stream()
+                        .map(AttendanceRecord::getStaffId)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .toList()
+        ).stream()
+                .filter(candidate -> isVisibleToActor(actor, actor, candidate))
+                .collect(Collectors.toMap(User::getId, user -> user));
+
+        List<PayrollItemResponse> items = records.stream()
+                .filter(record -> usersById.containsKey(record.getStaffId()))
+                .collect(Collectors.groupingBy(AttendanceRecord::getStaffId))
+                .entrySet()
+                .stream()
+                .map(entry -> toPayrollItem(usersById.get(entry.getKey()), entry.getValue()))
+                .filter(Objects::nonNull)
+                .sorted((left, right) -> String.valueOf(left.getStaffName()).compareToIgnoreCase(String.valueOf(right.getStaffName())))
+                .toList();
+
+        long totalWorkingMinutes = items.stream()
+                .mapToLong(item -> item.getTotalWorkingMinutes() != null ? item.getTotalWorkingMinutes() : 0L)
+                .sum();
+        int completedShifts = items.stream()
+                .mapToInt(item -> item.getCompletedShifts() != null ? item.getCompletedShifts() : 0)
+                .sum();
+        long totalEstimatedPay = items.stream()
+                .mapToLong(item -> item.getEstimatedPay() != null ? item.getEstimatedPay() : 0L)
+                .sum();
+
+        return new PayrollSummaryResponse(
+                from,
+                to,
+                totalWorkingMinutes,
+                roundHours(totalWorkingMinutes),
+                completedShifts,
+                totalEstimatedPay,
+                items
+        );
+    }
+
     private User findStaffByIdentifier(AttendanceCheckRequest req) {
         String identifier = String.valueOf(req.getIdentifier() == null ? "" : req.getIdentifier()).trim();
         if (identifier.isBlank()) {
@@ -657,6 +768,37 @@ public class UserService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "User khong phai nhan vien");
         }
         return user;
+    }
+
+    private User resolveVisibleTargetStaff(User actor, String staffId) {
+        if (staffId == null || staffId.isBlank()) {
+            return actor;
+        }
+
+        String normalizedStaffId = staffId.trim();
+        if (!MANAGER_ROLES.contains(actor.getRole()) && !Objects.equals(actor.getId(), normalizedStaffId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chi duoc xem du lieu cua chinh minh");
+        }
+
+        User target = requireStaffById(normalizedStaffId);
+        if (!isVisibleToActor(actor, target, target)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Khong duoc xem du lieu cua nhan vien khac chi nhanh");
+        }
+
+        return target;
+    }
+
+    private boolean isVisibleToActor(User actor, User targetContext, User candidate) {
+        if (actor.getRole() == User.Role.ADMIN) {
+            return true;
+        }
+
+        String referenceBranchId = targetContext != null ? targetContext.getBranchId() : actor.getBranchId();
+        if (referenceBranchId == null || referenceBranchId.isBlank()) {
+            return Objects.equals(actor.getId(), candidate.getId());
+        }
+
+        return Objects.equals(referenceBranchId, candidate.getBranchId());
     }
 
     private Branch requireBranchById(String branchId) {
@@ -825,6 +967,56 @@ public class UserService {
 
     private boolean isStaffRole(User.Role role) {
         return role != null && role != User.Role.CUSTOMER;
+    }
+
+    private ShiftType resolveSelectedShiftType(List<StaffShift> assignedShifts, String rawShiftType, ShiftType preferredShift) {
+        String normalized = normalizeNullableText(rawShiftType);
+        if (normalized != null) {
+            try {
+                return ShiftType.valueOf(normalized.toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException ex) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ca lam khong hop le");
+            }
+        }
+
+        if (!assignedShifts.isEmpty()) {
+            return assignedShifts.get(0).getShiftType();
+        }
+
+        return preferredShift;
+    }
+
+    private PayrollItemResponse toPayrollItem(User user, List<AttendanceRecord> records) {
+        if (user == null) {
+            return null;
+        }
+
+        long totalMinutes = records.stream()
+                .filter(record -> record.getCheckInAt() != null && record.getCheckOutAt() != null)
+                .mapToLong(record -> Math.max(0L, java.time.Duration.between(record.getCheckInAt(), record.getCheckOutAt()).toMinutes()))
+                .sum();
+        int completedShifts = (int) records.stream().filter(record -> record.getCheckOutAt() != null).count();
+        long hourlyRate = DEFAULT_HOURLY_RATES.getOrDefault(user.getRole(), 35_000L);
+        long estimatedPay = Math.round((totalMinutes / 60.0d) * hourlyRate);
+
+        return new PayrollItemResponse(
+                user.getId(),
+                user.getName(),
+                user.getEmployeeCode(),
+                user.getRole() != null ? user.getRole().name() : null,
+                user.getBranchId(),
+                resolveBranchName(user.getBranchId()),
+                hourlyRate,
+                totalMinutes,
+                roundHours(totalMinutes),
+                records.size(),
+                completedShifts,
+                estimatedPay
+        );
+    }
+
+    private Double roundHours(long totalMinutes) {
+        return Math.round((totalMinutes / 60.0d) * 100.0d) / 100.0d;
     }
 
     private String normalizeEmail(String email) {

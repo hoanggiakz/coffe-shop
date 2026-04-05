@@ -10,7 +10,10 @@ const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token
-  if (token) {
+  const explicitAuthHeader = (config.headers as any)?.Authorization ?? (config.headers as any)?.authorization
+  const hasAuthorizationHeader = typeof explicitAuthHeader === 'string' && explicitAuthHeader.trim().length > 0
+  const isCustomerMenuRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/menu')
+  if (token && !hasAuthorizationHeader && !isCustomerMenuRoute) {
     config.headers.Authorization = `Bearer ${token}`
   }
   return config

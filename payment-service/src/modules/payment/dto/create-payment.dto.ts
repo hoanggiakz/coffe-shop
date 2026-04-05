@@ -11,8 +11,10 @@ export class CreatePaymentDto {
   @Min(0)
   amount: number;
 
-  @ApiProperty({ enum: ['VNPAY', 'MOMO', 'VIETQR', 'CASH'], example: 'VNPAY' })
-  @IsIn(['VNPAY', 'MOMO', 'VIETQR', 'CASH'], { message: 'Provider must be VNPAY, MOMO, VIETQR, or CASH' })
+  @ApiProperty({ enum: ['VNPAY', 'MOMO', 'ZALOPAY', 'VIETQR', 'CASH'], example: 'VNPAY' })
+  @IsIn(['VNPAY', 'MOMO', 'ZALOPAY', 'VIETQR', 'CASH'], {
+    message: 'Provider must be VNPAY, MOMO, ZALOPAY, VIETQR, or CASH',
+  })
   provider: string;
 
   @ApiProperty({ example: 'table_12', required: false })

@@ -12,4 +12,5 @@ public interface StaffShiftRepository extends JpaRepository<StaffShift, String> 
     List<StaffShift> findByShiftDateBetweenOrderByShiftDateAsc(LocalDate from, LocalDate to);
     List<StaffShift> findByStaffIdAndShiftDateBetweenOrderByShiftDateAsc(String staffId, LocalDate from, LocalDate to);
     Optional<StaffShift> findByStaffIdAndShiftDateAndShiftType(String staffId, LocalDate shiftDate, ShiftType shiftType);
+    List<StaffShift> findByShiftDateAndShiftTypeOrderByStaffNameAsc(LocalDate shiftDate, ShiftType shiftType);
 }
