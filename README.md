@@ -6,6 +6,8 @@ Dự án xây dựng hệ thống quản lý quán cà phê theo mô hình micro
 - Nhân viên: nhận đơn, xử lý bàn, vận hành KDS, chat với khách, thu ngân.
 - Quản lý / quản trị: quản lý nhân sự, menu, kho, khuyến mãi, chi nhánh, báo cáo.
 
+Tài liệu chạy BE/FE chi tiết: `HUONG_DAN_CHAY_BE_FE.md`
+
 ## 1. Kiến trúc hệ thống
 
 ### 1.1 Các service chính
