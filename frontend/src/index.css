@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,41 +7,55 @@
 @layer base {
   :root {
     color-scheme: light;
-    --app-bg: #f7f3ee;
-    --app-surface: #fffdf9;
-    --app-ink: #292524;
-    --app-muted: #78716c;
-    --app-accent: #b45309;
-    --app-accent-soft: #fef3c7;
+    --app-bg: #eff8ff;
+    --app-surface: #ffffff;
+    --app-surface-soft: #f7fbff;
+    --app-ink: #1e293b;
+    --app-muted: #64748b;
+    --app-accent: #0ea5e9;
+    --app-accent-strong: #0284c7;
+    --app-accent-soft: rgba(125, 211, 252, 0.2);
+    --app-radius: 1.05rem;
+    --app-shadow: 0 18px 40px -28px rgba(2, 132, 199, 0.55);
   }
 
   .dark {
     color-scheme: dark;
-    --app-bg: #111827;
-    --app-surface: #1f2937;
-    --app-ink: #f9fafb;
+    --app-bg: #0f172a;
+    --app-surface: #1e293b;
+    --app-surface-soft: #1f2e47;
+    --app-ink: #f8fafc;
     --app-muted: #cbd5e1;
-    --app-accent: #f59e0b;
-    --app-accent-soft: rgba(245, 158, 11, 0.18);
+    --app-accent: #38bdf8;
+    --app-accent-strong: #0ea5e9;
+    --app-accent-soft: rgba(56, 189, 248, 0.2);
+    --app-shadow: 0 20px 48px -28px rgba(14, 165, 233, 0.4);
   }
 
   html {
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Plus Jakarta Sans', 'Avenir Next', 'Segoe UI', sans-serif;
     background: var(--app-bg);
+    -webkit-text-size-adjust: 100%;
+    text-rendering: geometricPrecision;
   }
 
   body {
     min-width: 320px;
     background:
-      radial-gradient(circle at top right, rgba(251, 191, 36, 0.16), transparent 24%),
-      linear-gradient(180deg, rgba(255, 251, 235, 0.9), transparent 35%),
+      radial-gradient(circle at 10% 10%, rgba(125, 211, 252, 0.32), transparent 26%),
+      radial-gradient(circle at 90% 0%, rgba(103, 232, 249, 0.22), transparent 32%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(239, 248, 255, 0.8)),
       var(--app-bg);
     color: var(--app-ink);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(120, 113, 108, 0.45) transparent;
+    scrollbar-color: rgba(14, 165, 233, 0.35) transparent;
+    box-sizing: border-box;
   }
 
   button,
@@ -47,25 +63,148 @@
   select,
   textarea {
     font: inherit;
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      color 160ms ease,
+      transform 120ms ease;
+  }
+
+  button {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  input,
+  select,
+  textarea {
+    background: var(--app-surface-soft);
+    color: var(--app-ink);
+  }
+
+  /* Legacy form classes used in older pages, auto-upgraded to new visual system */
+  input.rounded.border.px-3.py-2.text-sm,
+  select.rounded.border.px-3.py-2.text-sm,
+  textarea.rounded.border.px-3.py-2.text-sm,
+  button.rounded.border.px-3.py-2.text-sm {
+    min-height: 2.75rem;
+    border-color: rgba(125, 211, 252, 0.8);
+    border-radius: 0.75rem;
+    background: rgba(255, 255, 255, 0.92);
+    color: #0f172a;
+  }
+
+  button.rounded.border.px-3.py-2.text-sm {
+    cursor: pointer;
+  }
+
+  input.rounded.border.px-2.py-1.text-xs,
+  select.rounded.border.px-2.py-1.text-xs,
+  button.rounded.border.px-2.py-1.text-xs {
+    min-height: 2.2rem;
+    border-color: rgba(186, 230, 253, 0.95);
+    border-radius: 0.65rem;
+    background: rgba(255, 255, 255, 0.92);
+    color: #0f172a;
+  }
+
+  .dark input.rounded.border.px-3.py-2.text-sm,
+  .dark select.rounded.border.px-3.py-2.text-sm,
+  .dark textarea.rounded.border.px-3.py-2.text-sm,
+  .dark button.rounded.border.px-3.py-2.text-sm,
+  .dark input.rounded.border.px-2.py-1.text-xs,
+  .dark select.rounded.border.px-2.py-1.text-xs,
+  .dark button.rounded.border.px-2.py-1.text-xs {
+    border-color: rgba(71, 85, 105, 0.95);
+    background: rgba(30, 41, 59, 0.95);
+    color: #f8fafc;
+  }
+
+  img,
+  video {
+    max-width: 100%;
+    height: auto;
+  }
+
+  ::selection {
+    background: var(--app-accent-soft);
+    color: var(--app-ink);
   }
 }
 
 @layer components {
   .glass-panel {
-    @apply rounded-2xl border border-white/60 bg-white/85 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-800/85;
+    @apply rounded-[var(--app-radius)] border border-sky-100/75 bg-white/90 shadow-[var(--app-shadow)] backdrop-blur-md dark:border-slate-700/80 dark:bg-slate-800/90;
   }
 
   .section-title {
-    @apply text-lg font-semibold tracking-tight text-gray-900 dark:text-white;
+    @apply text-lg font-semibold tracking-tight text-slate-800 dark:text-slate-100;
   }
 }
 
 @layer utilities {
   html[data-density='compact'] .density-pad {
-    @apply p-4;
+    @apply p-3.5;
   }
 
   html[data-density='comfortable'] .density-pad {
-    @apply p-6;
+    @apply p-5;
+  }
+
+  .smooth-page {
+    animation: fade-slide-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .safe-bottom {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+@keyframes fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 768px) {
+  html[data-density='compact'] .density-pad {
+    padding: 0.8rem;
+  }
+
+  html[data-density='comfortable'] .density-pad {
+    padding: 0.95rem;
+  }
+
+  .glass-panel {
+    border-radius: 0.95rem;
+    overflow-x: auto;
+  }
+
+  .glass-panel table {
+    min-width: 620px;
+  }
+
+  body {
+    background:
+      radial-gradient(circle at 0% 0%, rgba(125, 211, 252, 0.28), transparent 38%),
+      radial-gradient(circle at 100% 0%, rgba(125, 211, 252, 0.2), transparent 40%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(239, 248, 255, 0.86)),
+      var(--app-bg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

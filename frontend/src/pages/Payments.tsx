@@ -33,20 +33,20 @@ export default function Payments() {
     .reduce((sum, p) => sum + p.amount, 0)
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Thanh toán</h1>
+    <div className="space-y-5 sm:space-y-6">
+      <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Thanh toán</h1>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card className="text-center">
-          <p className="text-sm text-gray-500">Tổng doanh thu</p>
+          <p className="text-sm text-slate-500">Tổng doanh thu</p>
           <p className="text-3xl font-bold text-green-600">{totalRevenue.toLocaleString('vi-VN')}đ</p>
         </Card>
         <Card className="text-center">
-          <p className="text-sm text-gray-500">Giao dịch</p>
-          <p className="text-3xl font-bold text-gray-900 dark:text-white">{mockPayments.length}</p>
+          <p className="text-sm text-slate-500">Giao dịch</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{mockPayments.length}</p>
         </Card>
         <Card className="text-center">
-          <p className="text-sm text-gray-500">Đang chờ</p>
+          <p className="text-sm text-slate-500">Đang chờ</p>
           <p className="text-3xl font-bold text-amber-600">
             {mockPayments.filter((p) => p.status === 'PENDING').length}
           </p>
@@ -54,7 +54,25 @@ export default function Payments() {
       </div>
 
       <Card>
-        <div className="overflow-x-auto">
+        <div className="space-y-3 sm:hidden">
+          {mockPayments.map((p) => (
+            <div key={p.id} className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold text-slate-900 dark:text-slate-100">{p.id}</p>
+                <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', statusColors[p.status])}>
+                  {trangThaiThanhToan(p.status)}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">{p.orderId} · {p.time}</p>
+              <p className="mt-2 font-semibold text-slate-900 dark:text-slate-100">{p.amount.toLocaleString('vi-VN')}đ</p>
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                {methodIcons[p.method]} {phuongThucThanhToan(p.method)}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden overflow-x-auto sm:block">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700">

@@ -62,6 +62,8 @@ const initialForm: PromotionFormState = {
   endAt: '',
   isActive: true,
 }
+const fieldClass =
+  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
 
 export default function Promotions() {
   const [promotions, setPromotions] = useState<PromotionApi[]>([])
@@ -209,25 +211,25 @@ export default function Promotions() {
   }, [promotions, keyword])
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Quản lý khuyến mãi (M-17/M-18)</h1>
+    <div className="space-y-5 sm:space-y-6">
+      <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Quản lý khuyến mãi (M-17/M-18)</h1>
 
       <Card title={editingId ? 'Cập nhật khuyến mãi' : 'M-17 Tạo mã giảm giá'}>
         <form onSubmit={onSubmit} className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <input
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             placeholder="Mã (ví dụ: WELCOME10)"
             value={form.code}
             onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))}
           />
           <input
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             placeholder="Mô tả"
             value={form.description}
             onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
           />
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={form.discountType}
             onChange={(e) => setForm((prev) => ({ ...prev, discountType: e.target.value as DiscountType }))}
           >
@@ -236,13 +238,13 @@ export default function Promotions() {
           </select>
           <input
             type="number"
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             placeholder="Giá trị giảm"
             value={form.discountValue}
             onChange={(e) => setForm((prev) => ({ ...prev, discountValue: e.target.value }))}
           />
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={form.appliesTo}
             onChange={(e) =>
               setForm((prev) => ({
@@ -257,38 +259,38 @@ export default function Promotions() {
           </select>
           <input
             type="number"
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             placeholder="Đơn tối thiểu"
             value={form.minOrderAmount}
             onChange={(e) => setForm((prev) => ({ ...prev, minOrderAmount: e.target.value }))}
           />
           <input
             type="number"
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             placeholder="Giảm tối đa (không bắt buộc)"
             value={form.maxDiscount}
             onChange={(e) => setForm((prev) => ({ ...prev, maxDiscount: e.target.value }))}
           />
           <input
             type="number"
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             placeholder="Số lượt giới hạn (không bắt buộc)"
             value={form.usageLimit}
             onChange={(e) => setForm((prev) => ({ ...prev, usageLimit: e.target.value }))}
           />
           <input
             type="datetime-local"
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={form.startAt}
             onChange={(e) => setForm((prev) => ({ ...prev, startAt: e.target.value }))}
           />
           <input
             type="datetime-local"
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={form.endAt}
             onChange={(e) => setForm((prev) => ({ ...prev, endAt: e.target.value }))}
           />
-          <label className="inline-flex items-center gap-2 rounded border px-3 py-2 text-sm">
+          <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm">
             <input
               type="checkbox"
               checked={form.isActive}
@@ -337,13 +339,13 @@ export default function Promotions() {
       <Card title="M-18 Quản lý chương trình">
         <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-4">
           <input
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             placeholder="Tìm theo mã hoặc mô tả"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
           />
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={scopeFilter}
             onChange={(e) => setScopeFilter(e.target.value as 'ALL' | PromotionScope)}
           >
@@ -351,7 +353,7 @@ export default function Promotions() {
             <option value="ORDER">Toàn đơn</option>
             <option value="ITEM">Món cụ thể</option>
           </select>
-          <label className="inline-flex items-center gap-2 rounded border px-3 py-2 text-sm">
+          <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm">
             <input
               type="checkbox"
               checked={includeInactive}

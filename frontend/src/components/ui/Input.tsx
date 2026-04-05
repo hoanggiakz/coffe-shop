@@ -11,7 +11,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="w-full">
         {label && (
-          <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-200">
             {label}
           </label>
         )}
@@ -19,13 +19,13 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           id={id}
           className={cn(
-            'block w-full rounded-lg border-0 py-2.5 px-4 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary-500 dark:bg-gray-700 dark:text-white dark:ring-gray-600 dark:placeholder:text-gray-400 sm:text-sm',
-            error && 'ring-red-500 focus:ring-red-500',
+            'block min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-4 py-2.5 text-slate-800 shadow-[0_1px_0_rgba(255,255,255,0.8)] placeholder:text-slate-400 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-sky-400 dark:focus:ring-sky-500/30 sm:text-sm',
+            error && 'border-rose-300 focus:border-rose-500 focus:ring-rose-300/60',
             className,
           )}
           {...props}
         />
-        {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+        {error && <p className="mt-1 text-xs text-rose-600 dark:text-rose-300">{error}</p>}
       </div>
     )
   },

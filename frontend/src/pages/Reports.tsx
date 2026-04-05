@@ -110,6 +110,9 @@ function formatHourLabel(value: string): string {
   return `${date.getHours().toString().padStart(2, '0')}:00`
 }
 
+const selectClass =
+  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
+
 export default function Reports() {
   const { tv } = useI18n()
   const now = new Date()
@@ -218,50 +221,50 @@ export default function Reports() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end gap-3">
-        <h1 className="mr-auto text-2xl font-bold text-gray-900 dark:text-white">Báo cáo và phân tích</h1>
-        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-44" />
-        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-44" />
+    <div className="space-y-5 sm:space-y-6">
+      <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-sky-100 bg-white/85 p-3 backdrop-blur sm:p-4">
+        <h1 className="mr-auto text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Báo cáo và phân tích</h1>
+        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full sm:w-44" />
+        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full sm:w-44" />
         <select
           value={groupBy}
           onChange={(e) => setGroupBy(e.target.value as TimeGroup)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          className={`${selectClass} sm:w-44`}
         >
           <option value="day">{tv('Theo ngày', 'By day')}</option>
           <option value="week">{tv('Theo tuần', 'By week')}</option>
           <option value="month">{tv('Theo tháng', 'By month')}</option>
           <option value="year">{tv('Theo năm', 'By year')}</option>
         </select>
-        <Button variant="secondary" onClick={() => void loadReports()} loading={loading}>
+        <Button variant="secondary" className="w-full sm:w-auto" onClick={() => void loadReports()} loading={loading}>
           {tv('Làm mới', 'Refresh')}
         </Button>
       </div>
 
       {loading && !dashboard && <RoutePageSkeleton kind="reports" />}
 
-      {!!dashboard && <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+      {!!dashboard && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="text-center">
-          <p className="text-sm text-gray-500">Tổng doanh thu</p>
-          <p className="text-2xl font-bold text-gray-900">{formatMoney(dashboard?.revenue.totalRevenue || 0)}</p>
+          <p className="text-sm text-slate-500">Tổng doanh thu</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-slate-100">{formatMoney(dashboard?.revenue.totalRevenue || 0)}</p>
         </Card>
         <Card className="text-center">
-          <p className="text-sm text-gray-500">Tổng đơn hoàn thành</p>
-          <p className="text-2xl font-bold text-gray-900">{dashboard?.revenue.totalOrders || 0}</p>
+          <p className="text-sm text-slate-500">Tổng đơn hoàn thành</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-slate-100">{dashboard?.revenue.totalOrders || 0}</p>
         </Card>
         <Card className="text-center">
-          <p className="text-sm text-gray-500">Nguyên liệu sắp hết</p>
+          <p className="text-sm text-slate-500">Nguyên liệu sắp hết</p>
           <p className="text-2xl font-bold text-red-600">{dashboard?.inventory.summary.lowStockCount || 0}</p>
         </Card>
         <Card className="text-center">
-          <p className="text-sm text-gray-500">Giá trị tồn kho</p>
-          <p className="text-2xl font-bold text-gray-900">{formatMoney(dashboard?.inventory.summary.totalStockValue || 0)}</p>
+          <p className="text-sm text-slate-500">Giá trị tồn kho</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-slate-100">{formatMoney(dashboard?.inventory.summary.totalStockValue || 0)}</p>
         </Card>
       </div>}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card title="Doanh thu theo thời gian (M-19)" subtitle="Ngày / tuần / tháng / năm">
-          <div className="h-72">
+          <div className="h-64 sm:h-72">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={revenueChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -276,7 +279,7 @@ export default function Reports() {
         </Card>
 
         <Card title="Đơn hàng theo giờ (M-23)" subtitle="24 giờ gần nhất">
-          <div className="h-72">
+          <div className="h-64 sm:h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={orderHourlyChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -296,14 +299,14 @@ export default function Reports() {
           <div className="space-y-2">
             {topItems.length === 0 && <p className="text-sm text-gray-500">Chưa có dữ liệu</p>}
             {topItems.map((item, index) => (
-              <div key={item.menuItemId} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm">
+              <div key={item.menuItemId} className="flex items-center justify-between rounded-xl border border-sky-100 bg-white/85 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
                 <div>
-                  <p className="font-medium text-gray-900">
+                  <p className="font-medium text-slate-900 dark:text-slate-100">
                     #{index + 1} {item.menuItemName}
                   </p>
-                  <p className="text-xs text-gray-500">{item.quantity} món · {item.orderCount} đơn</p>
+                  <p className="text-xs text-slate-500">{item.quantity} món · {item.orderCount} đơn</p>
                 </div>
-                <p className="font-semibold text-gray-900">{formatMoney(item.revenue)}</p>
+                <p className="font-semibold text-slate-900 dark:text-slate-100">{formatMoney(item.revenue)}</p>
               </div>
             ))}
           </div>
@@ -313,12 +316,12 @@ export default function Reports() {
           <div className="space-y-2">
             {staffItems.length === 0 && <p className="text-sm text-gray-500">Chưa có dữ liệu</p>}
             {staffItems.map((item) => (
-              <div key={item.staffId} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm">
+              <div key={item.staffId} className="flex items-center justify-between rounded-xl border border-sky-100 bg-white/85 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
                 <div>
-                  <p className="font-medium text-gray-900">{item.staffName}</p>
-                  <p className="text-xs text-gray-500">{vaiTroNhanVien(item.role) || 'Chưa phân vai trò'} · {item.orderCount} đơn</p>
+                  <p className="font-medium text-slate-900 dark:text-slate-100">{item.staffName}</p>
+                  <p className="text-xs text-slate-500">{vaiTroNhanVien(item.role) || 'Chưa phân vai trò'} · {item.orderCount} đơn</p>
                 </div>
-                <p className="font-semibold text-gray-900">{formatMoney(item.revenue)}</p>
+                <p className="font-semibold text-slate-900 dark:text-slate-100">{formatMoney(item.revenue)}</p>
               </div>
             ))}
           </div>
@@ -327,21 +330,36 @@ export default function Reports() {
 
       <Card title="Tồn kho hiện tại (M-21)" subtitle={`Cập nhật: ${dashboard?.updatedAt ? new Date(dashboard.updatedAt).toLocaleString('vi-VN') : '-'}`}>
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-lg bg-gray-50 p-3 text-sm">
-            <p className="text-gray-500">Tổng nguyên liệu</p>
-            <p className="text-xl font-semibold text-gray-900">{inventory?.summary.totalIngredients || 0}</p>
+          <div className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+            <p className="text-slate-500">Tổng nguyên liệu</p>
+            <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">{inventory?.summary.totalIngredients || 0}</p>
           </div>
-          <div className="rounded-lg bg-gray-50 p-3 text-sm">
-            <p className="text-gray-500">Đang hoạt động</p>
-            <p className="text-xl font-semibold text-gray-900">{inventory?.summary.activeIngredients || 0}</p>
+          <div className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+            <p className="text-slate-500">Đang hoạt động</p>
+            <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">{inventory?.summary.activeIngredients || 0}</p>
           </div>
-          <div className="rounded-lg bg-red-50 p-3 text-sm">
+          <div className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm">
             <p className="text-red-600">Sắp hết hàng</p>
             <p className="text-xl font-semibold text-red-700">{inventory?.summary.lowStockCount || 0}</p>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="space-y-3 sm:hidden">
+          {(inventory?.stocks || []).slice(0, 15).map((item) => (
+            <div key={item.id} className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold text-slate-900 dark:text-slate-100">{item.name}</p>
+                <span className={`rounded-full px-2 py-0.5 text-xs ${item.isLowStock ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                  {item.isLowStock ? 'Sắp hết hàng' : 'Ổn định'}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">{item.stock} {item.unit} · Min {item.minStock} {item.unit}</p>
+              <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-100">{formatMoney(item.stockValue)}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden overflow-x-auto sm:block">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
@@ -374,11 +392,11 @@ export default function Reports() {
       <Card title="Xuất báo cáo (M-19/M-21/M-22)">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">Loại báo cáo</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Loại báo cáo</label>
             <select
               value={exportType}
               onChange={(e) => setExportType(e.target.value as ExportType)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              className={selectClass}
             >
               <option value="revenue">Doanh thu</option>
               <option value="top-items">Top món bán chạy</option>
@@ -389,18 +407,18 @@ export default function Reports() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">Định dạng</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Định dạng</label>
             <select
               value={exportFormat}
               onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              className={selectClass}
             >
               <option value="excel">Excel (.xlsx)</option>
               <option value="pdf">PDF (.pdf)</option>
             </select>
           </div>
 
-          <Button onClick={() => void handleExport()} loading={loading}>
+          <Button className="w-full sm:w-auto" onClick={() => void handleExport()} loading={loading}>
             Tải báo cáo
           </Button>
         </div>

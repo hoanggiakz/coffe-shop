@@ -40,8 +40,8 @@ function RouteFallback() {
           : 'default'
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-2xl bg-white px-5 py-3 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-amber-100">
+    <div className="space-y-4 smooth-page">
+      <div className="rounded-2xl border border-sky-100 bg-white/90 px-5 py-3 text-sm font-medium text-slate-700 shadow-sm backdrop-blur">
         {t('loadingInterface')}
       </div>
       <RoutePageSkeleton kind={kind} />

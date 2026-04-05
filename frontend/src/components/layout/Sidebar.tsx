@@ -63,19 +63,19 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   return (
     <aside
       className={cn(
-        'fixed inset-y-0 left-0 z-30 flex flex-col border-r border-amber-100/80 bg-white/95 shadow-xl backdrop-blur transition-all duration-300 dark:border-slate-700 dark:bg-slate-900/95',
-        collapsed ? 'w-16' : 'w-72',
+        'fixed inset-y-0 left-0 z-30 flex w-[min(18rem,86vw)] flex-col border-r border-sky-100/80 bg-white/95 shadow-xl backdrop-blur transition-all duration-300 dark:border-slate-700 dark:bg-slate-900/95 lg:w-72',
+        collapsed && 'lg:w-16',
         mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
       )}
     >
       {/* Logo */}
-      <div className="flex h-16 items-center justify-center border-b border-amber-100/80 px-4 dark:border-slate-700">
+      <div className="flex h-16 items-center justify-center border-b border-sky-100/80 px-4 dark:border-slate-700">
         {collapsed ? (
           <span className="text-2xl">☕</span>
         ) : (
           <div className="text-center">
             <h1 className="text-xl font-bold text-primary-600">{t('appName')}</h1>
-            <p className="text-xs uppercase tracking-[0.22em] text-amber-700/80 dark:text-amber-300/80">Trung tâm vận hành</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-sky-700/80 dark:text-sky-300/80">Trung tâm vận hành</p>
           </div>
         )}
       </div>
@@ -90,10 +90,10 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
                 onClick={onNavigate}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-colors',
+                    'flex min-h-11 items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-colors',
                     isActive
-                      ? 'bg-amber-100 text-amber-800 shadow-sm dark:bg-amber-500/15 dark:text-amber-200'
-                      : 'text-gray-600 hover:bg-amber-50 dark:text-gray-300 dark:hover:bg-slate-800',
+                      ? 'bg-sky-100 text-sky-800 shadow-sm dark:bg-sky-500/15 dark:text-sky-200'
+                      : 'text-slate-600 hover:bg-sky-50 dark:text-slate-300 dark:hover:bg-slate-800',
                     collapsed && 'justify-center px-2',
                   )
                 }
@@ -108,12 +108,12 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
 
       {/* Settings */}
       {canViewSettings && (
-        <div className="border-t border-amber-100/80 p-2 dark:border-slate-700">
+        <div className="border-t border-sky-100/80 p-2 dark:border-slate-700">
           <NavLink
             to="/settings"
             onClick={onNavigate}
             className={cn(
-              'flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-gray-600 transition-colors hover:bg-amber-50 dark:text-gray-300 dark:hover:bg-slate-800',
+              'flex min-h-11 items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-slate-600 transition-colors hover:bg-sky-50 dark:text-slate-300 dark:hover:bg-slate-800',
               collapsed && 'justify-center px-2',
             )}
           >

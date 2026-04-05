@@ -20,17 +20,17 @@ export default function Button({
   return (
     <button
       className={cn(
-        'inline-flex min-h-10 items-center justify-center rounded-xl font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex min-h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent font-semibold tracking-[0.01em] transition-all duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900 disabled:pointer-events-none disabled:opacity-55',
         {
-          'bg-primary-600 text-white shadow-sm hover:bg-primary-700': variant === 'primary',
-          'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600': variant === 'secondary',
-          'bg-red-600 text-white hover:bg-red-700': variant === 'danger',
-          'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700': variant === 'ghost',
+          'bg-gradient-to-br from-sky-500 to-sky-600 text-white shadow-[0_12px_22px_-12px_rgba(14,165,233,0.75)] hover:from-sky-600 hover:to-sky-700': variant === 'primary',
+          'border-sky-200/80 bg-white/90 text-slate-700 shadow-sm hover:bg-sky-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700': variant === 'secondary',
+          'bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-[0_12px_22px_-12px_rgba(244,63,94,0.75)] hover:from-rose-600 hover:to-rose-700': variant === 'danger',
+          'text-slate-600 hover:bg-sky-50/80 dark:text-slate-200 dark:hover:bg-slate-800': variant === 'ghost',
         },
         {
-          'min-h-8 px-3 py-1.5 text-xs': size === 'sm',
-          'px-4 py-2 text-sm': size === 'md',
-          'px-6 py-3 text-base': size === 'lg',
+          'min-h-10 rounded-xl px-3 py-2 text-xs': size === 'sm',
+          'min-h-11 px-4 py-2.5 text-sm': size === 'md',
+          'min-h-12 px-6 py-3 text-base': size === 'lg',
         },
         className,
       )}

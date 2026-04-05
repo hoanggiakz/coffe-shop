@@ -53,6 +53,8 @@ interface StaffNotificationPayload {
 }
 
 const KITCHEN_ORDER_STATUSES = new Set<OrderApi['status']>(['CONFIRMED', 'PREPARING'])
+const chipButtonClass =
+  'inline-flex min-h-10 items-center justify-center rounded-xl border border-sky-200 bg-white/90 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-sky-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
 
 export default function Kitchen() {
   const { tv } = useI18n()
@@ -196,9 +198,9 @@ export default function Kitchen() {
   )
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{tv('Màn hình bếp (KDS)', 'Kitchen Display (KDS)')}</h1>
+        <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">{tv('Màn hình bếp (KDS)', 'Kitchen Display (KDS)')}</h1>
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span
             className={`rounded-full px-2 py-1 ${
@@ -209,7 +211,7 @@ export default function Kitchen() {
           </span>
           <button
             type="button"
-            className="rounded border px-2 py-1"
+            className={chipButtonClass}
             onClick={() => setSoundEnabled(!soundEnabled)}
           >
             {soundEnabled ? tv('Âm thanh: Bật', 'Sound: On') : tv('Âm thanh: Tắt', 'Sound: Off')}
@@ -219,7 +221,7 @@ export default function Kitchen() {
 
       {loading && <RoutePageSkeleton kind="dashboard" />}
       {!loading && (
-        <p className="text-sm text-gray-500">
+        <p className="rounded-xl border border-sky-100 bg-white/85 px-3 py-2 text-sm text-slate-600">
           {tv('S-12:', 'S-12:')} {orders.length} {tv('đơn đang chờ/đang làm', 'orders in queue/in progress')} · {totalPendingItems} {tv('món chưa hoàn thành', 'items not completed')}
         </p>
       )}
@@ -234,35 +236,36 @@ export default function Kitchen() {
           <Card key={order.id}>
             <div className="flex items-start justify-between">
               <div>
-                <p className="font-semibold text-gray-900 dark:text-white">{order.id}</p>
-                <p className="text-xs text-gray-500">
+                <p className="font-semibold text-slate-900 dark:text-white">{order.id}</p>
+                <p className="text-xs text-slate-500">
                   {tableLabel(order.tableId)} · {new Date(order.createdAt).toLocaleString()}
                 </p>
               </div>
-              <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700">
+              <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-medium text-sky-700">
                 {order.status}
               </span>
             </div>
 
             <div className="mt-3 space-y-2">
               {order.orderItems.map((item) => (
-                <div key={item.id} className="rounded border border-gray-200 p-2">
+                <div key={item.id} className="rounded-xl border border-sky-100 bg-white/85 p-3 dark:border-slate-700 dark:bg-slate-900/60">
                   <div className="flex items-center justify-between text-sm">
                     <span>
                       {item.quantity}x {itemLabel(item.menuItemId)}
                     </span>
-                    <span className="font-medium">{item.status}</span>
+                    <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">{item.status}</span>
                   </div>
                   {(item.note || item.options) && (
-                    <div className="mt-1 text-xs text-gray-600">
+                    <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
                       {item.note && <p>Ghi chú: {item.note}</p>}
                       {item.options && <p>Tùy chọn: {formatOptions(item.options)}</p>}
                     </div>
                   )}
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     {item.status === 'WAITING' && (
                       <Button
                         size="sm"
+                        className="w-full sm:w-auto"
                         onClick={() => updateItemStatus(order.id, item.id, 'PREPARING')}
                         loading={updatingId === item.id}
                       >
@@ -273,6 +276,7 @@ export default function Kitchen() {
                       <Button
                         size="sm"
                         variant="secondary"
+                        className="w-full sm:w-auto"
                         onClick={() => updateItemStatus(order.id, item.id, 'DONE')}
                         loading={updatingId === item.id}
                       >
@@ -284,13 +288,14 @@ export default function Kitchen() {
               ))}
             </div>
 
-            <div className="mt-3 flex items-center justify-between border-t pt-3 text-sm">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-sky-100 pt-3 text-sm">
               <span>
                 Món chưa xong: <strong>{order.orderItems.filter((item) => item.status !== 'DONE').length}</strong>
               </span>
               <Button
                 size="sm"
                 variant="secondary"
+                className="w-full sm:w-auto"
                 onClick={() => completeOrder(order)}
                 loading={updatingId === `order:${order.id}`}
               >

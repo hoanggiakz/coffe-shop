@@ -17,10 +17,10 @@ export default function Settings() {
   const setDensity = useUiStore((state) => state.setDensity)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Cài đặt</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Cài đặt</h1>
+        <p className="mt-1 text-sm text-slate-500">
           Tối ưu trải nghiệm theo thiết bị và chuẩn hóa giao diện tiếng Việt cho toàn bộ hệ thống.
         </p>
       </div>
@@ -36,10 +36,10 @@ export default function Settings() {
 
       <Card title="Tùy chọn giao diện" subtitle="Trải nghiệm sử dụng và khả năng tiếp cận">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3">
+          <label className="flex items-center justify-between gap-3 rounded-xl border border-sky-100 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-gray-900 dark:text-white">Thông báo trên máy tính</p>
-              <p className="text-xs text-gray-500">Hiển thị thông báo hệ thống khi có đơn/chat mới.</p>
+              <p className="text-sm font-medium text-slate-900 dark:text-white">Thông báo trên máy tính</p>
+              <p className="text-xs text-slate-500">Hiển thị thông báo hệ thống khi có đơn/chat mới.</p>
             </div>
             <input
               type="checkbox"
@@ -49,10 +49,10 @@ export default function Settings() {
             />
           </label>
 
-          <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3">
+          <label className="flex items-center justify-between gap-3 rounded-xl border border-sky-100 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-gray-900 dark:text-white">Âm báo</p>
-              <p className="text-xs text-gray-500">Phát âm báo khi có đơn mới hoặc tin nhắn mới.</p>
+              <p className="text-sm font-medium text-slate-900 dark:text-white">Âm báo</p>
+              <p className="text-xs text-slate-500">Phát âm báo khi có đơn mới hoặc tin nhắn mới.</p>
             </div>
             <input
               type="checkbox"
@@ -62,44 +62,44 @@ export default function Settings() {
             />
           </label>
 
-          <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3">
+          <label className="flex items-center justify-between gap-3 rounded-xl border border-sky-100 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-gray-900 dark:text-white">Giao diện</p>
-              <p className="text-xs text-gray-500">Chuyển nhanh giữa giao diện sáng và tối.</p>
+              <p className="text-sm font-medium text-slate-900 dark:text-white">Giao diện</p>
+              <p className="text-xs text-slate-500">Chuyển nhanh giữa giao diện sáng và tối.</p>
             </div>
             <select
               value={darkMode ? 'dark' : 'light'}
               onChange={(e) => setDarkMode(e.target.value === 'dark')}
-              className="rounded-lg border px-3 py-2 text-sm"
+              className="min-h-11 rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm"
             >
               <option value="light">Sáng</option>
               <option value="dark">Tối</option>
             </select>
           </label>
 
-          <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3">
+          <label className="flex items-center justify-between gap-3 rounded-xl border border-sky-100 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-gray-900 dark:text-white">Mật độ hiển thị</p>
-              <p className="text-xs text-gray-500">Gọn phù hợp desktop, thoải mái dễ thao tác trên màn hình cảm ứng.</p>
+              <p className="text-sm font-medium text-slate-900 dark:text-white">Mật độ hiển thị</p>
+              <p className="text-xs text-slate-500">Gọn phù hợp desktop, thoải mái dễ thao tác trên màn hình cảm ứng.</p>
             </div>
             <select
               value={density}
               onChange={(e) => setDensity(e.target.value as 'comfortable' | 'compact')}
-              className="rounded-lg border px-3 py-2 text-sm"
+              className="min-h-11 rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm"
             >
               <option value="comfortable">Thoải mái</option>
               <option value="compact">Gọn</option>
             </select>
           </label>
 
-          <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 lg:col-span-2">
+          <label className="flex items-center justify-between gap-3 rounded-xl border border-sky-100 px-4 py-3 lg:col-span-2">
             <div>
-              <p className="text-sm font-medium text-gray-900 dark:text-white">Chuẩn ngôn ngữ</p>
-              <p className="text-xs text-gray-500">
+              <p className="text-sm font-medium text-slate-900 dark:text-white">Chuẩn ngôn ngữ</p>
+              <p className="text-xs text-slate-500">
                 Giao diện hiện đang chuẩn hóa 100% tiếng Việt. Hạ tầng đa ngôn ngữ vẫn được giữ lại để mở rộng sau.
               </p>
             </div>
-            <span className="rounded-lg border px-3 py-2 text-sm text-gray-700 dark:text-gray-200">Tiếng Việt</span>
+            <span className="rounded-xl border border-sky-100 px-3 py-2 text-sm text-slate-700 dark:text-gray-200">Tiếng Việt</span>
           </label>
         </div>
       </Card>

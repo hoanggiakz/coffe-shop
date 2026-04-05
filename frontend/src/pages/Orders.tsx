@@ -58,6 +58,8 @@ interface PaymentApi {
 
 const paymentMethods: PaymentMethod[] = ['CASH', 'MOMO', 'VNPAY', 'ZALOPAY', 'VIETQR']
 const orderStatuses: Array<OrderApi['status']> = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
+const selectClass =
+  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
 
 export default function Orders() {
   const { tv } = useI18n()
@@ -406,13 +408,13 @@ export default function Orders() {
   const lockedProvider = payingOrder && createdPayment?.orderId === payingOrder.id ? createdPayment.provider : null
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{tv('Đơn hàng / POS', 'Orders / POS')}</h1>
+    <div className="space-y-5 sm:space-y-6">
+      <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">{tv('Đơn hàng / POS', 'Orders / POS')}</h1>
 
-      <Card title={tv('Bộ lọc đơn hàng', 'Order filters')} subtitle="S-08">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+      <Card className="sticky top-16 z-10" title={tv('Bộ lọc đơn hàng', 'Order filters')} subtitle="S-08">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={selectClass}
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value as 'ALL' | OrderApi['status'])}
           >
@@ -424,7 +426,7 @@ export default function Orders() {
             ))}
           </select>
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={selectClass}
             value={filterTableId}
             onChange={(e) => setFilterTableId(e.target.value)}
           >
@@ -437,17 +439,17 @@ export default function Orders() {
           </select>
           <input
             type="date"
-            className="rounded border px-3 py-2 text-sm"
+            className={selectClass}
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
           />
           <input
             type="date"
-            className="rounded border px-3 py-2 text-sm"
+            className={selectClass}
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
           />
-          <Button variant="secondary" onClick={resetFilters}>
+          <Button variant="secondary" className="w-full xl:w-auto" onClick={resetFilters}>
             {tv('Xóa lọc', 'Clear filters')}
           </Button>
         </div>
@@ -456,9 +458,9 @@ export default function Orders() {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-1">
           <form onSubmit={createOrder} className="space-y-3">
-            <p className="font-semibold text-gray-900 dark:text-white">{tv('Tạo đơn tại quầy (S-07)', 'Create walk-in order (S-07)')}</p>
+            <p className="text-base font-semibold text-slate-900 dark:text-white">{tv('Tạo đơn tại quầy (S-07)', 'Create walk-in order (S-07)')}</p>
             <select
-              className="w-full rounded border px-3 py-2 text-sm"
+              className={selectClass}
               value={selectedTableId}
               onChange={(e) => setSelectedTableId(e.target.value)}
             >
@@ -470,21 +472,29 @@ export default function Orders() {
               ))}
             </select>
 
-            <div className="max-h-80 space-y-2 overflow-y-auto rounded border p-2">
+            <div className="max-h-80 space-y-2 overflow-y-auto rounded-xl border border-sky-100 p-2">
               {menuItems
                 .filter((item) => item.available)
                 .map((item) => (
-                  <div key={item.id} className="flex items-center justify-between text-sm">
+                  <div key={item.id} className="flex items-center justify-between rounded-lg bg-white/80 px-2 py-1.5 text-sm dark:bg-slate-900/40">
                     <div>
                       <p className="font-medium">{item.name}</p>
-                      <p className="text-xs text-gray-500">{item.price.toLocaleString()}đ</p>
+                      <p className="text-xs text-slate-500">{item.price.toLocaleString()}đ</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button type="button" className="rounded border px-2" onClick={() => decrease(item.id)}>
+                      <button
+                        type="button"
+                        className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2"
+                        onClick={() => decrease(item.id)}
+                      >
                         -
                       </button>
                       <span>{cart[item.id] || 0}</span>
-                      <button type="button" className="rounded border px-2" onClick={() => increase(item.id)}>
+                      <button
+                        type="button"
+                        className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2"
+                        onClick={() => increase(item.id)}
+                      >
                         +
                       </button>
                     </div>
@@ -543,9 +553,9 @@ export default function Orders() {
 
               <div className="mt-3 flex items-center justify-between border-t pt-3">
                 <span className="font-bold text-amber-700">{order.totalAmount.toLocaleString()}đ</span>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => setDetailOrder(order)}>
-                    Chi tiết
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setDetailOrder(order)}>
+                  Chi tiết
                   </Button>
                   {!['COMPLETED', 'CANCELLED'].includes(order.status) && (
                     <Button size="sm" variant="secondary" onClick={() => openEditOrder(order)}>
@@ -583,17 +593,17 @@ export default function Orders() {
       </div>
 
       {payingOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-5">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
+          <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 dark:bg-slate-900">
             <p className="text-lg font-bold">Thanh toán đơn {payingOrder.id}</p>
-            <p className="mt-1 text-sm text-gray-500">Tổng tiền: {payingOrder.totalAmount.toLocaleString()}đ</p>
+            <p className="mt-1 text-sm text-slate-500">Tổng tiền: {payingOrder.totalAmount.toLocaleString()}đ</p>
 
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
               {paymentMethods.map((method) => (
                 <button
                   key={method}
-                  className={`rounded border px-3 py-2 text-sm ${
-                    selectedMethod === method ? 'border-amber-500 bg-amber-50' : ''
+                  className={`min-h-11 rounded-xl border px-3 py-2 text-sm ${
+                    selectedMethod === method ? 'border-sky-500 bg-sky-50' : 'border-sky-100'
                   }`}
                   disabled={Boolean(lockedProvider && lockedProvider !== method)}
                   onClick={() => setSelectedMethod(method)}
@@ -611,11 +621,11 @@ export default function Orders() {
 
             {selectedMethod === 'CASH' && (
               <div className="mt-4 space-y-2 rounded border border-gray-200 bg-gray-50 p-3 text-sm">
-                <label className="block text-xs font-medium text-gray-600">Số tiền khách đưa</label>
+                <label className="block text-xs font-medium text-slate-600">Số tiền khách đưa</label>
                 <input
                   type="number"
                   min={0}
-                  className="w-full rounded border px-3 py-2"
+                  className={selectClass}
                   value={cashReceived}
                   onChange={(e) => setCashReceived(e.target.value)}
                 />
@@ -684,16 +694,16 @@ export default function Orders() {
       )}
 
       {detailOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-xl bg-white p-5">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
+          <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 dark:bg-slate-900">
             <p className="text-lg font-bold">Chi tiết đơn {detailOrder.id}</p>
-            <div className="mt-2 space-y-1 text-sm text-gray-600">
+            <div className="mt-2 space-y-1 text-sm text-slate-600 dark:text-slate-300">
               <p>Bàn: {orderTableLabel(detailOrder)}</p>
               <p>Trạng thái: {trangThaiDonHang(detailOrder.status)}</p>
               <p>Tạo lúc: {new Date(detailOrder.createdAt).toLocaleString()}</p>
             </div>
 
-            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded border p-2 text-sm">
+            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-sky-100 p-2 text-sm">
               {detailOrder.orderItems.map((item) => {
                 return (
                   <div key={item.id} className="flex items-center justify-between">
@@ -716,12 +726,12 @@ export default function Orders() {
       )}
 
       {editingOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-5">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
+          <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 dark:bg-slate-900">
             <p className="text-lg font-bold">Sửa món đơn {editingOrder.id}</p>
-            <p className="mt-1 text-sm text-gray-500">S-09: Sửa số lượng, thêm/xóa món trong đơn</p>
+            <p className="mt-1 text-sm text-slate-500">S-09: Sửa số lượng, thêm/xóa món trong đơn</p>
 
-            <div className="mt-4 max-h-80 space-y-2 overflow-y-auto rounded border p-2">
+            <div className="mt-4 max-h-80 space-y-2 overflow-y-auto rounded-xl border border-sky-100 p-2">
               {menuItems
                 .filter((item) => item.available || editCart[item.id])
                 .map((item) => (
@@ -731,11 +741,11 @@ export default function Orders() {
                       <p className="text-xs text-gray-500">{item.price.toLocaleString()}đ</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button type="button" className="rounded border px-2" onClick={() => updateEditQuantity(item.id, -1)}>
+                      <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => updateEditQuantity(item.id, -1)}>
                         -
                       </button>
                       <span>{editCart[item.id] || 0}</span>
-                      <button type="button" className="rounded border px-2" onClick={() => updateEditQuantity(item.id, 1)}>
+                      <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => updateEditQuantity(item.id, 1)}>
                         +
                       </button>
                     </div>

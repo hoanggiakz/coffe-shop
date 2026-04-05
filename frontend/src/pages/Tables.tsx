@@ -41,6 +41,8 @@ type TableGridState = 'AVAILABLE' | 'OCCUPIED' | 'WAITING_PAYMENT' | 'MAINTENANC
 const statuses: TableStatus[] = ['AVAILABLE', 'OCCUPIED', 'RESERVED', 'CLEANING', 'MAINTENANCE']
 const activeStatuses: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY']
 const localhostHosts = new Set(['localhost', '127.0.0.1', '::1'])
+const fieldClass =
+  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
 
 export default function Tables() {
   const [tables, setTables] = useState<TableApi[]>([])
@@ -450,36 +452,36 @@ export default function Tables() {
   )
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Quản lý bàn</h1>
+    <div className="space-y-5 sm:space-y-6">
+      <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Quản lý bàn</h1>
 
       <Card>
         <form onSubmit={createTable} className="grid grid-cols-1 gap-3 md:grid-cols-5">
           <input
             type="number"
             placeholder="Số bàn"
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={form.number}
             onChange={(e) => setForm((prev) => ({ ...prev, number: e.target.value }))}
           />
           <input
             type="number"
             placeholder="Sức chứa"
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={form.capacity}
             onChange={(e) => setForm((prev) => ({ ...prev, capacity: e.target.value }))}
           />
           <input
             type="text"
             placeholder="Khu vực (trong nhà / ngoài trời)"
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={form.area}
             onChange={(e) => setForm((prev) => ({ ...prev, area: e.target.value }))}
           />
           <input
             type="text"
             placeholder="Mã chi nhánh (tùy chọn)"
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={form.branchId}
             onChange={(e) => setForm((prev) => ({ ...prev, branchId: e.target.value }))}
           />
@@ -491,37 +493,37 @@ export default function Tables() {
 
       {editingTableId && (
         <Card title="M-14 Sửa bàn">
-          <form onSubmit={submitEditTable} className="grid grid-cols-1 gap-3 md:grid-cols-6">
-            <input
-              type="number"
-              placeholder="Số bàn"
-              className="rounded border px-3 py-2 text-sm"
-              value={editForm.number}
-              onChange={(e) => setEditForm((prev) => ({ ...prev, number: e.target.value }))}
-            />
-            <input
-              type="number"
-              placeholder="Sức chứa"
-              className="rounded border px-3 py-2 text-sm"
-              value={editForm.capacity}
-              onChange={(e) => setEditForm((prev) => ({ ...prev, capacity: e.target.value }))}
-            />
-            <input
-              type="text"
-              placeholder="Khu vực"
-              className="rounded border px-3 py-2 text-sm"
-              value={editForm.area}
-              onChange={(e) => setEditForm((prev) => ({ ...prev, area: e.target.value }))}
-            />
-            <input
-              type="text"
-              placeholder="Mã chi nhánh"
-              className="rounded border px-3 py-2 text-sm"
-              value={editForm.branchId}
-              onChange={(e) => setEditForm((prev) => ({ ...prev, branchId: e.target.value }))}
-            />
-            <select
-              className="rounded border px-3 py-2 text-sm"
+        <form onSubmit={submitEditTable} className="grid grid-cols-1 gap-3 md:grid-cols-6">
+          <input
+            type="number"
+            placeholder="Số bàn"
+            className={fieldClass}
+            value={editForm.number}
+            onChange={(e) => setEditForm((prev) => ({ ...prev, number: e.target.value }))}
+          />
+          <input
+            type="number"
+            placeholder="Sức chứa"
+            className={fieldClass}
+            value={editForm.capacity}
+            onChange={(e) => setEditForm((prev) => ({ ...prev, capacity: e.target.value }))}
+          />
+          <input
+            type="text"
+            placeholder="Khu vực"
+            className={fieldClass}
+            value={editForm.area}
+            onChange={(e) => setEditForm((prev) => ({ ...prev, area: e.target.value }))}
+          />
+          <input
+            type="text"
+            placeholder="Mã chi nhánh"
+            className={fieldClass}
+            value={editForm.branchId}
+            onChange={(e) => setEditForm((prev) => ({ ...prev, branchId: e.target.value }))}
+          />
+          <select
+              className={fieldClass}
               value={editForm.status}
               onChange={(e) => setEditForm((prev) => ({ ...prev, status: e.target.value as TableStatus }))}
             >
@@ -546,7 +548,7 @@ export default function Tables() {
       <Card title="Chuyển / Ghép Bàn" subtitle="S-06">
         <form onSubmit={executeTableAction} className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={tableAction.fromTableId}
             onChange={(e) => setTableAction((prev) => ({ ...prev, fromTableId: e.target.value }))}
           >
@@ -558,7 +560,7 @@ export default function Tables() {
             ))}
           </select>
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={tableAction.toTableId}
             onChange={(e) => setTableAction((prev) => ({ ...prev, toTableId: e.target.value }))}
           >
@@ -570,7 +572,7 @@ export default function Tables() {
             ))}
           </select>
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={fieldClass}
             value={tableAction.mode}
             onChange={(e) => setTableAction((prev) => ({ ...prev, mode: e.target.value as TableActionMode }))}
           >
@@ -587,7 +589,7 @@ export default function Tables() {
         <form onSubmit={createWalkInOrder} className="space-y-3">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <select
-              className="rounded border px-3 py-2 text-sm"
+              className={fieldClass}
               value={orderTableId}
               onChange={(e) => setOrderTableId(e.target.value)}
             >
@@ -600,29 +602,29 @@ export default function Tables() {
                 </option>
                 ))}
             </select>
-            <div className="rounded border px-3 py-2 text-sm text-gray-600">
-              Tổng tạm tính: <span className="font-semibold text-amber-700">{cartTotal.toLocaleString()}đ</span>
+            <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
+              Tổng tạm tính: <span className="font-semibold text-sky-700">{cartTotal.toLocaleString()}đ</span>
             </div>
             <Button type="submit" loading={creatingWalkInOrder}>
               Tạo đơn cho khách
             </Button>
           </div>
 
-          <div className="max-h-72 space-y-2 overflow-y-auto rounded border p-2">
+          <div className="max-h-72 space-y-2 overflow-y-auto rounded-xl border border-sky-100 p-2">
             {menuItems
               .filter((item) => item.available)
               .map((item) => (
-                <div key={item.id} className="flex items-center justify-between text-sm">
+                <div key={item.id} className="flex items-center justify-between rounded-lg bg-white/85 px-2 py-1.5 text-sm dark:bg-slate-900/60">
                   <div>
                     <p className="font-medium">{item.name}</p>
-                    <p className="text-xs text-gray-500">{item.price.toLocaleString()}đ</p>
+                    <p className="text-xs text-slate-500">{item.price.toLocaleString()}đ</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button type="button" className="rounded border px-2" onClick={() => decreaseItem(item.id)}>
+                    <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => decreaseItem(item.id)}>
                       -
                     </button>
                     <span>{orderCart[item.id] || 0}</span>
-                    <button type="button" className="rounded border px-2" onClick={() => increaseItem(item.id)}>
+                    <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => increaseItem(item.id)}>
                       +
                     </button>
                   </div>
@@ -644,7 +646,7 @@ export default function Tables() {
             />
             Chọn tất cả
           </label>
-          <span className="text-gray-500">Đã chọn: {selectedQrTableIds.length} bàn</span>
+          <span className="text-slate-500">Đã chọn: {selectedQrTableIds.length} bàn</span>
           <Button size="sm" variant="secondary" onClick={printSelectedQrs} loading={printingBatch}>
             In QR đã chọn
           </Button>
@@ -656,14 +658,14 @@ export default function Tables() {
           <Card key={table.id} className={`${stateMeta(tableGridState(table)).borderClass}`}>
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-lg font-bold text-gray-900 dark:text-white">Bàn {table.number}</p>
-                <p className="text-sm text-gray-500">
+                <p className="text-lg font-bold text-slate-900 dark:text-white">Bàn {table.number}</p>
+                <p className="text-sm text-slate-500">
                   {table.area || 'Chưa phân khu'} · {table.capacity} chỗ
                 </p>
-                {table.branchId && <p className="text-xs text-gray-400">Chi nhánh: {table.branchId}</p>}
+                {table.branchId && <p className="text-xs text-slate-400">Chi nhánh: {table.branchId}</p>}
               </div>
               <div className="flex flex-col items-end gap-2">
-                <label className="inline-flex items-center gap-2 text-xs text-gray-500">
+                <label className="inline-flex items-center gap-2 text-xs text-slate-500">
                   <input
                     type="checkbox"
                     checked={selectedQrTableIds.includes(table.id)}
@@ -672,7 +674,7 @@ export default function Tables() {
                   QR
                 </label>
                 <select
-                  className="rounded border px-2 py-1 text-xs"
+                  className="min-h-9 rounded-lg border border-sky-200 bg-white/90 px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-800"
                   value={table.status}
                   onChange={(e) => updateStatus(table.id, e.target.value as TableStatus)}
                 >
@@ -688,12 +690,12 @@ export default function Tables() {
               <span className={`rounded-full px-2 py-1 text-xs font-medium ${stateMeta(tableGridState(table)).className}`}>
                 {stateMeta(tableGridState(table)).label}
               </span>
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-slate-500">
                 {(activeOrdersByTable.get(table.id) || []).length} đơn đang xử lý
               </span>
             </div>
             {(activeOrdersByTable.get(table.id) || []).slice(0, 2).map((order) => (
-              <div key={order.id} className="mt-2 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-xs text-gray-600">
+              <div key={order.id} className="mt-2 rounded-lg border border-sky-100 bg-white/90 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/60">
                 {order.id} · {trangThaiDonHang(order.status)} · {order.totalAmount.toLocaleString()}đ
               </div>
             ))}
