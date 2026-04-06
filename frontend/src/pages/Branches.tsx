@@ -33,6 +33,8 @@ const defaultForm = {
   managerId: '',
   isActive: true,
 }
+const fieldClass =
+  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
 
 export default function Branches() {
   const [branches, setBranches] = useState<BranchItem[]>([])
@@ -148,8 +150,8 @@ export default function Branches() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Quản lý chi nhánh (M-24/M-25)</h1>
+    <div className="space-y-5 sm:space-y-6">
+      <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Quản lý chi nhánh (M-24/M-25)</h1>
 
       <Card title="M-24 Thêm / sửa chi nhánh">
         <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -158,7 +160,7 @@ export default function Branches() {
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
           />
-          <label className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+          <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm">
             <input
               type="checkbox"
               checked={includeInactive}
@@ -193,7 +195,7 @@ export default function Branches() {
           <label className="text-sm">
             Quản lý chi nhánh
             <select
-              className="mt-1 block w-full rounded-lg border px-3 py-2"
+              className={`${fieldClass} mt-1 block`}
               value={form.managerId}
               onChange={(e) => setForm((prev) => ({ ...prev, managerId: e.target.value }))}
             >
@@ -205,7 +207,7 @@ export default function Branches() {
               ))}
             </select>
           </label>
-          <label className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+          <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm">
             <input
               type="checkbox"
               checked={form.isActive}

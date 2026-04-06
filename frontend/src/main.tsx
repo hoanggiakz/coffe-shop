@@ -43,9 +43,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           className: 'shadow-lg',
           style: {
             borderRadius: '14px',
-            border: '1px solid #d6d3d1',
-            background: '#fffaf0',
-            color: '#292524',
+            border: '1px solid #dbeafe',
+            background: 'rgba(255,255,255,0.94)',
+            color: '#0f172a',
+            backdropFilter: 'blur(8px)',
           },
         }}
       />

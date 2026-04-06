@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { StatsCardsSkeleton, TableSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
-import { trangThaiDonHang } from '@/utils/display'
+import { maDonHangNgan, trangThaiDonHang } from '@/utils/display'
 import {
   BellAlertIcon,
   CheckBadgeIcon,
@@ -193,7 +193,7 @@ export default function Dashboard() {
                 id: `order-poll:${order.id}`,
                 type: 'ORDER_NEW',
                 title: `Đơn mới từ ${orderTableLabel(order)}`,
-                message: `Đơn ${order.id} - ${formatMoney(Number(order.totalAmount || 0))}`,
+                message: `Đơn ${maDonHangNgan(order.id)} - ${formatMoney(Number(order.totalAmount || 0))}`,
                 tableId: order.tableId,
                 orderId: order.id,
                 createdAt: order.createdAt || new Date().toISOString(),
@@ -305,11 +305,11 @@ export default function Dashboard() {
   ]
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{tv('Tổng quan', 'Dashboard')}</h1>
+        <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">{tv('Tổng quan', 'Dashboard')}</h1>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-200">
+          <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-800 dark:bg-sky-500/15 dark:text-sky-200">
             {notifications.length} {tv('thông báo mới', 'new notifications')}
           </span>
           <span
@@ -326,12 +326,12 @@ export default function Dashboard() {
       {!loading && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.name} className="flex items-center gap-4">
-            <div className={`rounded-lg bg-gray-100 p-3 dark:bg-gray-700 ${stat.color}`}>
+            <div className={`rounded-xl bg-sky-50 p-3 dark:bg-slate-700 ${stat.color}`}>
               <stat.icon className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">{stat.name}</p>
-              <p className="text-xl font-bold text-gray-900 dark:text-white">{stat.value}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-300">{stat.name}</p>
+              <p className="text-xl font-bold text-slate-900 dark:text-white">{stat.value}</p>
             </div>
           </Card>
         ))}
@@ -343,13 +343,15 @@ export default function Dashboard() {
           {!loading && recentOrders.length === 0 && <p className="text-sm text-gray-500">{tv('Chưa có đơn hàng.', 'No orders yet.')}</p>}
           <div className="space-y-3">
             {recentOrders.map((order) => (
-              <div key={order.id} className="flex items-center justify-between rounded-lg bg-gray-50 p-3 dark:bg-gray-700/50">
+              <div key={order.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-gray-700/50">
                 <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">{order.id}</p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white" title={order.id}>
+                    {maDonHangNgan(order.id)}
+                  </p>
+                  <p className="text-xs text-slate-500">
                     {orderTableLabel(order)} · {formatMoney(Number(order.totalAmount || 0))}
                   </p>
-                  <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                  <p className="mt-1 text-xs text-slate-600 dark:text-gray-300">
                     {recentOrderItemsLabel(order)}
                   </p>
                 </div>
@@ -364,32 +366,32 @@ export default function Dashboard() {
         <Card title={tv('Thông báo realtime', 'Realtime notifications')} subtitle={tv('Đơn mới, gọi phục vụ, tin nhắn khách', 'New orders, staff calls, customer chat')}>
           <div className="space-y-3">
             {notifications.length === 0 && (
-              <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500 dark:bg-gray-700/50">
+              <div className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-gray-700/50">
                 {tv('Chưa có thông báo mới.', 'No new notifications.')}
               </div>
             )}
             {notifications.map((item) => (
-              <div key={item.id} className="rounded-lg border border-gray-200 p-3 text-sm">
+              <div key={item.id} className="rounded-xl border border-sky-100 p-3 text-sm dark:border-slate-700">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold text-gray-900">{notificationTitle(item)}</p>
-                  <span className="text-xs text-gray-500">{item.source}</span>
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">{notificationTitle(item)}</p>
+                  <span className="text-xs text-slate-500">{item.source}</span>
                 </div>
-                <p className="mt-1 text-gray-700">{item.message}</p>
-                <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
+                <p className="mt-1 text-slate-700 dark:text-slate-200">{item.message}</p>
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-1 text-xs text-slate-500">
                   <span>{item.tableId ? tableLabelById(item.tableId) : '---'}</span>
                   <span>{formatDateTime(item.createdAt)}</span>
                 </div>
               </div>
             ))}
           </div>
-          <div className="mt-4 border-t border-gray-100 pt-3">
+          <div className="mt-4 border-t border-sky-100 pt-3">
             <button
               type="button"
               onClick={() => {
                 setNotifications([])
                 seenNotificationsRef.current.clear()
               }}
-              className="inline-flex items-center gap-1 rounded border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+              className="inline-flex items-center gap-1 rounded-xl border border-sky-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-sky-50"
             >
               <BellAlertIcon className="h-4 w-4" />
               {tv('Xóa danh sách thông báo', 'Clear notifications')}

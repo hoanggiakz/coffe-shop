@@ -46,7 +46,7 @@ export class ProxyController {
     };
   }
 
-  @All('api/*')
+  @All('api/*path')
   handleProxy(@Req() req: Request, @Res() res: Response) {
     const route = SERVICE_ROUTES.find((r) => req.originalUrl.startsWith(r.path));
     if (!route) {

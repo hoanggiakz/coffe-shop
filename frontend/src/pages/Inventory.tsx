@@ -83,6 +83,8 @@ const defaultReceiptRow = {
   unitPrice: '',
   note: '',
 }
+const selectClass =
+  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
 
 function toDateInputValue(date: Date) {
   return date.toISOString().slice(0, 10)
@@ -435,10 +437,10 @@ export default function Inventory() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{tv('Quản lý kho (M-07..M-11)', 'Inventory management (M-07..M-11)')}</h1>
-        <div className="flex items-center gap-2">
+        <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">{tv('Quản lý kho (M-07..M-11)', 'Inventory management (M-07..M-11)')}</h1>
+        <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto">
           <span
             className={`rounded-full px-3 py-1 text-xs font-medium ${
               socketConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
@@ -450,8 +452,9 @@ export default function Inventory() {
             placeholder="Mã chi nhánh"
             value={branchId}
             onChange={(e) => setBranchId(e.target.value)}
+            className="w-full sm:w-40"
           />
-          <Button onClick={syncFromMenu} loading={syncing}>
+          <Button className="w-full sm:w-auto" onClick={syncFromMenu} loading={syncing}>
             Đồng bộ thực đơn sang kho
           </Button>
         </div>
@@ -524,7 +527,48 @@ export default function Inventory() {
           </label>
         </div>
 
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4 space-y-3 md:hidden">
+          {ingredients.map((ingredient) => {
+            const isLow = Number(ingredient.stock) <= Number(ingredient.minStock)
+            return (
+              <div key={ingredient.id} className="rounded-xl border border-sky-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-semibold text-slate-900 dark:text-slate-100">{ingredient.name}</p>
+                    <p className="text-xs text-slate-500">{ingredient.branchId || 'Không gắn chi nhánh'}</p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2 py-1 text-xs font-medium ${
+                      !ingredient.isActive
+                        ? 'bg-gray-100 text-gray-700'
+                        : isLow
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-green-100 text-green-700'
+                    }`}
+                  >
+                    {!ingredient.isActive ? trangThaiHoatDong(false) : isLow ? 'Sắp hết hàng' : 'Ổn định'}
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300">
+                  <p>Tồn: <span className="font-semibold">{ingredient.stock}</span></p>
+                  <p>Đơn vị: <span className="font-semibold">{ingredient.unit}</span></p>
+                  <p>Min: <span className="font-semibold">{ingredient.minStock}</span></p>
+                  <p>Giá nhập: <span className="font-semibold">{formatMoney(ingredient.importPrice)}</span></p>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="secondary" className="flex-1" onClick={() => editIngredient(ingredient)}>
+                    Sửa
+                  </Button>
+                  <Button size="sm" variant="danger" className="flex-1" onClick={() => deleteIngredient(ingredient)}>
+                    Xóa
+                  </Button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="mt-4 hidden overflow-x-auto md:block">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b">
@@ -591,7 +635,7 @@ export default function Inventory() {
             {receiptItems.map((item, index) => (
               <div key={`receipt-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-5">
                 <select
-                  className="rounded border px-3 py-2 text-sm"
+                  className={selectClass}
                   value={item.ingredientId}
                   onChange={(e) =>
                     setReceiptItems((prev) =>
@@ -664,7 +708,7 @@ export default function Inventory() {
         <Card title="M-09 Kiểm kê / điều chỉnh tồn kho">
           <form onSubmit={submitAdjustStock} className="grid grid-cols-1 gap-3">
             <select
-              className="rounded border px-3 py-2 text-sm"
+              className={selectClass}
               value={adjustForm.ingredientId}
               onChange={(e) => setAdjustForm((prev) => ({ ...prev, ingredientId: e.target.value }))}
             >
@@ -699,7 +743,7 @@ export default function Inventory() {
         <Card title="Nhập / xuất nhanh">
           <form onSubmit={submitQuickMovement} className="grid grid-cols-1 gap-3">
             <select
-              className="rounded border px-3 py-2 text-sm"
+              className={selectClass}
               value={quickMovementForm.ingredientId}
               onChange={(e) => setQuickMovementForm((prev) => ({ ...prev, ingredientId: e.target.value }))}
             >
@@ -713,7 +757,7 @@ export default function Inventory() {
                 ))}
             </select>
             <select
-              className="rounded border px-3 py-2 text-sm"
+              className={selectClass}
               value={quickMovementForm.type}
               onChange={(e) => setQuickMovementForm((prev) => ({ ...prev, type: e.target.value as 'IMPORT' | 'EXPORT' }))}
             >
@@ -758,7 +802,7 @@ export default function Inventory() {
       <Card title="M-11 Lịch sử nhập / xuất">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={selectClass}
             value={historyIngredientId}
             onChange={(e) => setHistoryIngredientId(e.target.value)}
           >
@@ -770,7 +814,7 @@ export default function Inventory() {
             ))}
           </select>
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={selectClass}
             value={historyType}
             onChange={(e) => setHistoryType(e.target.value as typeof historyType)}
           >
@@ -780,7 +824,7 @@ export default function Inventory() {
             <option value="ADJUST">Điều chỉnh</option>
           </select>
           <select
-            className="rounded border px-3 py-2 text-sm"
+            className={selectClass}
             value={historySource}
             onChange={(e) => setHistorySource(e.target.value as typeof historySource)}
           >
@@ -799,7 +843,30 @@ export default function Inventory() {
           </Button>
         </div>
 
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4 space-y-3 md:hidden">
+          {movements.map((movement) => (
+            <div key={movement.id} className="rounded-xl border border-sky-100 bg-white/90 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/60">
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-semibold text-slate-900 dark:text-slate-100">{movement.ingredient?.name || movement.ingredientId}</p>
+                <span className="rounded-full bg-sky-100 px-2 py-0.5 font-medium text-sky-700">{movement.type}</span>
+              </div>
+              <p className="mt-1 text-slate-500">{new Date(movement.createdAt).toLocaleString()}</p>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-slate-600 dark:text-slate-300">
+                <p>Nguồn: <span className="font-medium">{movement.source}</span></p>
+                <p>Số lượng: <span className="font-medium">{movement.quantity}</span></p>
+                <p>Tồn: <span className="font-medium">{movement.beforeStock} → {movement.afterStock}</span></p>
+                <p>Chi nhánh: <span className="font-medium">{movement.branchId || movement.ingredient?.branchId || '-'}</span></p>
+              </div>
+              <p className="mt-2 text-slate-600 dark:text-slate-300">
+                Giá trị: <span className="font-medium">{movement.totalPrice > 0 ? formatMoney(movement.totalPrice) : '-'}</span>
+              </p>
+              <p className="text-slate-500">Lý do: {movement.reason || movement.note || '-'}</p>
+              <p className="text-slate-500">Ref: {movement.referenceCode || '-'}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 hidden overflow-x-auto md:block">
           <table className="min-w-full text-xs">
             <thead>
               <tr className="border-b">

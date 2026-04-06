@@ -4,7 +4,7 @@ import toast from 'react-hot-toast'
 import api from '@/utils/api'
 import { getSocket, disconnectSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
-import { phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
+import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 
 type PaymentMode = 'POSTPAY' | 'PREPAY'
 type PaymentProvider = 'VNPAY' | 'MOMO' | 'ZALOPAY' | 'VIETQR'
@@ -137,6 +137,11 @@ function toNumber(value: string | null): number | null {
   const parsed = Number(value)
   return Number.isNaN(parsed) ? null : parsed
 }
+
+const fieldClass =
+  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60'
+
+const panelClass = 'rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm'
 
 export default function CustomerMenu() {
   const [searchParams] = useSearchParams()
@@ -917,7 +922,7 @@ export default function CustomerMenu() {
             toast.success('Da tao don. Vui long chuyen khoan theo ma VietQR ben duoi')
           }
         } else {
-          toast.success(`Đặt món thành công. Mã đơn: ${newOrderId}`)
+          toast.success(`Đặt món thành công. Mã đơn: ${maDonHangNgan(newOrderId)}`)
         }
 
         fetchOrderStatus(newOrderId)
@@ -1001,14 +1006,14 @@ export default function CustomerMenu() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 pb-28 pt-4 sm:px-6 sm:pt-6">
+    <div className="mx-auto max-w-7xl px-3 pb-28 pt-4 sm:px-6 sm:pt-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{resolvingTable ? 'Đang xác định bàn...' : `Thực đơn ${tableName}`}</h1>
-          <p className="mt-1 text-sm text-gray-500">Đặt món qua QR, theo dõi trạng thái và gọi nhân viên.</p>
+          <h1 className="text-2xl font-bold text-slate-900">{resolvingTable ? 'Đang xác định bàn...' : `Thực đơn ${tableName}`}</h1>
+          <p className="mt-1 text-sm text-slate-500">Đặt món qua QR, theo dõi trạng thái và gọi nhân viên.</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
-          <span className="rounded-full bg-amber-50 px-3 py-1 font-medium text-amber-800">
+          <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-800">
             {cartItemCount} món trong giỏ
           </span>
           <span className="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
@@ -1022,17 +1027,17 @@ export default function CustomerMenu() {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm sm:grid-cols-3">
         <input
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
-          className="rounded border px-3 py-2 text-sm"
+          className={fieldClass}
           placeholder="Tìm món theo tên hoặc mô tả"
         />
         <select
           value={selectedCategory}
           onChange={(e) => setSelectedCategory(e.target.value)}
-          className="rounded border px-3 py-2 text-sm"
+          className={fieldClass}
         >
           {categories.map((category) => (
             <option key={category} value={category}>
@@ -1040,7 +1045,7 @@ export default function CustomerMenu() {
             </option>
           ))}
         </select>
-        <div className="flex items-center justify-end text-sm text-gray-500">{filteredItems.length} món hiển thị</div>
+        <div className="flex items-center justify-end text-sm text-slate-500">{filteredItems.length} món hiển thị</div>
       </div>
       <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
         {categories.map((category) => (
@@ -1050,8 +1055,8 @@ export default function CustomerMenu() {
             onClick={() => setSelectedCategory(category)}
             className={`whitespace-nowrap rounded-full px-3 py-2 text-sm ${
               selectedCategory === category
-                ? 'bg-amber-600 text-white'
-                : 'border border-gray-200 bg-white text-gray-700'
+                ? 'bg-sky-600 text-white'
+                : 'border border-sky-100 bg-white text-slate-700'
             }`}
           >
             {category === 'ALL' ? 'Tất cả' : category}
@@ -1067,32 +1072,32 @@ export default function CustomerMenu() {
               const cartItem = cart[item.id] || ensureCartItem(item.id)
               const selectedCount = cart[item.id]?.quantity || 0
               return (
-              <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-4">
+              <div key={item.id} className="rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
                     <img
                       src={item.image || `https://placehold.co/120x120?text=${encodeURIComponent(item.name)}`}
                       alt={item.name}
-                      className="h-16 w-16 rounded object-cover"
+                      className="h-16 w-16 rounded-xl object-cover"
                     />
                     <div>
-                    <p className="font-semibold text-gray-900">{item.name}</p>
-                    <p className="text-sm text-gray-500">{item.description || '---'}</p>
+                    <p className="font-semibold text-slate-900">{item.name}</p>
+                    <p className="text-sm text-slate-500">{item.description || '---'}</p>
                   </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold text-amber-700">{item.price.toLocaleString()}đ</p>
-                    <p className="text-xs text-gray-500">{item.category}</p>
+                    <p className="font-bold text-sky-700">{item.price.toLocaleString()}đ</p>
+                    <p className="text-xs text-slate-500">{item.category}</p>
                   </div>
                 </div>
                 {(item.customizations || []).map((group) => (
                   <div key={`${item.id}-${group.id}`} className="mt-3">
-                    <p className="mb-1 text-xs font-semibold uppercase text-gray-500">{group.label}</p>
+                    <p className="mb-1 text-xs font-semibold uppercase text-slate-500">{group.label}</p>
                     {group.type === 'single' && (
                       <select
                         value={String(cartItem.selections[group.id] || '')}
                         onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
-                        className="w-full rounded border px-3 py-2 text-sm"
+                        className={fieldClass}
                       >
                         {(group.options || []).map((option) => (
                           <option key={option.value} value={option.value}>
@@ -1130,7 +1135,7 @@ export default function CustomerMenu() {
                       <input
                         value={String(cartItem.selections[group.id] || '')}
                         onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
-                        className="w-full rounded border px-3 py-2 text-sm"
+                        className={fieldClass}
                         placeholder={group.placeholder || 'Nhập yêu cầu'}
                       />
                     )}
@@ -1139,7 +1144,7 @@ export default function CustomerMenu() {
                 <textarea
                   value={cartItem.note}
                   onChange={(e) => updateNote(item.id, e.target.value)}
-                  className="mt-3 w-full rounded border px-3 py-2 text-sm"
+                  className={`${fieldClass} mt-3`}
                   rows={2}
                   placeholder="Ghi chú cho món (tùy chọn)"
                 />
@@ -1147,7 +1152,7 @@ export default function CustomerMenu() {
                   <button
                     type="button"
                     onClick={() => decrease(item.id)}
-                    className="rounded border px-3 py-1 text-sm"
+                    className="inline-flex h-10 min-w-10 items-center justify-center rounded-xl border border-sky-200 px-3 py-1 text-sm"
                   >
                     -
                   </button>
@@ -1155,7 +1160,7 @@ export default function CustomerMenu() {
                   <button
                     type="button"
                     onClick={() => increase(item.id)}
-                    className="rounded border px-3 py-1 text-sm"
+                    className="inline-flex h-10 min-w-10 items-center justify-center rounded-xl border border-sky-200 px-3 py-1 text-sm"
                     disabled={!item.available}
                   >
                     +
@@ -1166,14 +1171,14 @@ export default function CustomerMenu() {
         </div>
 
         <div ref={cartPanelRef} className="space-y-4 lg:sticky lg:top-24 lg:self-start">
-          <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className={panelClass}>
             <div className="flex items-center justify-between">
-              <p className="font-semibold text-gray-900">Tai khoan thanh vien</p>
+              <p className="font-semibold text-slate-900">Tai khoan thanh vien</p>
               {!customerSession ? (
                 <button
                   type="button"
                   onClick={() => setCustomerAuthOpen(true)}
-                  className="rounded border px-3 py-1 text-xs"
+                  className="rounded-xl border border-sky-200 px-3 py-1 text-xs"
                 >
                   Đăng nhập / Đăng ký
                 </button>
@@ -1181,7 +1186,7 @@ export default function CustomerMenu() {
                 <button
                   type="button"
                   onClick={clearCustomerSession}
-                  className="rounded border px-3 py-1 text-xs text-red-600"
+                  className="rounded-xl border border-red-200 px-3 py-1 text-xs text-red-600"
                 >
                   Dang xuat
                 </button>
@@ -1230,7 +1235,7 @@ export default function CustomerMenu() {
                     <div className="mt-1 space-y-1">
                       {customerOrderHistory.slice(0, 4).map((historyOrder) => (
                         <div key={historyOrder.id} className="flex items-center justify-between">
-                          <span>{historyOrder.id.slice(-8)}</span>
+                          <span>{maDonHangNgan(historyOrder.id)}</span>
                           <span>{historyOrder.totalAmount.toLocaleString()}đ</span>
                           <span className="font-semibold">{historyOrder.status}</span>
                         </div>
@@ -1242,8 +1247,8 @@ export default function CustomerMenu() {
             )}
           </div>
 
-          <form onSubmit={submitOrder} className="rounded-xl border border-gray-200 bg-white p-4">
-            <p className="font-semibold text-gray-900">Giỏ hàng</p>
+          <form onSubmit={submitOrder} className={panelClass}>
+            <p className="font-semibold text-slate-900">Giỏ hàng</p>
             <div className="mt-3 space-y-2 text-sm">
               {Object.entries(cart).filter(([, entry]) => entry.quantity > 0).length === 0 && (
                 <p className="text-gray-500">Chưa có món</p>
@@ -1267,8 +1272,8 @@ export default function CustomerMenu() {
               })}
             </div>
 
-            <div className="mt-3 rounded border border-gray-100 p-3">
-              <p className="text-xs font-semibold uppercase text-gray-500">Hình thức thanh toán</p>
+            <div className="mt-3 rounded-xl border border-sky-100 p-3">
+              <p className="text-xs font-semibold uppercase text-slate-500">Hình thức thanh toán</p>
               {editingCurrentOrder && (
                 <p className="mt-2 text-xs text-amber-700">
                   Đơn hiện tại đã được tạo. Bạn chỉ đang cập nhật lại món trong đơn chờ xác nhận.
@@ -1279,7 +1284,7 @@ export default function CustomerMenu() {
                   type="button"
                   onClick={() => setPaymentMode('POSTPAY')}
                   disabled={editingCurrentOrder}
-                  className={`rounded px-3 py-1 text-sm ${paymentMode === 'POSTPAY' ? 'bg-gray-900 text-white' : 'border'}`}
+                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'POSTPAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
                 >
                   Trả sau
                 </button>
@@ -1287,7 +1292,7 @@ export default function CustomerMenu() {
                   type="button"
                   onClick={() => setPaymentMode('PREPAY')}
                   disabled={editingCurrentOrder}
-                  className={`rounded px-3 py-1 text-sm ${paymentMode === 'PREPAY' ? 'bg-gray-900 text-white' : 'border'}`}
+                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'PREPAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
                 >
                   Trả trước
                 </button>
@@ -1297,7 +1302,7 @@ export default function CustomerMenu() {
                   value={paymentProvider}
                   onChange={(e) => setPaymentProvider(e.target.value as PaymentProvider)}
                   disabled={editingCurrentOrder}
-                  className="mt-2 w-full rounded border px-3 py-2 text-sm"
+                  className={`${fieldClass} mt-2`}
                 >
                   <option value="VNPAY">VNPAY</option>
                   <option value="MOMO">MOMO</option>
@@ -1307,20 +1312,20 @@ export default function CustomerMenu() {
               )}
             </div>
 
-            <div className="mt-3 rounded border border-gray-100 p-3">
-              <p className="text-xs font-semibold uppercase text-gray-500">Ma khuyen mai</p>
+            <div className="mt-3 rounded-xl border border-sky-100 p-3">
+              <p className="text-xs font-semibold uppercase text-slate-500">Ma khuyen mai</p>
               <div className="mt-2 flex gap-2">
                 <input
                   value={promoCode}
                   onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
-                  className="flex-1 rounded border px-3 py-2 text-sm"
+                  className={`${fieldClass} flex-1`}
                   placeholder="Nhap ma giam gia"
                 />
                 <button
                   type="button"
                   onClick={applyPromotion}
                   disabled={applyingPromo}
-                  className="rounded border px-3 py-2 text-sm disabled:opacity-60"
+                  className="rounded-xl border border-sky-200 px-3 py-2 text-sm disabled:opacity-60"
                 >
                   {applyingPromo ? 'Đang áp dụng...' : 'Áp dụng'}
                 </button>
@@ -1376,16 +1381,16 @@ export default function CustomerMenu() {
                       : null,
                   )
                 }}
-                className="mt-2 w-full rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700"
+                className="mt-2 w-full rounded-xl border border-sky-200 px-4 py-2 text-sm font-medium text-slate-700"
               >
                 Hủy sửa đơn
               </button>
             )}
           </form>
 
-          <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className={panelClass}>
             <div className="flex items-center justify-between">
-              <p className="font-semibold text-gray-900">Trạng thái đơn</p>
+              <p className="font-semibold text-slate-900">Trạng thái đơn</p>
               {currentOrderId && (
                 <button
                   type="button"
@@ -1404,7 +1409,7 @@ export default function CustomerMenu() {
             {currentOrder && (
               <div className="mt-2 text-sm">
                 <p>
-                  Mã đơn: <span className="font-semibold">{currentOrder.id}</span>
+                  Mã đơn: <span className="font-semibold" title={currentOrder.id}>{maDonHangNgan(currentOrder.id)}</span>
                 </p>
                 <p>
                   Trạng thái: <span className="font-semibold">{trangThaiDonHang(currentOrder.status)}</span>
@@ -1502,12 +1507,12 @@ export default function CustomerMenu() {
             )}
           </div>
 
-          <div className="rounded-xl border border-gray-200 bg-white p-4">
-            <p className="font-semibold text-gray-900">Gọi phục vụ</p>
+          <div className={panelClass}>
+            <p className="font-semibold text-slate-900">Gọi phục vụ</p>
             <select
               value={staffReason}
               onChange={(e) => setStaffReason(e.target.value)}
-              className="mt-2 w-full rounded border px-3 py-2 text-sm"
+              className={`${fieldClass} mt-2`}
             >
               <option>Cần hỗ trợ</option>
               <option>Cần tính tiền</option>
@@ -1518,7 +1523,7 @@ export default function CustomerMenu() {
               <input
                 value={customReason}
                 onChange={(e) => setCustomReason(e.target.value)}
-                className="mt-2 w-full rounded border px-3 py-2 text-sm"
+                className={`${fieldClass} mt-2`}
                 placeholder="Nhập lý do cụ thể"
               />
             )}
@@ -1536,14 +1541,14 @@ export default function CustomerMenu() {
       </div>
 
       {customerAuthOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-5">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:p-4">
+          <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
             <div className="flex items-center justify-between">
-              <p className="text-lg font-bold text-gray-900">Tài khoản khách hàng</p>
+              <p className="text-lg font-bold text-slate-900">Tài khoản khách hàng</p>
               <button
                 type="button"
                 onClick={() => setCustomerAuthOpen(false)}
-                className="rounded border px-2 py-1 text-xs"
+                className="rounded-xl border border-sky-200 px-2 py-1 text-xs"
               >
                 Dong
               </button>
@@ -1553,14 +1558,14 @@ export default function CustomerMenu() {
               <button
                 type="button"
                 onClick={() => setCustomerAuthTab('LOGIN')}
-                className={`rounded px-3 py-1 text-sm ${customerAuthTab === 'LOGIN' ? 'bg-gray-900 text-white' : 'border'}`}
+                className={`rounded-xl px-3 py-2 text-sm ${customerAuthTab === 'LOGIN' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
               >
                 Đăng nhập
               </button>
               <button
                 type="button"
                 onClick={() => setCustomerAuthTab('REGISTER')}
-                className={`rounded px-3 py-1 text-sm ${customerAuthTab === 'REGISTER' ? 'bg-gray-900 text-white' : 'border'}`}
+                className={`rounded-xl px-3 py-2 text-sm ${customerAuthTab === 'REGISTER' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
               >
                 Đăng ký
               </button>
@@ -1570,14 +1575,14 @@ export default function CustomerMenu() {
               <button
                 type="button"
                 onClick={() => setCustomerAuthMode('EMAIL')}
-                className={`rounded px-3 py-1 text-xs ${customerAuthMode === 'EMAIL' ? 'bg-amber-100 text-amber-700' : 'border'}`}
+                className={`rounded-xl px-3 py-1.5 text-xs ${customerAuthMode === 'EMAIL' ? 'bg-sky-100 text-sky-700' : 'border border-sky-200'}`}
               >
                 Email
               </button>
               <button
                 type="button"
                 onClick={() => setCustomerAuthMode('OTP')}
-                className={`rounded px-3 py-1 text-xs ${customerAuthMode === 'OTP' ? 'bg-amber-100 text-amber-700' : 'border'}`}
+                className={`rounded-xl px-3 py-1.5 text-xs ${customerAuthMode === 'OTP' ? 'bg-sky-100 text-sky-700' : 'border border-sky-200'}`}
               >
                 So dien thoai OTP
               </button>
@@ -1588,7 +1593,7 @@ export default function CustomerMenu() {
                 <input
                   value={authName}
                   onChange={(e) => setAuthName(e.target.value)}
-                  className="w-full rounded border px-3 py-2 text-sm"
+                  className={fieldClass}
                   placeholder="Ho ten"
                   required
                 />
@@ -1599,7 +1604,7 @@ export default function CustomerMenu() {
                   <input
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
-                    className="w-full rounded border px-3 py-2 text-sm"
+                    className={fieldClass}
                     placeholder="Email"
                     type="email"
                     required
@@ -1608,7 +1613,7 @@ export default function CustomerMenu() {
                     <input
                       value={authPassword}
                       onChange={(e) => setAuthPassword(e.target.value)}
-                      className="w-full rounded border px-3 py-2 text-sm"
+                      className={fieldClass}
                       placeholder="Mat khau"
                       type="password"
                       required
@@ -1618,7 +1623,7 @@ export default function CustomerMenu() {
                     <input
                       value={authPhone}
                       onChange={(e) => setAuthPhone(e.target.value)}
-                      className="w-full rounded border px-3 py-2 text-sm"
+                      className={fieldClass}
                       placeholder="So dien thoai (tuy chon)"
                     />
                   )}
@@ -1629,7 +1634,7 @@ export default function CustomerMenu() {
                     <input
                       value={authPhone}
                       onChange={(e) => setAuthPhone(e.target.value)}
-                      className="flex-1 rounded border px-3 py-2 text-sm"
+                      className={`${fieldClass} flex-1`}
                       placeholder="So dien thoai"
                       required
                     />
@@ -1637,7 +1642,7 @@ export default function CustomerMenu() {
                       type="button"
                       onClick={requestCustomerOtp}
                       disabled={requestingOtp}
-                      className="rounded border px-3 py-2 text-xs disabled:opacity-60"
+                      className="rounded-xl border border-sky-200 px-3 py-2 text-xs disabled:opacity-60"
                     >
                       {requestingOtp ? 'Đang gửi OTP' : 'Lấy OTP'}
                     </button>
@@ -1645,7 +1650,7 @@ export default function CustomerMenu() {
                   <input
                     value={authOtp}
                     onChange={(e) => setAuthOtp(e.target.value)}
-                    className="w-full rounded border px-3 py-2 text-sm"
+                    className={fieldClass}
                     placeholder="Ma OTP"
                     required
                   />
@@ -1653,7 +1658,7 @@ export default function CustomerMenu() {
                     <input
                       value={authEmail}
                       onChange={(e) => setAuthEmail(e.target.value)}
-                      className="w-full rounded border px-3 py-2 text-sm"
+                      className={fieldClass}
                       placeholder="Email (tuy chon)"
                       type="email"
                     />
@@ -1664,7 +1669,7 @@ export default function CustomerMenu() {
               <button
                 type="submit"
                 disabled={authSubmitting}
-                className="mt-2 w-full rounded bg-gray-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                className="mt-2 w-full rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
                 {authSubmitting
                   ? 'Đang xử lý...'
@@ -1678,13 +1683,13 @@ export default function CustomerMenu() {
       )}
 
       {chatOpen && (
-        <div className="fixed bottom-24 right-4 z-40 w-[calc(100vw-2rem)] max-w-sm rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
+        <div className="fixed inset-x-3 bottom-24 z-40 max-h-[72vh] overflow-y-auto rounded-2xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-x-auto sm:right-4 sm:w-[calc(100vw-2rem)] sm:max-w-sm">
           <div className="flex items-center justify-between">
-            <p className="font-semibold text-gray-900">Chat hỗ trợ - {tableName}</p>
+            <p className="font-semibold text-slate-900">Chat hỗ trợ - {tableName}</p>
             <button
               type="button"
               onClick={() => setChatOpen(false)}
-              className="rounded border px-2 py-1 text-xs text-gray-600"
+              className="rounded-xl border border-sky-200 px-2 py-1 text-xs text-slate-600"
             >
               Dong
             </button>
@@ -1695,23 +1700,23 @@ export default function CustomerMenu() {
               <input
                 value={chatCustomerName}
                 onChange={(e) => setChatCustomerName(e.target.value)}
-                className="w-full rounded border px-3 py-2 text-sm"
+                className={fieldClass}
                 placeholder="Nhap ten cua ban"
               />
               <input
                 value={chatCustomerPhone}
                 onChange={(e) => setChatCustomerPhone(e.target.value)}
-                className="w-full rounded border px-3 py-2 text-sm"
+                className={fieldClass}
                 placeholder="Nhap so dien thoai (tuy chon)"
               />
-              <button type="submit" className="w-full rounded bg-gray-900 px-3 py-2 text-sm text-white">
+              <button type="submit" className="w-full rounded-xl bg-sky-700 px-3 py-2 text-sm text-white">
                 Bat dau chat
               </button>
             </form>
           ) : (
             <>
               {chatConnecting && <p className="mt-2 text-xs text-gray-500">Đang kết nối chat...</p>}
-              <div className="mt-3 h-64 space-y-2 overflow-y-auto rounded border bg-gray-50 p-2">
+              <div className="mt-3 h-64 space-y-2 overflow-y-auto rounded-xl border border-sky-100 bg-sky-50/50 p-2">
                 {messages.length === 0 && <p className="text-sm text-gray-500">Chưa có tin nhắn.</p>}
                 {messages.map((msg, idx) => (
                   <div key={`${msg.id || 'm'}-${idx}`} className="text-sm">
@@ -1725,10 +1730,10 @@ export default function CustomerMenu() {
                   value={chatText}
                   onChange={(e) => setChatText(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && sendChat()}
-                  className="flex-1 rounded border px-3 py-2 text-sm"
+                  className={`${fieldClass} flex-1`}
                   placeholder="Nhập tin nhắn..."
                 />
-                <button type="button" onClick={sendChat} className="rounded bg-gray-900 px-3 py-2 text-sm text-white">
+                <button type="button" onClick={sendChat} className="rounded-xl bg-sky-700 px-3 py-2 text-sm text-white">
                   Gửi
                 </button>
               </div>
@@ -1740,7 +1745,7 @@ export default function CustomerMenu() {
       <button
         type="button"
         onClick={toggleChatWidget}
-        className="fixed bottom-6 right-4 z-40 rounded-full bg-gray-900 px-5 py-3 text-sm font-semibold text-white shadow-lg"
+        className="fixed bottom-6 right-4 z-40 rounded-full bg-sky-700 px-5 py-3 text-sm font-semibold text-white shadow-lg"
       >
         {chatOpen ? 'Đóng chat' : 'Chat hỗ trợ'}
       </button>

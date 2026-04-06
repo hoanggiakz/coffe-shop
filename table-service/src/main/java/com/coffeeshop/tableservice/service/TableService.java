@@ -137,15 +137,15 @@ public class TableService {
         return tableRepository.save(table);
     }
 
-    public String getQrCode(String id, String baseUrl) {
+    public String getQrCode(String id) {
         CoffeeTable table = findById(id);
-        String qr = qrCodeService.generateQrBase64(table, baseUrl);
+        String qr = qrCodeService.generateQrBase64(table);
         table.setQrCode(qr);
         tableRepository.save(table);
         return qr;
     }
 
-    public List<Map<String, String>> getQrBatch(List<String> tableIds, String baseUrl) {
+    public List<Map<String, String>> getQrBatch(List<String> tableIds) {
         List<CoffeeTable> tables;
         if (tableIds == null || tableIds.isEmpty()) {
             tables = tableRepository.findAll();
@@ -159,7 +159,7 @@ public class TableService {
 
         List<Map<String, String>> payload = new ArrayList<>();
         for (CoffeeTable table : sortedTables) {
-            String qrCode = qrCodeService.generateQrBase64(table, baseUrl);
+            String qrCode = qrCodeService.generateQrBase64(table);
             table.setQrCode(qrCode);
             tableRepository.save(table);
             payload.add(Map.of(

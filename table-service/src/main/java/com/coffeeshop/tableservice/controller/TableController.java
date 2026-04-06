@@ -68,18 +68,15 @@ public class TableController {
     }
 
     @GetMapping("/{id}/qr")
-    public ResponseEntity<Map<String, String>> getQrCode(
-            @PathVariable String id,
-            @RequestParam(required = false) String baseUrl) {
-        String qr = tableService.getQrCode(id, baseUrl);
+    public ResponseEntity<Map<String, String>> getQrCode(@PathVariable String id) {
+        String qr = tableService.getQrCode(id);
         return ResponseEntity.ok(Map.of("qrCode", qr));
     }
 
     @PostMapping("/qr/batch")
     public ResponseEntity<List<Map<String, String>>> getQrCodesBatch(@RequestBody(required = false) BatchQrRequest request) {
         List<String> tableIds = request != null ? request.getTableIds() : null;
-        String baseUrl = request != null ? request.getBaseUrl() : null;
-        return ResponseEntity.ok(tableService.getQrBatch(tableIds, baseUrl));
+        return ResponseEntity.ok(tableService.getQrBatch(tableIds));
     }
 
     @PostMapping("/{id}/call-staff")

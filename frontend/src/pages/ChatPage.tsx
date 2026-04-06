@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { ChatSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
+import { maDonHangNgan } from '@/utils/display'
 
 interface ChatItem {
   id: string
@@ -388,9 +389,9 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{tv('Chat hỗ trợ', 'Support chat')}</h1>
+    <div className="space-y-5 sm:space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">{tv('Chat hỗ trợ', 'Support chat')}</h1>
         <span
           className={`rounded-full px-3 py-1 text-xs font-medium ${
             socketConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
@@ -401,19 +402,20 @@ export default function ChatPage() {
       </div>
 
       <Card>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             value={newTableId}
             onChange={(e) => setNewTableId(e.target.value)}
             placeholder={tv('Tạo chat mới theo tableId...', 'Create chat by tableId...')}
+            className="flex-1"
           />
-          <Button onClick={createChat}>{tv('Tạo chat', 'Create chat')}</Button>
+          <Button className="w-full sm:w-auto" onClick={createChat}>{tv('Tạo chat', 'Create chat')}</Button>
         </div>
       </Card>
 
       {loading ? <ChatSkeleton /> : <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:min-h-[calc(100vh-260px)]">
-        <Card className="overflow-y-auto lg:col-span-1">
-          <h3 className="mb-3 font-semibold text-gray-900 dark:text-white">{tv('Phiên chat mở', 'Open chats')}</h3>
+        <Card className="max-h-[42vh] overflow-y-auto lg:col-span-1 lg:max-h-none">
+          <h3 className="mb-3 font-semibold text-slate-900 dark:text-white">{tv('Phiên chat mở', 'Open chats')}</h3>
           <div className="space-y-2">
             {chats.map((chat) => {
               const latest = getLatestMessage(chat)
@@ -429,16 +431,18 @@ export default function ChatPage() {
                       markChatSeen(chat.id)
                     }
                   }}
-                  className={`w-full rounded-lg border p-3 text-left ${
-                    activeChatId === chat.id ? 'border-amber-500 bg-amber-50' : 'border-gray-200'
+                  className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                    activeChatId === chat.id
+                      ? 'border-sky-300 bg-sky-50'
+                      : 'border-sky-100 bg-white/90 hover:bg-sky-50/70'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium text-gray-900">{tableLabel(chat.tableId)}</p>
+                    <p className="font-medium text-slate-900">{tableLabel(chat.tableId)}</p>
                     {unread && <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-semibold text-white">{tv('Mới', 'New')}</span>}
                   </div>
-                  <p className="mt-1 text-xs text-gray-500">{chat.status}</p>
-                  <p className="mt-1 line-clamp-1 text-xs text-gray-600">
+                  <p className="mt-1 text-xs text-slate-500">{chat.status}</p>
+                  <p className="mt-1 line-clamp-1 text-xs text-slate-600">
                     {latest ? formatSystemMessage(latest).preview : tv('Chưa có tin nhắn', 'No messages yet')}
                   </p>
                 </button>
@@ -448,11 +452,11 @@ export default function ChatPage() {
         </Card>
 
         <Card className="flex min-h-[420px] flex-col lg:col-span-2">
-          {!activeChat && <p className="text-sm text-gray-500">{tv('Chọn một chat để bắt đầu', 'Choose a chat to start')}</p>}
+          {!activeChat && <p className="text-sm text-slate-500">{tv('Chọn một chat để bắt đầu', 'Choose a chat to start')}</p>}
           {activeChat && (
             <>
-              <div className="flex items-center justify-between border-b border-gray-200 pb-3 dark:border-gray-700">
-                <p className="font-semibold text-gray-900 dark:text-white">{tableLabel(activeChat.tableId)}</p>
+              <div className="flex items-center justify-between border-b border-sky-100 pb-3 dark:border-gray-700">
+                <p className="font-semibold text-slate-900 dark:text-white">{tableLabel(activeChat.tableId)}</p>
                 <Button size="sm" variant="secondary" onClick={() => closeChat(activeChat.id)}>
                   {tv('Đóng chat', 'Close chat')}
                 </Button>
@@ -467,32 +471,32 @@ export default function ChatPage() {
                     return (
                       <div
                         key={msg.id}
-                        className="ml-auto max-w-[90%] rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-4 text-sm text-amber-950 shadow-sm"
+                        className="ml-auto max-w-[95%] rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-cyan-50 p-4 text-sm text-sky-950 shadow-sm sm:max-w-[90%]"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
                               {tv('Đơn mới', 'New order')}
                             </p>
-                            <p className="mt-1 text-base font-bold text-gray-900">{formatted.tableText || tv('Bàn không xác định', 'Unknown table')}</p>
+                            <p className="mt-1 text-base font-bold text-slate-900">{formatted.tableText || tv('Bàn không xác định', 'Unknown table')}</p>
                           </div>
-                          <div className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                          <div className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-800">
                             {formatted.totalText || '0đ'}
                           </div>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2 text-xs">
                           {formatted.itemsText && (
-                            <span className="rounded-full bg-white px-2.5 py-1 font-medium text-gray-700 ring-1 ring-amber-200">
+                            <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-700 ring-1 ring-sky-200">
                               {formatted.itemsText}
                             </span>
                           )}
                           {formatted.orderId && (
-                            <span className="rounded-full bg-white px-2.5 py-1 font-medium text-gray-700 ring-1 ring-amber-200">
-                              {tv('Mã đơn', 'Order')}: {formatted.orderId.slice(-8)}
+                            <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-700 ring-1 ring-sky-200">
+                              {tv('Mã đơn', 'Order')}: {maDonHangNgan(formatted.orderId)}
                             </span>
                           )}
                         </div>
-                        <div className="mt-3 rounded-xl bg-white/80 p-3 text-sm leading-6 text-gray-700 ring-1 ring-amber-100">
+                        <div className="mt-3 rounded-xl bg-white/80 p-3 text-sm leading-6 text-slate-700 ring-1 ring-sky-100">
                           <p className="whitespace-pre-line">{formatted.detail}</p>
                         </div>
                       </div>
@@ -504,8 +508,8 @@ export default function ChatPage() {
                       key={msg.id}
                       className={`rounded-2xl p-3 text-sm ${
                         msg.senderType === 'STAFF'
-                          ? 'ml-auto max-w-[85%] bg-amber-50 text-amber-950'
-                          : 'max-w-[85%] bg-gray-50'
+                          ? 'ml-auto max-w-[90%] bg-sky-50 text-sky-950 sm:max-w-[85%]'
+                          : 'max-w-[90%] bg-white/90 ring-1 ring-sky-100 sm:max-w-[85%]'
                       }`}
                     >
                       <p className="font-medium">
@@ -518,14 +522,15 @@ export default function ChatPage() {
                 <div ref={messageEndRef} />
               </div>
 
-              <div className="mt-2 flex gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
+              <div className="mt-2 flex flex-col gap-2 border-t border-sky-100 pt-3 dark:border-gray-700 sm:flex-row">
                 <Input
                   value={messageText}
                   onChange={(e) => setMessageText(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                   placeholder={tv('Nhập tin nhắn...', 'Type a message...')}
+                  className="flex-1"
                 />
-                <Button onClick={sendMessage} loading={sending}>
+                <Button className="w-full sm:w-auto" onClick={sendMessage} loading={sending}>
                   {tv('Gửi', 'Send')}
                 </Button>
               </div>
