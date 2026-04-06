@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { ChatSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
+import { maDonHangNgan } from '@/utils/display'
 
 interface ChatItem {
   id: string
@@ -491,7 +492,7 @@ export default function ChatPage() {
                           )}
                           {formatted.orderId && (
                             <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-700 ring-1 ring-sky-200">
-                              {tv('Mã đơn', 'Order')}: {formatted.orderId.slice(-8)}
+                              {tv('Mã đơn', 'Order')}: {maDonHangNgan(formatted.orderId)}
                             </span>
                           )}
                         </div>

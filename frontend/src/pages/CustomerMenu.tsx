@@ -4,7 +4,7 @@ import toast from 'react-hot-toast'
 import api from '@/utils/api'
 import { getSocket, disconnectSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
-import { phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
+import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 
 type PaymentMode = 'POSTPAY' | 'PREPAY'
 type PaymentProvider = 'VNPAY' | 'MOMO' | 'ZALOPAY' | 'VIETQR'
@@ -922,7 +922,7 @@ export default function CustomerMenu() {
             toast.success('Da tao don. Vui long chuyen khoan theo ma VietQR ben duoi')
           }
         } else {
-          toast.success(`Đặt món thành công. Mã đơn: ${newOrderId}`)
+          toast.success(`Đặt món thành công. Mã đơn: ${maDonHangNgan(newOrderId)}`)
         }
 
         fetchOrderStatus(newOrderId)
@@ -1235,7 +1235,7 @@ export default function CustomerMenu() {
                     <div className="mt-1 space-y-1">
                       {customerOrderHistory.slice(0, 4).map((historyOrder) => (
                         <div key={historyOrder.id} className="flex items-center justify-between">
-                          <span>{historyOrder.id.slice(-8)}</span>
+                          <span>{maDonHangNgan(historyOrder.id)}</span>
                           <span>{historyOrder.totalAmount.toLocaleString()}đ</span>
                           <span className="font-semibold">{historyOrder.status}</span>
                         </div>
@@ -1409,7 +1409,7 @@ export default function CustomerMenu() {
             {currentOrder && (
               <div className="mt-2 text-sm">
                 <p>
-                  Mã đơn: <span className="font-semibold">{currentOrder.id}</span>
+                  Mã đơn: <span className="font-semibold" title={currentOrder.id}>{maDonHangNgan(currentOrder.id)}</span>
                 </p>
                 <p>
                   Trạng thái: <span className="font-semibold">{trangThaiDonHang(currentOrder.status)}</span>

@@ -6,7 +6,7 @@ import api from '@/utils/api'
 import { PaymentMethod } from '@/types'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
-import { phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
+import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 
 interface TableApi {
   id: string
@@ -185,7 +185,7 @@ export default function Orders() {
     try {
       await api.patch(`/orders/${orderId}/status`, { status })
       await loadData()
-      toast.success(`Đơn ${orderId} -> ${trangThaiDonHang(status)}`)
+      toast.success(`Đơn ${maDonHangNgan(orderId)} -> ${trangThaiDonHang(status)}`)
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Cập nhật trạng thái thất bại', 'Failed to update order status'))
     }
@@ -522,7 +522,9 @@ export default function Orders() {
             <Card key={order.id}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-semibold text-gray-900 dark:text-white">{order.id}</p>
+                  <p className="font-semibold text-gray-900 dark:text-white" title={order.id}>
+                    Đơn {maDonHangNgan(order.id)}
+                  </p>
                   <p className="text-sm text-gray-500">
                     {orderTableLabel(order)} · {new Date(order.createdAt).toLocaleString()}
                   </p>
@@ -595,7 +597,7 @@ export default function Orders() {
       {payingOrder && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
           <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 dark:bg-slate-900">
-            <p className="text-lg font-bold">Thanh toán đơn {payingOrder.id}</p>
+            <p className="text-lg font-bold" title={payingOrder.id}>Thanh toán đơn {maDonHangNgan(payingOrder.id)}</p>
             <p className="mt-1 text-sm text-slate-500">Tổng tiền: {payingOrder.totalAmount.toLocaleString()}đ</p>
 
             <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -696,7 +698,7 @@ export default function Orders() {
       {detailOrder && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
           <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 dark:bg-slate-900">
-            <p className="text-lg font-bold">Chi tiết đơn {detailOrder.id}</p>
+            <p className="text-lg font-bold" title={detailOrder.id}>Chi tiết đơn {maDonHangNgan(detailOrder.id)}</p>
             <div className="mt-2 space-y-1 text-sm text-slate-600 dark:text-slate-300">
               <p>Bàn: {orderTableLabel(detailOrder)}</p>
               <p>Trạng thái: {trangThaiDonHang(detailOrder.status)}</p>
@@ -728,7 +730,7 @@ export default function Orders() {
       {editingOrder && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
           <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 dark:bg-slate-900">
-            <p className="text-lg font-bold">Sửa món đơn {editingOrder.id}</p>
+            <p className="text-lg font-bold" title={editingOrder.id}>Sửa món đơn {maDonHangNgan(editingOrder.id)}</p>
             <p className="mt-1 text-sm text-slate-500">S-09: Sửa số lượng, thêm/xóa món trong đơn</p>
 
             <div className="mt-4 max-h-80 space-y-2 overflow-y-auto rounded-xl border border-sky-100 p-2">

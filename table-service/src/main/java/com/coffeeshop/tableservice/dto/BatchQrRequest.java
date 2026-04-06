@@ -7,5 +7,4 @@ import java.util.List;
 @Data
 public class BatchQrRequest {
     private List<String> tableIds;
-    private String baseUrl;
 }

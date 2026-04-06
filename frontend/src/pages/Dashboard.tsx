@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { StatsCardsSkeleton, TableSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
-import { trangThaiDonHang } from '@/utils/display'
+import { maDonHangNgan, trangThaiDonHang } from '@/utils/display'
 import {
   BellAlertIcon,
   CheckBadgeIcon,
@@ -193,7 +193,7 @@ export default function Dashboard() {
                 id: `order-poll:${order.id}`,
                 type: 'ORDER_NEW',
                 title: `Đơn mới từ ${orderTableLabel(order)}`,
-                message: `Đơn ${order.id} - ${formatMoney(Number(order.totalAmount || 0))}`,
+                message: `Đơn ${maDonHangNgan(order.id)} - ${formatMoney(Number(order.totalAmount || 0))}`,
                 tableId: order.tableId,
                 orderId: order.id,
                 createdAt: order.createdAt || new Date().toISOString(),
@@ -345,7 +345,9 @@ export default function Dashboard() {
             {recentOrders.map((order) => (
               <div key={order.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-gray-700/50">
                 <div>
-                  <p className="text-sm font-medium text-slate-900 dark:text-white">{order.id}</p>
+                  <p className="text-sm font-medium text-slate-900 dark:text-white" title={order.id}>
+                    {maDonHangNgan(order.id)}
+                  </p>
                   <p className="text-xs text-slate-500">
                     {orderTableLabel(order)} · {formatMoney(Number(order.totalAmount || 0))}
                   </p>

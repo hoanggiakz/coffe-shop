@@ -8,6 +8,7 @@ import { showRealtimeNotification } from '@/utils/notifications'
 import { useUiStore } from '@/stores/uiStore'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
+import { maDonHangNgan } from '@/utils/display'
 
 interface TableApi {
   id: string
@@ -163,7 +164,7 @@ export default function Kitchen() {
         await api.patch(`/orders/${order.id}/items/${item.id}/status`, { status: 'DONE' })
       }
       await loadData()
-      toast.success(tv(`Đã hoàn thành đơn ${order.id}`, `Order ${order.id} completed`))
+      toast.success(tv(`Đã hoàn thành đơn ${maDonHangNgan(order.id)}`, `Order ${maDonHangNgan(order.id)} completed`))
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Không thể hoàn thành đơn', 'Unable to complete order'))
     } finally {
@@ -236,7 +237,9 @@ export default function Kitchen() {
           <Card key={order.id}>
             <div className="flex items-start justify-between">
               <div>
-                <p className="font-semibold text-slate-900 dark:text-white">{order.id}</p>
+                <p className="font-semibold text-slate-900 dark:text-white" title={order.id}>
+                  {maDonHangNgan(order.id)}
+                </p>
                 <p className="text-xs text-slate-500">
                   {tableLabel(order.tableId)} · {new Date(order.createdAt).toLocaleString()}
                 </p>

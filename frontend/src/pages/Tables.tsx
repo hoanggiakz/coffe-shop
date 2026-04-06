@@ -5,7 +5,7 @@ import Button from '@/components/ui/Button'
 import api from '@/utils/api'
 import { TableStatus } from '@/types'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
-import { trangThaiBan, trangThaiDonHang } from '@/utils/display'
+import { maDonHangNgan, trangThaiBan, trangThaiDonHang } from '@/utils/display'
 
 interface TableApi {
   id: string
@@ -40,7 +40,6 @@ type TableGridState = 'AVAILABLE' | 'OCCUPIED' | 'WAITING_PAYMENT' | 'MAINTENANC
 
 const statuses: TableStatus[] = ['AVAILABLE', 'OCCUPIED', 'RESERVED', 'CLEANING', 'MAINTENANCE']
 const activeStatuses: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY']
-const localhostHosts = new Set(['localhost', '127.0.0.1', '::1'])
 const fieldClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
 
@@ -285,8 +284,7 @@ export default function Tables() {
 
   const openQr = async (table: TableApi) => {
     try {
-      const currentBaseUrl = localhostHosts.has(window.location.hostname) ? undefined : window.location.origin
-      const qr = (await api.get(`/tables/${table.id}/qr`, { params: { baseUrl: currentBaseUrl } })).data?.qrCode
+      const qr = (await api.get(`/tables/${table.id}/qr`)).data?.qrCode
       if (!qr) {
         toast.error('Không lấy được QR')
         return
@@ -302,8 +300,7 @@ export default function Tables() {
 
   const downloadQr = async (table: TableApi) => {
     try {
-      const currentBaseUrl = localhostHosts.has(window.location.hostname) ? undefined : window.location.origin
-      const qr = (await api.get(`/tables/${table.id}/qr`, { params: { baseUrl: currentBaseUrl } })).data?.qrCode
+      const qr = (await api.get(`/tables/${table.id}/qr`)).data?.qrCode
       if (!qr) {
         toast.error('Không lấy được QR')
         return
@@ -339,11 +336,7 @@ export default function Tables() {
 
     setPrintingBatch(true)
     try {
-      const currentBaseUrl = localhostHosts.has(window.location.hostname) ? undefined : window.location.origin
-      const payload = currentBaseUrl
-        ? { tableIds: selectedQrTableIds, baseUrl: currentBaseUrl }
-        : { tableIds: selectedQrTableIds }
-      const { data } = await api.post('/tables/qr/batch', payload)
+      const { data } = await api.post('/tables/qr/batch', { tableIds: selectedQrTableIds })
       const rows = Array.isArray(data) ? data : []
       if (!rows.length) {
         toast.error('Không lấy được danh sách QR để in')
@@ -696,7 +689,7 @@ export default function Tables() {
             </div>
             {(activeOrdersByTable.get(table.id) || []).slice(0, 2).map((order) => (
               <div key={order.id} className="mt-2 rounded-lg border border-sky-100 bg-white/90 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/60">
-                {order.id} · {trangThaiDonHang(order.status)} · {order.totalAmount.toLocaleString()}đ
+                {maDonHangNgan(order.id)} · {trangThaiDonHang(order.status)} · {order.totalAmount.toLocaleString()}đ
               </div>
             ))}
             <div className="mt-3 flex flex-wrap gap-2">

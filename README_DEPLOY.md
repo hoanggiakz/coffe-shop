@@ -215,6 +215,7 @@ cat backup-manual.sql | docker compose exec -T postgres psql -U postgres
 - Đã thay toàn bộ secret mặc định.
 - Đã dùng SSL certificate thật (không self-signed).
 - `APP_BASE_URL`, `MOMO_RETURN_URL`, `ZALOPAY_RETURN_URL` dùng domain production.
+- QR phải luôn trỏ về domain public (không trỏ `localhost`/IP LAN). Sau khi đổi domain, vào màn hình `Bàn` và bấm `In QR đã chọn` để sinh/in lại QR mới.
 - Đã test end-to-end 5 luồng chính:
   - Quét QR -> đặt món
   - Nhân viên nhận và xác nhận đơn

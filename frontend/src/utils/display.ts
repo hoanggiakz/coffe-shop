@@ -145,3 +145,16 @@ export function loaiTuyChonMon(type?: string | null): string {
       return type || '-'
   }
 }
+
+export function maDonHangNgan(orderId?: string | null, prefix = 'ĐH'): string {
+  const raw = String(orderId || '').trim()
+  if (!raw) return '-'
+
+  if (raw.length <= 12 && /^[a-zA-Z0-9-]+$/.test(raw)) {
+    return raw.toUpperCase()
+  }
+
+  const compact = raw.replace(/[^a-zA-Z0-9]/g, '')
+  const tail = (compact || raw).slice(-6).toUpperCase()
+  return `${prefix}-${tail}`
+}
