@@ -1,0 +1,20 @@
+{
+  "name": "Coffee Shop POS",
+  "short_name": "Coffee POS",
+  "description": "Ung dung quan ly quan ca phe: dat mon, theo doi don, KDS va chat realtime.",
+  "lang": "vi",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8f4ec",
+  "theme_color": "#a16207",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

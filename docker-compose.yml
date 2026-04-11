@@ -6,7 +6,7 @@ services:
       - "5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: change-this-postgres-password-prod
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
@@ -39,13 +39,13 @@ services:
 
   # ── API Gateway (Node.js / NestJS) ────────────────────────
   api-gateway:
-    build: ./api-gateway
+    build: ./apps/backend/api-gateway
     expose:
       - "8080"
     environment:
       NODE_ENV: production
       PORT: 8080
-      JWT_SECRET: replace-with-long-random-jwt-secret-2026
+      JWT_SECRET: ${JWT_SECRET}
       REDIS_URL: redis://redis:6379
       USER_SERVICE_URL: http://user-service:3000
       TABLE_SERVICE_URL: http://table-service:3003
@@ -72,7 +72,7 @@ services:
       report-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -83,21 +83,21 @@ services:
 
   # ── User Service (Spring Boot) ────────────────────────────
   user-service:
-    build: ./user-service
+    build: ./apps/backend/user-service
     expose:
       - "3000"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/userdb
       SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: change-this-postgres-password-prod
-      JWT_SECRET: replace-with-long-random-jwt-secret-2026
+      SPRING_DATASOURCE_PASSWORD: ${USER_DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION: 86400000
       SERVER_PORT: 3000
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/users/health >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/users/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -108,13 +108,13 @@ services:
 
   # ── Table Service (Spring Boot) ───────────────────────────
   table-service:
-    build: ./table-service
+    build: ./apps/backend/table-service
     expose:
       - "3003"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/tabledb
       SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: change-this-postgres-password-prod
+      SPRING_DATASOURCE_PASSWORD: ${TABLE_DB_PASSWORD}
       SERVER_PORT: 3003
       APP_BASE_URL: ${APP_BASE_URL:-https://coffee.example.com}
       APP_CHAT_SERVICE_URL: http://chat-service:3007/api/chats
@@ -125,7 +125,7 @@ services:
       chat-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3003/api/tables/health >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3003/api/tables/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -136,19 +136,19 @@ services:
 
   # ── Order Service (Node.js / NestJS) ──────────────────────
   order-service:
-    build: ./order-service
+    build: ./apps/backend/order-service
     command: sh -c "npx prisma db push --accept-data-loss && npx prisma db seed && node dist/src/main.js"
     expose:
       - "3001"
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: postgresql://postgres:change-this-postgres-password-prod@postgres:5432/orderdb?schema=public
+      DATABASE_URL: ${ORDER_DATABASE_URL}
       INVENTORY_SERVICE_URL: http://inventory-service:3005
       USER_SERVICE_URL: http://user-service:3000
       CHAT_SERVICE_URL: http://chat-service:3007/api/chats
       TABLE_SERVICE_URL: http://table-service:3003
-      INTERNAL_SERVICE_TOKEN: replace-with-long-random-internal-service-token-2026
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
@@ -157,7 +157,7 @@ services:
       user-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/orders/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/orders/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -168,14 +168,14 @@ services:
 
   # ── Chat Service (Node.js / NestJS + Socket.io) ──────────
   chat-service:
-    build: ./chat-service
+    build: ./apps/backend/chat-service
     command: sh -c "npx prisma db push && node dist/main"
     expose:
       - "3007"
     environment:
       NODE_ENV: production
       PORT: 3007
-      DATABASE_URL: postgresql://postgres:change-this-postgres-password-prod@postgres:5432/chatdb?schema=public
+      DATABASE_URL: ${CHAT_DATABASE_URL}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
@@ -183,7 +183,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3007/api/chats/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3007/api/chats/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -194,29 +194,29 @@ services:
 
   # ── Inventory Service (Node.js / NestJS) ─────────────────
   inventory-service:
-    build: ./inventory-service
+    build: ./apps/backend/inventory-service
     command: sh -c "npx prisma db push && node dist/src/main.js"
     expose:
       - "3005"
     environment:
       NODE_ENV: production
       PORT: 3005
-      DATABASE_URL: postgresql://postgres:change-this-postgres-password-prod@postgres:5432/inventorydb?schema=public
+      DATABASE_URL: ${INVENTORY_DATABASE_URL}
       KAFKA_BROKERS: ""
       CHAT_SERVICE_URL: http://chat-service:3007/api/chats
-      JWT_SECRET: replace-with-long-random-jwt-secret-2026
-      INTERNAL_SERVICE_TOKEN: replace-with-long-random-internal-service-token-2026
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       LOW_STOCK_ALERT_EMAILS: manager@coffeeshop.com
       SMTP_HOST: smtp.your-provider.com
       SMTP_PORT: 587
       SMTP_USER: noreply@coffee.example.com
-      SMTP_PASS: change-this-smtp-password
+      SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: "\"Coffee Shop\" <noreply@coffee.example.com>"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3005/api/v1/ingredients/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3005/api/v1/ingredients/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -227,34 +227,27 @@ services:
 
   # ── Payment Service (Node.js / NestJS) ───────────────────
   payment-service:
-    build: ./payment-service
+    build: ./apps/backend/payment-service
     command: sh -c "npx prisma db push && node dist/src/main.js"
     expose:
       - "3004"
     environment:
       NODE_ENV: production
       PORT: 3004
-      DATABASE_URL: postgresql://postgres:change-this-postgres-password-prod@postgres:5432/paymentdb?schema=public
+      DATABASE_URL: ${PAYMENT_DATABASE_URL}
       KAFKA_BROKERS: ""
-      JWT_SECRET: replace-with-long-random-jwt-secret-2026
-      INTERNAL_SERVICE_TOKEN: replace-with-long-random-internal-service-token-2026
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       CHAT_SERVICE_URL: http://chat-service:3007/api/chats
-      VIETQR_BANK_BIN: 970422
-      VIETQR_ACCOUNT_NO: 1900123456789
-      VIETQR_ACCOUNT_NAME: COFFEE SHOP
-      VIETQR_SECRET: ""
-      MOMO_RETURN_URL: ${MOMO_RETURN_URL:-https://coffee.example.com/payment/return}
-      ZALOPAY_APP_ID: "2554"
-      ZALOPAY_KEY1: ""
-      ZALOPAY_KEY2: ""
-      ZALOPAY_RETURN_URL: ${ZALOPAY_RETURN_URL:-https://coffee.example.com/payment/return}
+      VNPAY_SECRET_KEY: ${VNPAY_SECRET_KEY}
+      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-https://coffee.example.com/payment/return}
     depends_on:
       postgres:
         condition: service_healthy
       chat-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3004/api/v1/payments/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3004/api/v1/payments/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -265,20 +258,20 @@ services:
 
   # ── Report Service (Node.js / NestJS) ───────────────────
   report-service:
-    build: ./report-service
+    build: ./apps/backend/report-service
     command: sh -c "npx prisma db push && node dist/src/main.js"
     expose:
       - "3006"
     environment:
       NODE_ENV: production
       PORT: 3006
-      DATABASE_URL: postgresql://postgres:change-this-postgres-password-prod@postgres:5432/reportdb?schema=public
-      ORDER_DATABASE_URL: postgresql://postgres:change-this-postgres-password-prod@postgres:5432/orderdb?schema=public
-      INVENTORY_DATABASE_URL: postgresql://postgres:change-this-postgres-password-prod@postgres:5432/inventorydb?schema=public
-      PAYMENT_DATABASE_URL: postgresql://postgres:change-this-postgres-password-prod@postgres:5432/paymentdb?schema=public
-      USER_DATABASE_URL: postgresql://postgres:change-this-postgres-password-prod@postgres:5432/userdb?schema=public
+      DATABASE_URL: ${REPORT_DATABASE_URL}
+      ORDER_DATABASE_URL: ${ORDER_DATABASE_URL}
+      INVENTORY_DATABASE_URL: ${INVENTORY_DATABASE_URL}
+      PAYMENT_DATABASE_URL: ${PAYMENT_DATABASE_URL}
+      USER_DATABASE_URL: ${REPORT_USER_DATABASE_URL}
       KAFKA_BROKERS: ""
-      JWT_SECRET: replace-with-long-random-jwt-secret-2026
+      JWT_SECRET: ${JWT_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
@@ -291,7 +284,7 @@ services:
       user-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3006/api/reports/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3006/api/reports/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -302,7 +295,7 @@ services:
 
   # ── Frontend (Vite + Nginx) ────────────────────────────────
   frontend:
-    build: ./frontend
+    build: ./apps/frontend
     ports:
       - "80:80"
       - "443:443"
@@ -312,7 +305,7 @@ services:
       chat-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 8
@@ -328,7 +321,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      POSTGRES_PASSWORD: change-this-postgres-password-prod
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       BACKUP_INTERVAL_SECONDS: 86400
       BACKUP_RETENTION_DAYS: 7
     command: >
@@ -353,3 +346,4 @@ volumes:
 networks:
   backend:
     driver: bridge
+

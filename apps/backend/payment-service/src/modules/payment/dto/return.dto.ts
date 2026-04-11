@@ -1,0 +1,28 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { IsIn, IsOptional, IsString } from 'class-validator';
+
+export class PaymentReturnDto {
+  @ApiProperty({ enum: ['VNPAY'], example: 'VNPAY' })
+  @IsString()
+  @IsIn(['VNPAY'], { message: 'Provider must be VNPAY' })
+  provider: string;
+
+  @ApiProperty({ example: 'order_123' })
+  @IsString()
+  orderId: string;
+
+  @ApiProperty({ example: '0', required: false, description: 'Provider-specific result code (0 or 00 = success)' })
+  @IsOptional()
+  @IsString()
+  resultCode?: string;
+
+  @ApiProperty({ example: 'Thanh toán thành công', required: false })
+  @IsOptional()
+  @IsString()
+  message?: string;
+
+  @ApiProperty({ example: 'momo_123456', required: false })
+  @IsOptional()
+  @IsString()
+  transactionId?: string;
+}

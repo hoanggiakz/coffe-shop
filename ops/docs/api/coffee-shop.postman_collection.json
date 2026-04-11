@@ -1,0 +1,186 @@
+{
+  "info": {
+    "name": "Coffee Shop Microservices",
+    "_postman_id": "0f5ed8a2-d0bb-47ea-9646-665bdf2f1a1f",
+    "description": "Gateway-level API collection for delivery handoff.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://localhost"
+    },
+    {
+      "key": "token",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Checks",
+      "item": [
+        {
+          "name": "Users Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/users/health"
+          }
+        },
+        {
+          "name": "Tables Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/tables/health"
+          }
+        },
+        {
+          "name": "Orders Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/orders/health"
+          }
+        },
+        {
+          "name": "Chats Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/chats/health"
+          }
+        },
+        {
+          "name": "Inventory Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/ingredients/health"
+          }
+        },
+        {
+          "name": "Payments Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/payments/health"
+          }
+        },
+        {
+          "name": "Reports Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/reports/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin.test@coffeeshop.local\",\n  \"password\": \"Admin@123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/users/login"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Table Service",
+      "item": [
+        {
+          "name": "Get Tables",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/tables"
+          }
+        },
+        {
+          "name": "Create Table",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"number\": 101,\n  \"area\": \"Tang 1\",\n  \"capacity\": 4\n}"
+            },
+            "url": "{{baseUrl}}/api/tables"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Order Service",
+      "item": [
+        {
+          "name": "Get Menu",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/orders/menu"
+          }
+        },
+        {
+          "name": "Create Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tableId\": \"table-id\",\n  \"customerName\": \"Customer Demo\",\n  \"items\": [\n    {\n      \"menuItemId\": \"menu-item-id\",\n      \"quantity\": 1\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/orders"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat Service",
+      "item": [
+        {
+          "name": "Create Chat Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tableId\": \"table-id\",\n  \"customerName\": \"Customer Demo\"\n}"
+            },
+            "url": "{{baseUrl}}/api/chats"
+          }
+        }
+      ]
+    }
+  ]
+}

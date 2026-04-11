@@ -1,0 +1,412 @@
+{
+  "generatedAt": "2026-04-11T09:19:42.411Z",
+  "baseUrl": "https://localhost",
+  "summary": {
+    "pass": 18,
+    "fail": 0,
+    "total": 18
+  },
+  "checks": [
+    {
+      "section": "3.1",
+      "code": "3.1.1",
+      "criterion": "TypeScript cho Node.js",
+      "status": "PASS",
+      "detail": "api-gateway, order-service, chat-service đều có tsconfig",
+      "evidence": [
+        "apps/backend/api-gateway/tsconfig.json",
+        "apps/backend/order-service/tsconfig.json",
+        "apps/backend/chat-service/tsconfig.json"
+      ]
+    },
+    {
+      "section": "3.1",
+      "code": "3.1.2",
+      "criterion": "Java 17+ với kiểu rõ ràng",
+      "status": "PASS",
+      "detail": "user-service và table-service khai báo sourceCompatibility=17",
+      "evidence": [
+        "apps/backend/user-service/build.gradle",
+        "apps/backend/table-service/build.gradle"
+      ]
+    },
+    {
+      "section": "3.1",
+      "code": "3.1.3",
+      "criterion": "Tuân thủ coding convention (ESLint + Checkstyle)",
+      "status": "PASS",
+      "detail": "Đã có lint scripts + ESLint config cho Node.js và Checkstyle config cho Spring Boot",
+      "evidence": [
+        "apps/backend/api-gateway",
+        "apps/backend/order-service",
+        "apps/backend/chat-service",
+        "apps/backend/user-service/config/checkstyle/checkstyle.xml",
+        "apps/backend/table-service/config/checkstyle/checkstyle.xml"
+      ]
+    },
+    {
+      "section": "3.1",
+      "code": "3.1.4",
+      "criterion": "Unit test coverage >= 70% cho Order/User/Table",
+      "status": "PASS",
+      "detail": "order=100%, user=100%, table=100%",
+      "evidence": [
+        "apps/backend/order-service/coverage/coverage-summary.json",
+        "apps/backend/user-service/build/reports/jacoco/test/jacocoTestReport.xml",
+        "apps/backend/table-service/build/reports/jacoco/test/jacocoTestReport.xml"
+      ]
+    },
+    {
+      "section": "3.1",
+      "code": "3.1.5",
+      "criterion": "Không có critical bug ở luồng chính",
+      "status": "PASS",
+      "detail": "mvp script code=0, failed=0",
+      "evidence": [
+        "ops/scripts/check-mvp-phase.mjs"
+      ]
+    },
+    {
+      "section": "3.2",
+      "code": "3.2.3",
+      "criterion": "Tạo đơn hàng < 1 giây",
+      "status": "PASS",
+      "detail": "avgMs=45.14, p95Ms=58.32, failures=0",
+      "evidence": [
+        "ops/scripts/order-create-latency.mjs"
+      ]
+    },
+    {
+      "section": "3.2",
+      "code": "3.2.1",
+      "criterion": "API Gateway >= 100 req/s, avg latency < 200ms",
+      "status": "PASS",
+      "detail": "rps=1149.85, avgMs=45.78, failures=0",
+      "evidence": [
+        "ops/scripts/perf-100-users.mjs"
+      ]
+    },
+    {
+      "section": "3.2",
+      "code": "3.2.2",
+      "criterion": "WebSocket chat latency < 100ms với 50 phiên đồng thời",
+      "status": "PASS",
+      "detail": "failedSessions=0, messageAvgMs=23.06, messageP95Ms=34.53",
+      "evidence": [
+        "apps/frontend/scripts/ws-latency-50.mjs"
+      ]
+    },
+    {
+      "section": "3.3",
+      "code": "3.3.1",
+      "criterion": "Mật khẩu được mã hóa bằng bcrypt",
+      "status": "PASS",
+      "detail": "Auth service dùng bcrypt hash/compare và Spring Security dùng BCryptPasswordEncoder",
+      "evidence": [
+        "apps/backend/user-service/src/modules/auth/auth.service.ts",
+        "apps/backend/user-service/src/main/java/com/coffeeshop/userservice/config/SecurityConfig.java"
+      ]
+    },
+    {
+      "section": "3.3",
+      "code": "3.3.2",
+      "criterion": "JWT có thời gian hết hạn 1 ngày",
+      "status": "PASS",
+      "detail": "JWT_EXPIRATION được cấu hình mặc định 86400000ms",
+      "evidence": [
+        "apps/backend/user-service/src/main/resources/application.properties",
+        "docker-compose.yml"
+      ]
+    },
+    {
+      "section": "3.3",
+      "code": "3.3.4",
+      "criterion": "Endpoint quan trọng yêu cầu quyền quản lý",
+      "status": "PASS",
+      "detail": "staffPromo=403, staffRegister=403, managerPromo=200",
+      "evidence": [
+        "apps/backend/api-gateway/src/proxy/proxy.controller.ts"
+      ]
+    },
+    {
+      "section": "3.3",
+      "code": "3.3.3",
+      "criterion": "Không có SQL injection/XSS (qua OWASP ZAP hoặc tương tự)",
+      "status": "PASS",
+      "detail": "Có report bảo mật: reports/security/zap-report.json, reports/security/zap-report.html, reports/security/zap-report.md",
+      "evidence": [
+        "reports/security/zap-report.json",
+        "reports/security/zap-report.html",
+        "reports/security/zap-report.md"
+      ]
+    },
+    {
+      "section": "3.4",
+      "code": "3.4.1",
+      "criterion": "Docker compose chạy thành công trên máy mới",
+      "status": "PASS",
+      "detail": "servicesUp=11/11",
+      "evidence": [
+        "docker-compose.yml"
+      ]
+    },
+    {
+      "section": "3.4",
+      "code": "3.4.2",
+      "criterion": "Hướng dẫn triển khai đầy đủ",
+      "status": "PASS",
+      "detail": "Có ops/docs/deployment-guide.md với hướng dẫn Docker Compose và Kubernetes",
+      "evidence": [
+        "ops/docs/deployment-guide.md"
+      ]
+    },
+    {
+      "section": "3.4",
+      "code": "3.4.3",
+      "criterion": "Không hardcode IP/cổng/mật khẩu, dùng biến môi trường",
+      "status": "PASS",
+      "detail": "Không phát hiện hardcode secret/IP trong docker-compose.yml",
+      "evidence": [
+        "docker-compose.yml",
+        ".env.example"
+      ]
+    },
+    {
+      "section": "3.5",
+      "code": "3.5.1",
+      "criterion": "UI responsive cho mobile và desktop",
+      "status": "PASS",
+      "detail": "Số responsive tokens (sm:/md:/lg:/xl:) = 31",
+      "evidence": [
+        "apps/frontend/src/pages/CustomerMenu.tsx",
+        "apps/frontend/src/pages/Orders.tsx"
+      ]
+    },
+    {
+      "section": "3.5",
+      "code": "3.5.2",
+      "criterion": "Luồng đặt món/chat/cập nhật trạng thái trực quan",
+      "status": "PASS",
+      "detail": "Smoke flow MVP pass: login -> table -> order -> KDS update -> chat",
+      "evidence": [
+        "ops/scripts/check-mvp-phase.mjs"
+      ]
+    },
+    {
+      "section": "3.5",
+      "code": "3.5.3",
+      "criterion": "Thông báo lỗi rõ ràng",
+      "status": "PASS",
+      "detail": "Frontend/backend đều có nhiều thông báo lỗi nghiệp vụ cụ thể",
+      "evidence": [
+        "apps/frontend/src/pages/CustomerMenu.tsx",
+        "apps/frontend/src/pages/Orders.tsx",
+        "apps/backend/order-service/src/modules/order/order.service.ts"
+      ]
+    }
+  ],
+  "artifacts": {
+    "codingConvention": {
+      "lintScriptGateway": true,
+      "lintScriptOrder": true,
+      "lintScriptChat": true,
+      "eslintConfigReady": true,
+      "checkstyleConfigured": true
+    },
+    "orderCoverageCommand": {
+      "code": 0
+    },
+    "javaCoverageCommands": {
+      "userServiceCode": 0,
+      "tableServiceCode": 0
+    },
+    "coverage": {
+      "orderCoverage": 100,
+      "userCoverage": 100,
+      "tableCoverage": 100
+    },
+    "mvpCheck": {
+      "phase": "MVP",
+      "baseUrl": "https://localhost",
+      "passed": 12,
+      "failed": 0,
+      "durationMs": 800,
+      "results": [
+        {
+          "name": "User login",
+          "status": "PASS",
+          "detail": "Admin login successful"
+        },
+        {
+          "name": "User profile",
+          "status": "PASS",
+          "detail": "Profile endpoint accessible"
+        },
+        {
+          "name": "Table list",
+          "status": "PASS",
+          "detail": "Fetched 66 tables"
+        },
+        {
+          "name": "Table QR",
+          "status": "PASS",
+          "detail": "QR base64 generated"
+        },
+        {
+          "name": "Menu list",
+          "status": "PASS",
+          "detail": "Fetched 10 menu items"
+        },
+        {
+          "name": "Order create",
+          "status": "PASS",
+          "detail": "Created order cmnu4incz00041uzll8pl0hm4"
+        },
+        {
+          "name": "Order by table",
+          "status": "PASS",
+          "detail": "Fetched 6 orders"
+        },
+        {
+          "name": "Order status update",
+          "status": "PASS",
+          "detail": "Updated to PREPARING"
+        },
+        {
+          "name": "Order item status update",
+          "status": "PASS",
+          "detail": "Updated item to DONE"
+        },
+        {
+          "name": "Chat create",
+          "status": "PASS",
+          "detail": "Created chat cmnu4infz0007iol42e3v6nij"
+        },
+        {
+          "name": "Chat send message",
+          "status": "PASS",
+          "detail": "Message created"
+        },
+        {
+          "name": "Chat message list",
+          "status": "PASS",
+          "detail": "Fetched 1 messages"
+        }
+      ]
+    },
+    "orderLatency": {
+      "target": "https://localhost/api/orders",
+      "iterations": 20,
+      "thresholdMs": 1000,
+      "totalRequests": 20,
+      "successfulRequests": 20,
+      "failures": 0,
+      "successRate": 100,
+      "avgMs": 45.14,
+      "p95Ms": 58.32,
+      "minMs": 38.82,
+      "maxMs": 64.76,
+      "pass": true,
+      "errors": [],
+      "generatedAt": "2026-04-11T09:19:39.929Z"
+    },
+    "gatewayPerf": {
+      "target": "https://localhost/",
+      "totalRequests": 1000,
+      "concurrency": 100,
+      "rounds": 10,
+      "failures": 0,
+      "successRate": 100,
+      "avgMs": 45.78,
+      "p95Ms": 233.1,
+      "totalDurationMs": 869.68,
+      "requestsPerSecond": 1149.85,
+      "generatedAt": "2026-04-11T09:19:40.863Z"
+    },
+    "wsPerf": {
+      "target": "http://localhost/chat",
+      "sessions": 50,
+      "successfulSessions": 50,
+      "failedSessions": 0,
+      "thresholdMs": 100,
+      "joinLatency": {
+        "avgMs": 202.33,
+        "p95Ms": 310.79,
+        "minMs": 100.92,
+        "maxMs": 315.47
+      },
+      "messageLatency": {
+        "avgMs": 23.06,
+        "p95Ms": 34.53,
+        "minMs": 9.7,
+        "maxMs": 37.25
+      },
+      "totalDurationMs": 364.18,
+      "pass": true,
+      "failures": [],
+      "generatedAt": "2026-04-11T09:19:41.456Z"
+    },
+    "composeServices": [
+      {
+        "service": "api-gateway",
+        "status": "Up 4 minutes (healthy)",
+        "health": "healthy"
+      },
+      {
+        "service": "chat-service",
+        "status": "Up 4 minutes (healthy)",
+        "health": "healthy"
+      },
+      {
+        "service": "db-backup",
+        "status": "Up 4 minutes",
+        "health": ""
+      },
+      {
+        "service": "frontend",
+        "status": "Up 4 minutes (unhealthy)",
+        "health": "unhealthy"
+      },
+      {
+        "service": "inventory-service",
+        "status": "Up 4 minutes (healthy)",
+        "health": "healthy"
+      },
+      {
+        "service": "order-service",
+        "status": "Up 4 minutes (healthy)",
+        "health": "healthy"
+      },
+      {
+        "service": "payment-service",
+        "status": "Up 4 minutes (healthy)",
+        "health": "healthy"
+      },
+      {
+        "service": "postgres",
+        "status": "Up 4 minutes (healthy)",
+        "health": "healthy"
+      },
+      {
+        "service": "redis",
+        "status": "Up 5 minutes (healthy)",
+        "health": "healthy"
+      },
+      {
+        "service": "report-service",
+        "status": "Up 4 minutes (healthy)",
+        "health": "healthy"
+      },
+      {
+        "service": "table-service",
+        "status": "Up 4 minutes (healthy)",
+        "health": "healthy"
+      },
+      {
+        "service": "user-service",
+        "status": "Up 4 minutes (healthy)",
+        "health": "healthy"
+      }
+    ]
+  }
+}

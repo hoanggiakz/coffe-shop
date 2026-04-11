@@ -3,7 +3,7 @@
 ## 1) Kết quả rà soát nhanh (ngày 05/04/2026)
 
 - `docker-compose.yml` hợp lệ (`docker compose config -q` chạy thành công).
-- Frontend build thành công (`npm --prefix frontend run build`).
+- Frontend build thành công (`npm --prefix apps/frontend run build`).
 - Tại thời điểm rà soát, Docker daemon trên máy đang tắt nên không kiểm tra được trạng thái container runtime (`docker compose ps` báo không kết nối daemon).
 
 ## 2) Cách chạy khuyến nghị: Docker toàn bộ hệ thống
@@ -57,7 +57,7 @@ docker compose up -d postgres redis user-service table-service order-service cha
 ### Bước 2: chạy FE local
 
 ```powershell
-cd frontend
+cd apps/frontend
 npm install
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
@@ -66,8 +66,8 @@ Mở: `http://localhost:5173`
 
 Ghi chú:
 
-- `frontend/vite.config.ts` đã được chỉnh proxy `/api` sang `http://localhost` (cổng 80 hiện tại).
-- `frontend/.env.example` đã dùng `VITE_WS_URL=https://localhost`.
+- `apps/frontend/vite.config.ts` đã được chỉnh proxy `/api` sang `http://localhost` (cổng 80 hiện tại).
+- `apps/frontend/.env.example` đã dùng `VITE_WS_URL=https://localhost`.
 
 ## 4) Health check nhanh từng BE service
 
@@ -114,3 +114,5 @@ docker compose down -v
 
 - Đảm bảo điện thoại và máy chạy Docker cùng mạng LAN.
 - Đảm bảo QR được tạo lại theo host/IP hiện tại trước khi in.
+
+

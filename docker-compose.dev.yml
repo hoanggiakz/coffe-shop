@@ -1,0 +1,95 @@
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  api-gateway:
+    environment:
+      NODE_ENV: development
+      JWT_SECRET: dev-jwt-secret-change-me
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8080:8080"
+
+  user-service:
+    environment:
+      SPRING_DATASOURCE_PASSWORD: postgres
+      JWT_SECRET: dev-jwt-secret-change-me
+    ports:
+      - "3000:3000"
+
+  table-service:
+    environment:
+      SPRING_DATASOURCE_PASSWORD: postgres
+      APP_BASE_URL: http://localhost:3000
+      SEED_TABLES_ON_STARTUP: "true"
+    ports:
+      - "3003:3003"
+
+  order-service:
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/orderdb?schema=public
+      INTERNAL_SERVICE_TOKEN: dev-internal-token
+    ports:
+      - "3001:3001"
+
+  chat-service:
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/chatdb?schema=public
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3007:3007"
+
+  inventory-service:
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/inventorydb?schema=public
+      JWT_SECRET: dev-jwt-secret-change-me
+      INTERNAL_SERVICE_TOKEN: dev-internal-token
+    ports:
+      - "3005:3005"
+
+  payment-service:
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/paymentdb?schema=public
+      JWT_SECRET: dev-jwt-secret-change-me
+      INTERNAL_SERVICE_TOKEN: dev-internal-token
+    ports:
+      - "3004:3004"
+
+  report-service:
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/reportdb?schema=public
+      ORDER_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/orderdb?schema=public
+      INVENTORY_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/inventorydb?schema=public
+      PAYMENT_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/paymentdb?schema=public
+      USER_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/userdb?schema=public
+      JWT_SECRET: dev-jwt-secret-change-me
+    ports:
+      - "3006:3006"
+
+  frontend:
+    build: ./apps/frontend
+    ports:
+      - "3000:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 25s
+
+  db-backup:
+    environment:
+      POSTGRES_PASSWORD: postgres
+

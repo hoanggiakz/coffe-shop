@@ -1,0 +1,44 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "api-gateway"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api-gateway:8080"]
+
+  - job_name: "user-service"
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["user-service:3000"]
+
+  - job_name: "table-service"
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["table-service:3003"]
+
+  - job_name: "order-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["order-service:3001"]
+
+  - job_name: "chat-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["chat-service:3007"]
+
+  - job_name: "inventory-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["inventory-service:3005"]
+
+  - job_name: "payment-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["payment-service:3004"]
+
+  - job_name: "report-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["report-service:3006"]

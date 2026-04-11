@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: table-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: table-service
+  template:
+    metadata:
+      labels:
+        app: table-service
+    spec:
+      containers:
+        - name: table-service
+          image: your-registry/coffee-table-service:latest
+          ports:
+            - containerPort: 3003
+          env:
+            - name: SERVER_PORT
+              value: "3003"
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/tabledb
+            - name: SPRING_DATASOURCE_USERNAME
+              value: postgres
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: coffee-secret
+                  key: POSTGRES_PASSWORD
+            - name: APP_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: coffee-config
+                  key: APP_BASE_URL
+            - name: SEED_TABLES_ON_STARTUP
+              value: "false"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: table-service
+spec:
+  selector:
+    app: table-service
+  ports:
+    - port: 3003
+      targetPort: 3003

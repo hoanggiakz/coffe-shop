@@ -22,6 +22,27 @@ Hệ thống phục vụ 3 nhóm người dùng:
 | `postgres` | PostgreSQL | CSDL |
 | `redis` | Redis | Realtime/cache |
 
+## Cấu trúc thư mục
+
+```text
+Microservices/
+├── apps/backend/
+│   ├── api-gateway/
+│   ├── user-service/
+│   ├── table-service/
+│   ├── order-service/
+│   ├── chat-service/
+│   ├── inventory-service/
+│   ├── payment-service/
+│   └── report-service/
+├── apps/frontend/
+├── ops/docs/
+├── ops/scripts/
+├── ops/k8s/
+├── docker-compose*.yml
+└── README.md
+```
+
 ## 2. Truy cập hệ thống
 
 - FE chính: `https://localhost`
@@ -40,6 +61,7 @@ Xem tài liệu chi tiết:
 
 - Chạy local/dev: [HUONG_DAN_CHAY_BE_FE.md](HUONG_DAN_CHAY_BE_FE.md)
 - Deploy production: [README_DEPLOY.md](README_DEPLOY.md)
+- Nghiệm thu Section 4 (4.1, 4.2, 4.3): [ops/docs/ACCEPTANCE_GUIDE.md](ops/docs/ACCEPTANCE_GUIDE.md)
 
 Khởi động nhanh:
 
@@ -266,3 +288,29 @@ Base URL: `https://localhost/api`
 
 - Repo có tài liệu chạy riêng: [HUONG_DAN_CHAY_BE_FE.md](HUONG_DAN_CHAY_BE_FE.md).
 - Cấu hình FE local dev đã chuẩn hóa cho cổng hiện tại (`http://localhost` / `https://localhost`).
+
+## 11. Gói bàn giao
+
+- Checklist bàn giao: [ops/docs/DELIVERABLES.md](ops/docs/DELIVERABLES.md)
+- Chuẩn đầu ra theo phase: [ops/docs/PHASED_OUTPUTS.md](ops/docs/PHASED_OUTPUTS.md)
+- Tiêu chí nghiệm thu chi tiết: [ops/docs/ACCEPTANCE_CRITERIA.md](ops/docs/ACCEPTANCE_CRITERIA.md)
+- Kiến trúc và luồng dữ liệu: [ops/docs/architecture.md](ops/docs/architecture.md)
+- Hướng dẫn triển khai dev/prod: [ops/docs/deployment-guide.md](ops/docs/deployment-guide.md)
+- API collection (Postman): [ops/docs/api/coffee-shop.postman_collection.json](ops/docs/api/coffee-shop.postman_collection.json)
+- Test reports: `reports/tests/`
+- Phase readiness reports: `reports/phases/`
+- Acceptance report: `reports/acceptance/`
+- K8s manifests: `ops/k8s/`
+
+Script bàn giao bắt buộc:
+
+```bash
+./build-all.sh
+./seed-database.sh
+./deploy.sh dev
+./deploy.sh prod
+node ops/scripts/check-acceptance-criteria.mjs
+```
+
+
+

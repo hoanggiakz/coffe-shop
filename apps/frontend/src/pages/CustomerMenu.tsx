@@ -1,0 +1,1746 @@
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import toast from 'react-hot-toast'
+import api from '@/utils/api'
+import { getSocket, disconnectSocket } from '@/utils/socket'
+import { showRealtimeNotification } from '@/utils/notifications'
+import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
+
+type PaymentMode = 'POSTPAY' | 'PREPAY'
+type PaymentProvider = 'VNPAY'
+
+interface CustomizationOption {
+  value: string
+  label: string
+  priceDelta?: number
+}
+
+interface CustomizationGroup {
+  id: string
+  label: string
+  type: 'single' | 'multi' | 'text'
+  options?: CustomizationOption[]
+  placeholder?: string
+}
+
+interface MenuItem {
+  id: string
+  name: string
+  description?: string
+  price: number
+  category: string
+  available: boolean
+  image?: string | null
+  customizations?: CustomizationGroup[]
+}
+
+interface CartItem {
+  quantity: number
+  note: string
+  selections: Record<string, string | string[]>
+}
+
+interface ChatMessage {
+  id?: string
+  senderName?: string
+  senderType?: 'CUSTOMER' | 'STAFF'
+  content: string
+  createdAt?: string
+}
+
+interface OrderItemStatus {
+  id: string
+  menuItemId: string
+  quantity: number
+  status: string
+  note?: string | null
+  options?: string | null
+  menuItemName?: string | null
+}
+
+interface OrderStatusResponse {
+  id: string
+  status: string
+  subtotalAmount?: number
+  discountAmount?: number
+  promotionCode?: string | null
+  totalAmount: number
+  orderItems: OrderItemStatus[]
+}
+
+interface PaymentStatusResponse {
+  paymentId: string
+  orderId: string
+  status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED'
+  provider: 'VNPAY' | 'CASH'
+  paymentUrl?: string | null
+  transferContent?: string | null
+  vietQr?: {
+    qrImageUrl: string
+    transferContent: string
+    accountNo?: string
+    accountName?: string
+    bankBin?: string
+  } | null
+}
+
+interface PromotionPreview {
+  code: string
+  description?: string
+  discountAmount: number
+  finalAmount: number
+}
+
+interface CustomerSession {
+  id: string
+  email: string
+  name: string
+  role: string
+  phone?: string | null
+  loyaltyPoints: number
+  memberTier: 'STANDARD' | 'SILVER' | 'GOLD'
+  totalSpent: number
+}
+
+interface CustomerAuthResponse {
+  accessToken: string
+  user: CustomerSession
+}
+
+interface CustomerOfferResponse {
+  tier: string
+  loyaltyPoints: number
+  offers: string[]
+}
+
+function normalizeCustomizations(raw: unknown): CustomizationGroup[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((entry: any) => ({
+      id: String(entry?.id || ''),
+      label: String(entry?.label || ''),
+      type: entry?.type === 'multi' || entry?.type === 'text' ? entry.type : 'single',
+      options: Array.isArray(entry?.options)
+        ? entry.options.map((opt: any) => ({
+            value: String(opt?.value || ''),
+            label: String(opt?.label || ''),
+            priceDelta: Number(opt?.priceDelta || 0),
+          }))
+        : undefined,
+      placeholder: entry?.placeholder ? String(entry.placeholder) : undefined,
+    }))
+    .filter((entry) => entry.id && entry.label)
+}
+
+function toNumber(value: string | null): number | null {
+  if (!value) return null
+  const parsed = Number(value)
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+const fieldClass =
+  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60'
+
+const panelClass = 'rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm'
+
+export default function CustomerMenu() {
+  const [searchParams] = useSearchParams()
+  const qrTableId = searchParams.get('tableId') || ''
+  const qrBranchId = searchParams.get('branchId') || ''
+  const qrTableNumber = toNumber(searchParams.get('tableNumber'))
+
+  const [tableId, setTableId] = useState('')
+  const [tableName, setTableName] = useState('Chưa xác định')
+  const [resolvingTable, setResolvingTable] = useState(true)
+
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const [loadingMenu, setLoadingMenu] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [cart, setCart] = useState<Record<string, CartItem>>({})
+  const [cartLoaded, setCartLoaded] = useState(false)
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('POSTPAY')
+  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('VNPAY')
+  const [promoCode, setPromoCode] = useState('')
+  const [promoPreview, setPromoPreview] = useState<PromotionPreview | null>(null)
+  const [applyingPromo, setApplyingPromo] = useState(false)
+  const [searchText, setSearchText] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('ALL')
+
+  const [currentOrderId, setCurrentOrderId] = useState('')
+  const [currentOrder, setCurrentOrder] = useState<OrderStatusResponse | null>(null)
+  const [editingCurrentOrder, setEditingCurrentOrder] = useState(false)
+  const [loadingOrderStatus, setLoadingOrderStatus] = useState(false)
+  const [currentPayment, setCurrentPayment] = useState<PaymentStatusResponse | null>(null)
+  const [loadingPaymentStatus, setLoadingPaymentStatus] = useState(false)
+  const [requestingCashPayment, setRequestingCashPayment] = useState(false)
+
+  const [staffReason, setStaffReason] = useState('Cần hỗ trợ')
+  const [customReason, setCustomReason] = useState('')
+  const [callingStaff, setCallingStaff] = useState(false)
+
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [chatText, setChatText] = useState('')
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatNeedProfile, setChatNeedProfile] = useState(false)
+  const [chatConnecting, setChatConnecting] = useState(false)
+  const [chatCustomerName, setChatCustomerName] = useState('')
+  const [chatCustomerPhone, setChatCustomerPhone] = useState('')
+
+  const [customerToken, setCustomerToken] = useState('')
+  const [customerSession, setCustomerSession] = useState<CustomerSession | null>(null)
+  const [customerOffers, setCustomerOffers] = useState<string[]>([])
+  const [customerOrderHistory, setCustomerOrderHistory] = useState<OrderStatusResponse[]>([])
+  const [customerAuthOpen, setCustomerAuthOpen] = useState(false)
+  const [customerAuthTab, setCustomerAuthTab] = useState<'LOGIN' | 'REGISTER'>('LOGIN')
+  const [customerAuthMode, setCustomerAuthMode] = useState<'EMAIL' | 'OTP'>('EMAIL')
+  const [authName, setAuthName] = useState('')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authPhone, setAuthPhone] = useState('')
+  const [authOtp, setAuthOtp] = useState('')
+  const [requestingOtp, setRequestingOtp] = useState(false)
+  const [authSubmitting, setAuthSubmitting] = useState(false)
+  const [loadingCustomerData, setLoadingCustomerData] = useState(false)
+  const cartPanelRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    let ignore = false
+    const resolveTable = async () => {
+      setResolvingTable(true)
+      if (qrTableId) {
+        try {
+          const { data } = await api.get(`/tables/${qrTableId}`)
+          if (!data?.id) {
+            toast.error('Không tìm thấy bàn từ QR')
+            if (!ignore) {
+              setTableId('')
+              setTableName('Không xác định')
+            }
+            return
+          }
+          if (!ignore) {
+            setTableId(String(data.id))
+            setTableName(`Bàn ${data.number ?? qrTableNumber ?? qrTableId}`)
+          }
+        } catch (error: any) {
+          if (!ignore) {
+            setTableId('')
+            setTableName('Không xác định')
+          }
+          toast.error(error.response?.data?.message || 'Không tìm thấy bàn từ QR')
+        } finally {
+          if (!ignore) {
+            setResolvingTable(false)
+          }
+        }
+        return
+      }
+
+      if (!qrBranchId || qrTableNumber === null) {
+        if (!ignore) {
+          toast.error('QR không hợp lệ: thiếu tableId hoặc branchId + tableNumber')
+          setResolvingTable(false)
+        }
+        return
+      }
+
+      try {
+        const { data } = await api.get('/tables', { params: { branchId: qrBranchId } })
+        const matched = (Array.isArray(data) ? data : []).find((table: any) => Number(table?.number) === qrTableNumber)
+        if (!matched?.id) {
+          toast.error('Không tìm thấy bàn từ QR')
+          return
+        }
+        if (!ignore) {
+          setTableId(matched.id)
+          setTableName(`Bàn ${matched.number}`)
+        }
+      } catch (error: any) {
+        toast.error(error.response?.data?.message || 'Không xác định được bàn')
+      } finally {
+        if (!ignore) setResolvingTable(false)
+      }
+    }
+
+    resolveTable()
+    return () => {
+      ignore = true
+    }
+  }, [qrTableId, qrBranchId, qrTableNumber])
+
+  useEffect(() => {
+    const loadMenu = async () => {
+      try {
+        const { data } = await api.get('/orders/menu', {
+          params: {
+            tableId: tableId || undefined,
+            branchId: qrBranchId || undefined,
+          },
+        })
+        const normalized = (Array.isArray(data) ? data : []).map((item: any) => ({
+          ...item,
+          customizations: normalizeCustomizations(item.customizations),
+        }))
+        setMenuItems(normalized)
+      } catch (error: any) {
+        toast.error(error.response?.data?.message || 'Không tải được menu')
+      } finally {
+        setLoadingMenu(false)
+      }
+    }
+    loadMenu()
+  }, [tableId, qrBranchId])
+
+  const cartStorageKey = useMemo(() => (tableId ? `customer-cart:${tableId}` : ''), [tableId])
+  const orderStorageKey = useMemo(() => (tableId ? `customer-last-order:${tableId}` : ''), [tableId])
+  const chatProfileStorageKey = useMemo(() => (tableId ? `customer-chat-profile:${tableId}` : ''), [tableId])
+  const customerAuthStorageKey = 'customer-auth-session'
+
+  useEffect(() => {
+    if (!cartStorageKey) return
+    try {
+      const raw = localStorage.getItem(cartStorageKey)
+      if (raw) {
+        setCart(JSON.parse(raw))
+      } else {
+        setCart({})
+      }
+    } catch {
+      setCart({})
+    } finally {
+      setCartLoaded(true)
+    }
+  }, [cartStorageKey])
+
+  useEffect(() => {
+    if (!cartStorageKey || !cartLoaded) return
+    localStorage.setItem(cartStorageKey, JSON.stringify(cart))
+  }, [cartStorageKey, cart, cartLoaded])
+
+  useEffect(() => {
+    if (!orderStorageKey) return
+    setCurrentOrderId(localStorage.getItem(orderStorageKey) || '')
+  }, [orderStorageKey])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(customerAuthStorageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      const token = String(parsed?.token || '')
+      const user = parsed?.user as CustomerSession | undefined
+      const role = String(user?.role || '').toUpperCase()
+      if (!token || !user?.id || role !== 'CUSTOMER') {
+        localStorage.removeItem(customerAuthStorageKey)
+        return
+      }
+      setCustomerToken(token)
+      setCustomerSession(user)
+      setChatCustomerName(String(user.name || ''))
+      if (user.phone) setChatCustomerPhone(String(user.phone))
+    } catch {
+      // ignore broken storage
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!chatProfileStorageKey) return
+    try {
+      const raw = localStorage.getItem(chatProfileStorageKey)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        setChatCustomerName(String(parsed?.name || ''))
+        setChatCustomerPhone(String(parsed?.phone || ''))
+        return
+      }
+    } catch {
+      // ignore invalid localStorage
+    }
+    setChatCustomerName(customerSession?.name || '')
+    setChatCustomerPhone(customerSession?.phone || '')
+    setMessages([])
+  }, [chatProfileStorageKey, customerSession?.id])
+
+  useEffect(() => {
+    if (!tableId || currentOrderId) return
+    const loadLatestOrder = async () => {
+      try {
+        const { data } = await api.get('/orders', { params: { tableId } })
+        if (Array.isArray(data) && data.length > 0) {
+          const latestOrderId = String(data[0].id)
+          setCurrentOrderId(latestOrderId)
+          if (orderStorageKey) localStorage.setItem(orderStorageKey, latestOrderId)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadLatestOrder()
+  }, [tableId, currentOrderId, orderStorageKey])
+
+  const saveCustomerSession = (token: string, user: CustomerSession) => {
+    const normalizedUser: CustomerSession = {
+      ...user,
+      loyaltyPoints: Number(user.loyaltyPoints || 0),
+      totalSpent: Number(user.totalSpent || 0),
+      memberTier: (user.memberTier || 'STANDARD') as CustomerSession['memberTier'],
+    }
+    setCustomerToken(token)
+    setCustomerSession(normalizedUser)
+    setChatCustomerName(normalizedUser.name || chatCustomerName)
+    setChatCustomerPhone(normalizedUser.phone || chatCustomerPhone)
+    localStorage.setItem(customerAuthStorageKey, JSON.stringify({ token, user: normalizedUser }))
+  }
+
+  const clearCustomerSession = () => {
+    setCustomerToken('')
+    setCustomerSession(null)
+    setCustomerOffers([])
+    setCustomerOrderHistory([])
+    setCustomerAuthOpen(false)
+    localStorage.removeItem(customerAuthStorageKey)
+  }
+
+  const fetchCustomerProfile = async (token: string) => {
+    const { data } = await api.get('/users/customer/profile', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    return data as CustomerSession
+  }
+
+  const fetchCustomerOffers = async (token: string) => {
+    const { data } = await api.get('/users/customer/offers', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const payload = data as CustomerOfferResponse
+    return payload.offers || []
+  }
+
+  const fetchCustomerOrderHistory = async (user: CustomerSession) => {
+    const params: Record<string, string | number> = { limit: 10 }
+    if (user.id) params.customerId = user.id
+    else if (user.phone) params.phone = user.phone
+    else if (user.email) params.email = user.email
+
+    const { data } = await api.get('/orders/history', { params })
+    return Array.isArray(data) ? (data as OrderStatusResponse[]) : []
+  }
+
+  const loadCustomerData = async (token: string, baseUser: CustomerSession) => {
+    setLoadingCustomerData(true)
+    try {
+      const [profile, offers, history] = await Promise.all([
+        fetchCustomerProfile(token),
+        fetchCustomerOffers(token),
+        fetchCustomerOrderHistory(baseUser),
+      ])
+      saveCustomerSession(token, profile)
+      setCustomerOffers(offers)
+      setCustomerOrderHistory(history)
+    } catch (error: any) {
+      clearCustomerSession()
+      const status = Number(error?.response?.status || 0)
+      if (status === 401 || status === 403) {
+        toast.error('Phiên khách hàng không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.')
+      } else {
+        toast.error(error.response?.data?.message || 'Phiên đăng nhập đã hết hạn')
+      }
+    } finally {
+      setLoadingCustomerData(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!customerToken || !customerSession?.id) return
+    loadCustomerData(customerToken, customerSession)
+  }, [customerToken])
+
+  const requestCustomerOtp = async () => {
+    const phone = authPhone.trim()
+    if (!phone) {
+      toast.error('Nhap so dien thoai truoc khi lay OTP')
+      return
+    }
+    setRequestingOtp(true)
+    try {
+      const { data } = await api.post('/users/customer/request-otp', { phone })
+      if (data?.otp) {
+        toast.success(`OTP sandbox: ${data.otp}`)
+      } else {
+        toast.success('OTP da duoc gui')
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Khong gui duoc OTP')
+    } finally {
+      setRequestingOtp(false)
+    }
+  }
+
+  const submitCustomerAuth = async (e: FormEvent) => {
+    e.preventDefault()
+    setAuthSubmitting(true)
+    try {
+      let data: CustomerAuthResponse
+      if (customerAuthMode === 'EMAIL') {
+        if (customerAuthTab === 'REGISTER') {
+          const res = await api.post('/users/customer/register-email', {
+            name: authName.trim(),
+            email: authEmail.trim(),
+            password: authPassword,
+            phone: authPhone.trim() || undefined,
+          })
+          data = res.data as CustomerAuthResponse
+        } else {
+          const res = await api.post('/users/customer/login-email', {
+            email: authEmail.trim(),
+            password: authPassword,
+          })
+          data = res.data as CustomerAuthResponse
+        }
+      } else {
+        if (customerAuthTab === 'REGISTER') {
+          const res = await api.post('/users/customer/register-otp', {
+            name: authName.trim(),
+            phone: authPhone.trim(),
+            otp: authOtp.trim(),
+            email: authEmail.trim() || undefined,
+          })
+          data = res.data as CustomerAuthResponse
+        } else {
+          const res = await api.post('/users/customer/login-otp', {
+            phone: authPhone.trim(),
+            otp: authOtp.trim(),
+          })
+          data = res.data as CustomerAuthResponse
+        }
+      }
+
+      saveCustomerSession(data.accessToken, data.user)
+      setCustomerAuthOpen(false)
+      setAuthPassword('')
+      setAuthOtp('')
+      toast.success('Đăng nhập thành công')
+      await loadCustomerData(data.accessToken, data.user)
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Đăng nhập hoặc đăng ký thất bại')
+    } finally {
+      setAuthSubmitting(false)
+    }
+  }
+
+  const joinChatSession = (customerName: string, customerPhone?: string) => {
+    if (!tableId) return
+    const socket = getSocket()
+    if (!socket.connected) {
+      socket.connect()
+    }
+    setChatConnecting(true)
+    socket.emit('join', {
+      tableId,
+      customerName,
+      customerPhone: customerPhone || undefined,
+    })
+  }
+
+  useEffect(() => {
+    if (!chatOpen || !tableId) return
+
+    const socket = getSocket()
+    if (!socket.connected) {
+      socket.connect()
+    }
+
+    const onJoined = (payload: { messages?: ChatMessage[] }) => {
+      setMessages(payload.messages || [])
+      setChatConnecting(false)
+    }
+    const onNewMessage = (message: ChatMessage) => {
+      setMessages((prev) => [...prev, message])
+      if (message.senderType === 'STAFF') {
+        showRealtimeNotification(message.senderName || 'Nhân viên', message.content)
+      }
+    }
+    const onSocketError = (payload: { message?: string }) => {
+      setChatConnecting(false)
+      if (payload?.message) {
+        toast.error(payload.message)
+      }
+    }
+
+    socket.on('joined', onJoined)
+    socket.on('new-message', onNewMessage)
+    socket.on('error', onSocketError)
+
+    if (chatCustomerName.trim()) {
+      setChatNeedProfile(false)
+      joinChatSession(chatCustomerName.trim(), chatCustomerPhone.trim())
+    } else {
+      setChatNeedProfile(true)
+      setChatConnecting(false)
+    }
+
+    return () => {
+      socket.off('joined', onJoined)
+      socket.off('new-message', onNewMessage)
+      socket.off('error', onSocketError)
+      disconnectSocket()
+      setChatConnecting(false)
+    }
+  }, [chatOpen, tableId])
+
+  const menuMap = useMemo(() => new Map(menuItems.map((item) => [item.id, item])), [menuItems])
+  const categories = useMemo(() => ['ALL', ...new Set(menuItems.map((item) => item.category))], [menuItems])
+
+  const filteredItems = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase()
+    return menuItems.filter((item) => {
+      const byCategory = selectedCategory === 'ALL' || item.category === selectedCategory
+      const byKeyword =
+        !keyword ||
+        item.name.toLowerCase().includes(keyword) ||
+        (item.description || '').toLowerCase().includes(keyword)
+      return byCategory && byKeyword
+    })
+  }, [menuItems, searchText, selectedCategory])
+
+  const ensureCartItem = (menuItemId: string): CartItem => {
+    const existing = cart[menuItemId]
+    if (existing) return existing
+    const menuItem = menuMap.get(menuItemId)
+    const defaults: Record<string, string | string[]> = {}
+    ;(menuItem?.customizations || []).forEach((group) => {
+      defaults[group.id] = group.type === 'multi' ? [] : String(group.options?.[0]?.value || '')
+    })
+    return { quantity: 0, note: '', selections: defaults }
+  }
+
+  const getCustomizationDelta = (menuItem: MenuItem, cartItem: CartItem): number => {
+    let totalDelta = 0
+    ;(menuItem.customizations || []).forEach((group) => {
+      if (!group.options?.length) return
+      const selected = cartItem.selections[group.id]
+      if (group.type === 'single' && typeof selected === 'string') {
+        const match = group.options.find((option) => option.value === selected)
+        totalDelta += Number(match?.priceDelta || 0)
+      }
+      if (group.type === 'multi' && Array.isArray(selected)) {
+        selected.forEach((value) => {
+          const match = group.options?.find((option) => option.value === value)
+          totalDelta += Number(match?.priceDelta || 0)
+        })
+      }
+    })
+    return totalDelta
+  }
+
+  const cartTotal = useMemo(() => {
+    return Object.entries(cart).reduce((sum, [menuItemId, cartItem]) => {
+      const menuItem = menuMap.get(menuItemId)
+      if (!menuItem || cartItem.quantity <= 0) return sum
+      return sum + (menuItem.price + getCustomizationDelta(menuItem, cartItem)) * cartItem.quantity
+    }, 0)
+  }, [cart, menuMap])
+  const previewDiscount = promoPreview?.discountAmount || 0
+  const payableCartTotal = Math.max(cartTotal - previewDiscount, 0)
+  const cartItemCount = useMemo(
+    () => Object.values(cart).reduce((sum, item) => sum + Math.max(item.quantity || 0, 0), 0),
+    [cart],
+  )
+
+  const increase = (menuItemId: string) => {
+    setCart((prev) => {
+      const current = prev[menuItemId] || ensureCartItem(menuItemId)
+      return { ...prev, [menuItemId]: { ...current, quantity: current.quantity + 1 } }
+    })
+  }
+
+  const decrease = (menuItemId: string) => {
+    setCart((prev) => {
+      const current = prev[menuItemId]
+      if (!current) return prev
+      if (current.quantity <= 1) {
+        const next = { ...prev }
+        delete next[menuItemId]
+        return next
+      }
+      return { ...prev, [menuItemId]: { ...current, quantity: current.quantity - 1 } }
+    })
+  }
+
+  const updateSelection = (menuItemId: string, groupId: string, value: string | string[]) => {
+    setCart((prev) => {
+      const current = prev[menuItemId] || ensureCartItem(menuItemId)
+      return {
+        ...prev,
+        [menuItemId]: {
+          ...current,
+          selections: {
+            ...current.selections,
+            [groupId]: value,
+          },
+        },
+      }
+    })
+  }
+
+  const updateNote = (menuItemId: string, note: string) => {
+    setCart((prev) => {
+      const current = prev[menuItemId] || ensureCartItem(menuItemId)
+      return { ...prev, [menuItemId]: { ...current, note } }
+    })
+  }
+
+  const parseOrderItemSelections = (rawOptions?: string | null): Record<string, string | string[]> => {
+    if (!rawOptions) return {}
+    try {
+      const parsed = JSON.parse(rawOptions) as { selections?: Record<string, string | string[]> }
+      return parsed?.selections && typeof parsed.selections === 'object' ? parsed.selections : {}
+    } catch {
+      return {}
+    }
+  }
+
+  const populateCartFromCurrentOrder = () => {
+    if (!currentOrder || currentOrder.status !== 'PENDING') {
+      toast.error('Chỉ có thể sửa đơn đang chờ xác nhận')
+      return
+    }
+
+    if (currentPayment) {
+      toast.error('Đơn đã có giao dịch thanh toán, không thể sửa')
+      return
+    }
+
+    const nextCart = currentOrder.orderItems.reduce<Record<string, CartItem>>((acc, item) => {
+      acc[item.menuItemId] = {
+        quantity: Number(item.quantity || 0),
+        note: String(item.note || ''),
+        selections: parseOrderItemSelections(item.options),
+      }
+      return acc
+    }, {})
+
+    setCart(nextCart)
+    setEditingCurrentOrder(true)
+    setPromoCode(currentOrder.promotionCode || '')
+    setPromoPreview(
+      currentOrder.promotionCode && Number(currentOrder.discountAmount || 0) > 0
+        ? {
+            code: String(currentOrder.promotionCode || ''),
+            discountAmount: Number(currentOrder.discountAmount || 0),
+            finalAmount: Number(currentOrder.totalAmount || 0),
+          }
+        : null,
+    )
+    scrollToCart()
+    toast.success('Đã nạp đơn hiện tại vào giỏ hàng để chỉnh sửa')
+  }
+
+  const fetchOrderStatus = async (orderId: string) => {
+    if (!orderId) return
+    setLoadingOrderStatus(true)
+    try {
+      const { data } = await api.get(`/orders/${orderId}`)
+      setCurrentOrder(data)
+    } catch (error: any) {
+      if (error.response?.status !== 404) {
+        toast.error(error.response?.data?.message || 'Không tải được trạng thái đơn')
+      }
+    } finally {
+      setLoadingOrderStatus(false)
+    }
+  }
+
+  const fetchPaymentStatus = async (orderId: string) => {
+    if (!orderId) return
+    setLoadingPaymentStatus(true)
+    try {
+      const { data } = await api.get(`/v1/payments/orders/${orderId}`)
+      setCurrentPayment(data)
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        setCurrentPayment(null)
+      } else {
+        toast.error(error.response?.data?.message || 'Khong tai duoc trang thai thanh toan')
+      }
+    } finally {
+      setLoadingPaymentStatus(false)
+    }
+  }
+
+  const applyPromotion = async () => {
+    const code = promoCode.trim()
+    if (!code) {
+      setPromoPreview(null)
+      return
+    }
+    if (cartTotal <= 0) {
+      toast.error('Vui long co it nhat 1 mon truoc khi ap ma')
+      return
+    }
+
+    setApplyingPromo(true)
+    try {
+      const selectedMenuItemIds = Object.entries(cart)
+        .filter(([, cartItem]) => cartItem.quantity > 0)
+        .map(([menuItemId]) => menuItemId)
+
+      const { data } = await api.get('/orders/promotions/validate', {
+        params: {
+          code,
+          subtotal: cartTotal,
+          menuItemIds: selectedMenuItemIds.join(','),
+          tableId: tableId || undefined,
+          branchId: qrBranchId || undefined,
+        },
+      })
+      setPromoPreview({
+        code: String(data?.code || code).toUpperCase(),
+        description: data?.description || undefined,
+        discountAmount: Number(data?.discountAmount || 0),
+        finalAmount: Number(data?.finalAmount || cartTotal),
+      })
+      toast.success('Đã áp dụng mã khuyến mãi')
+    } catch (error: any) {
+      setPromoPreview(null)
+      toast.error(error.response?.data?.message || 'Ma khuyen mai khong hop le')
+    } finally {
+      setApplyingPromo(false)
+    }
+  }
+
+  const requestCashPayment = async () => {
+    if (!tableId || !currentOrder) return
+    setRequestingCashPayment(true)
+    try {
+      const { data } = await api.post(
+        '/v1/payments',
+        {
+          orderId: currentOrder.id,
+          amount: Number(currentOrder.totalAmount),
+          provider: 'CASH',
+          tableId,
+          customerName: customerSession?.name || tableName,
+        },
+        customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
+      )
+      setCurrentPayment(data)
+      toast.success('Da gui yeu cau thanh toan tien mat cho nhan vien')
+      await fetchPaymentStatus(currentOrder.id)
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Khong tao duoc yeu cau tien mat')
+    } finally {
+      setRequestingCashPayment(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!currentOrderId) {
+      setCurrentOrder(null)
+      setCurrentPayment(null)
+      return
+    }
+    fetchOrderStatus(currentOrderId)
+    fetchPaymentStatus(currentOrderId)
+    const timer = window.setInterval(() => {
+      fetchOrderStatus(currentOrderId)
+      fetchPaymentStatus(currentOrderId)
+    }, 8000)
+    return () => window.clearInterval(timer)
+  }, [currentOrderId])
+
+  const submitOrder = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!tableId) {
+      toast.error('Thiếu thông tin bàn từ QR')
+      return
+    }
+    const items = Object.entries(cart)
+      .filter(([, cartItem]) => cartItem.quantity > 0)
+      .map(([menuItemId, cartItem]) => {
+        const menuItem = menuMap.get(menuItemId)
+        return {
+          menuItemId,
+          quantity: cartItem.quantity,
+          note: cartItem.note || undefined,
+          options: JSON.stringify({
+            selections: cartItem.selections,
+            extraAmount: menuItem ? getCustomizationDelta(menuItem, cartItem) : 0,
+          }),
+        }
+      })
+
+    if (!items.length) {
+      toast.error('Vui lòng chọn ít nhất 1 món')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      if (editingCurrentOrder && currentOrderId) {
+        const { data: updatedOrder } = await api.patch(`/orders/${currentOrderId}/customer-items`, {
+          tableId,
+          items,
+        })
+        setCurrentOrder(updatedOrder)
+        setEditingCurrentOrder(false)
+        toast.success('Đã cập nhật món trong đơn')
+        await fetchOrderStatus(currentOrderId)
+        await fetchPaymentStatus(currentOrderId)
+      } else {
+        const { data: order } = await api.post('/orders', {
+          tableId,
+          branchId: qrBranchId || undefined,
+          customerId: customerSession?.id || undefined,
+          customerEmail: customerSession?.email || undefined,
+          customerName: customerSession?.name || chatCustomerName || tableName,
+          customerPhone: customerSession?.phone || chatCustomerPhone || undefined,
+          promoCode: promoPreview?.code || promoCode.trim() || undefined,
+          items,
+        })
+        const newOrderId = String(order.id)
+        setCurrentOrderId(newOrderId)
+        if (orderStorageKey) localStorage.setItem(orderStorageKey, newOrderId)
+
+        if (paymentMode === 'PREPAY') {
+          const { data: payment } = await api.post(
+            '/v1/payments',
+            {
+              orderId: newOrderId,
+              amount: Number(order.totalAmount),
+              provider: paymentProvider,
+              tableId,
+              customerName: customerSession?.name || tableName,
+            },
+            customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
+          )
+          setCurrentPayment(payment)
+          if (payment?.paymentUrl) window.open(payment.paymentUrl, '_blank')
+          toast.success('Da tao don va chuyen sang cong thanh toan')
+        } else {
+          toast.success(`Đặt món thành công. Mã đơn: ${maDonHangNgan(newOrderId)}`)
+        }
+
+        fetchOrderStatus(newOrderId)
+        fetchPaymentStatus(newOrderId)
+        if (customerToken && customerSession) {
+          loadCustomerData(customerToken, customerSession)
+        }
+      }
+
+      setCart({})
+      setPromoCode('')
+      setPromoPreview(null)
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Đặt món thất bại')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const sendChat = () => {
+    if (!chatText.trim() || !tableId) {
+      return
+    }
+    if (!chatOpen) {
+      setChatOpen(true)
+      return
+    }
+    if (chatNeedProfile || !chatCustomerName.trim()) {
+      toast.error('Vui long nhap ten de bat dau chat')
+      setChatNeedProfile(true)
+      return
+    }
+    const socket = getSocket()
+    socket.emit('send-message', {
+      content: chatText,
+      senderType: 'CUSTOMER',
+      senderName: chatCustomerName.trim(),
+    })
+    setChatText('')
+  }
+
+  const toggleChatWidget = () => {
+    if (!tableId) {
+      toast.error('Chua xac dinh duoc ban')
+      return
+    }
+    setChatOpen((prev) => !prev)
+  }
+
+  const startChatSession = (e: FormEvent) => {
+    e.preventDefault()
+    const customerName = chatCustomerName.trim()
+    const customerPhone = chatCustomerPhone.trim()
+    if (!customerName) {
+      toast.error('Vui long nhap ten truoc khi chat')
+      return
+    }
+    if (chatProfileStorageKey) {
+      localStorage.setItem(chatProfileStorageKey, JSON.stringify({ name: customerName, phone: customerPhone }))
+    }
+    setChatNeedProfile(false)
+    joinChatSession(customerName, customerPhone)
+  }
+
+  const callStaff = async () => {
+    if (!tableId) return
+    const reason = staffReason === 'Khác' ? customReason.trim() || 'Cần hỗ trợ tại bàn' : staffReason
+    setCallingStaff(true)
+    try {
+      await api.post(`/tables/${tableId}/call-staff`, { reason })
+      toast.success('Đã gửi yêu cầu gọi phục vụ')
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Gọi phục vụ thất bại')
+    } finally {
+      setCallingStaff(false)
+    }
+  }
+
+  const scrollToCart = () => {
+    cartPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl px-3 pb-28 pt-4 sm:px-6 sm:pt-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">{resolvingTable ? 'Đang xác định bàn...' : `Thực đơn ${tableName}`}</h1>
+          <p className="mt-1 text-sm text-slate-500">Đặt món qua QR, theo dõi trạng thái và gọi nhân viên.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-800">
+            {cartItemCount} món trong giỏ
+          </span>
+          <span className="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
+            Tạm tính {payableCartTotal.toLocaleString()}đ
+          </span>
+          {currentOrder && (
+            <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-700">
+              Đơn hiện tại: {trangThaiDonHang(currentOrder.status)}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm sm:grid-cols-3">
+        <input
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          className={fieldClass}
+          placeholder="Tìm món theo tên hoặc mô tả"
+        />
+        <select
+          value={selectedCategory}
+          onChange={(e) => setSelectedCategory(e.target.value)}
+          className={fieldClass}
+        >
+          {categories.map((category) => (
+            <option key={category} value={category}>
+              {category === 'ALL' ? 'Tất cả danh mục' : category}
+            </option>
+          ))}
+        </select>
+        <div className="flex items-center justify-end text-sm text-slate-500">{filteredItems.length} món hiển thị</div>
+      </div>
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        {categories.map((category) => (
+          <button
+            key={`chip-${category}`}
+            type="button"
+            onClick={() => setSelectedCategory(category)}
+            className={`whitespace-nowrap rounded-full px-3 py-2 text-sm ${
+              selectedCategory === category
+                ? 'bg-sky-600 text-white'
+                : 'border border-sky-100 bg-white text-slate-700'
+            }`}
+          >
+            {category === 'ALL' ? 'Tất cả' : category}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="space-y-3 lg:col-span-2">
+          {loadingMenu && <p>Đang tải menu...</p>}
+          {!loadingMenu &&
+            filteredItems.map((item) => {
+              const cartItem = cart[item.id] || ensureCartItem(item.id)
+              const selectedCount = cart[item.id]?.quantity || 0
+              return (
+              <div key={item.id} className="rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <img
+                      src={item.image || `https://placehold.co/120x120?text=${encodeURIComponent(item.name)}`}
+                      alt={item.name}
+                      className="h-16 w-16 rounded-xl object-cover"
+                    />
+                    <div>
+                    <p className="font-semibold text-slate-900">{item.name}</p>
+                    <p className="text-sm text-slate-500">{item.description || '---'}</p>
+                  </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold text-sky-700">{item.price.toLocaleString()}đ</p>
+                    <p className="text-xs text-slate-500">{item.category}</p>
+                  </div>
+                </div>
+                {(item.customizations || []).map((group) => (
+                  <div key={`${item.id}-${group.id}`} className="mt-3">
+                    <p className="mb-1 text-xs font-semibold uppercase text-slate-500">{group.label}</p>
+                    {group.type === 'single' && (
+                      <select
+                        value={String(cartItem.selections[group.id] || '')}
+                        onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
+                        className={fieldClass}
+                      >
+                        {(group.options || []).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {group.type === 'multi' && (
+                      <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                        {(group.options || []).map((option) => {
+                          const selectedValues = Array.isArray(cartItem.selections[group.id])
+                            ? (cartItem.selections[group.id] as string[])
+                            : []
+                          const checked = selectedValues.includes(option.value)
+                          return (
+                            <label key={option.value} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const nextValues = e.target.checked
+                                    ? Array.from(new Set([...selectedValues, option.value]))
+                                    : selectedValues.filter((entry) => entry !== option.value)
+                                  updateSelection(item.id, group.id, nextValues)
+                                }}
+                              />
+                              {option.label}
+                            </label>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {group.type === 'text' && (
+                      <input
+                        value={String(cartItem.selections[group.id] || '')}
+                        onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
+                        className={fieldClass}
+                        placeholder={group.placeholder || 'Nhập yêu cầu'}
+                      />
+                    )}
+                  </div>
+                ))}
+                <textarea
+                  value={cartItem.note}
+                  onChange={(e) => updateNote(item.id, e.target.value)}
+                  className={`${fieldClass} mt-3`}
+                  rows={2}
+                  placeholder="Ghi chú cho món (tùy chọn)"
+                />
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => decrease(item.id)}
+                    className="inline-flex h-10 min-w-10 items-center justify-center rounded-xl border border-sky-200 px-3 py-1 text-sm"
+                  >
+                    -
+                  </button>
+                  <span className="w-8 text-center">{selectedCount}</span>
+                  <button
+                    type="button"
+                    onClick={() => increase(item.id)}
+                    className="inline-flex h-10 min-w-10 items-center justify-center rounded-xl border border-sky-200 px-3 py-1 text-sm"
+                    disabled={!item.available}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            )})}
+        </div>
+
+        <div ref={cartPanelRef} className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+          <div className={panelClass}>
+            <div className="flex items-center justify-between">
+              <p className="font-semibold text-slate-900">Tai khoan thanh vien</p>
+              {!customerSession ? (
+                <button
+                  type="button"
+                  onClick={() => setCustomerAuthOpen(true)}
+                  className="rounded-xl border border-sky-200 px-3 py-1 text-xs"
+                >
+                  Đăng nhập / Đăng ký
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={clearCustomerSession}
+                  className="rounded-xl border border-red-200 px-3 py-1 text-xs text-red-600"
+                >
+                  Dang xuat
+                </button>
+              )}
+            </div>
+
+            {!customerSession && (
+              <p className="mt-2 text-sm text-gray-500">
+                Đăng nhập để lưu lịch sử đơn hàng, tích điểm và nhận ưu đãi thành viên.
+              </p>
+            )}
+
+            {customerSession && (
+              <div className="mt-2 space-y-2 text-sm">
+                <p>
+                  Xin chao <span className="font-semibold">{customerSession.name}</span>
+                </p>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded bg-amber-50 p-2">
+                    <p className="text-gray-500">Diem</p>
+                    <p className="font-semibold text-amber-700">{customerSession.loyaltyPoints}</p>
+                  </div>
+                  <div className="rounded bg-blue-50 p-2">
+                    <p className="text-gray-500">Hang</p>
+                    <p className="font-semibold text-blue-700">{customerSession.memberTier}</p>
+                  </div>
+                  <div className="rounded bg-emerald-50 p-2">
+                    <p className="text-gray-500">Chi tieu</p>
+                    <p className="font-semibold text-emerald-700">{customerSession.totalSpent.toLocaleString()}đ</p>
+                  </div>
+                </div>
+                {loadingCustomerData && <p className="text-xs text-gray-500">Dang tai du lieu thanh vien...</p>}
+                {!loadingCustomerData && customerOffers.length > 0 && (
+                  <div className="rounded border border-gray-100 p-2 text-xs">
+                    <p className="font-semibold text-gray-700">Uu dai cua ban</p>
+                    {customerOffers.slice(0, 3).map((offer, idx) => (
+                      <p key={`${offer}-${idx}`} className="mt-1 text-gray-600">
+                        - {offer}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {!loadingCustomerData && customerOrderHistory.length > 0 && (
+                  <div className="rounded border border-gray-100 p-2 text-xs">
+                    <p className="font-semibold text-gray-700">Lich su don gan day</p>
+                    <div className="mt-1 space-y-1">
+                      {customerOrderHistory.slice(0, 4).map((historyOrder) => (
+                        <div key={historyOrder.id} className="flex items-center justify-between">
+                          <span>{maDonHangNgan(historyOrder.id)}</span>
+                          <span>{historyOrder.totalAmount.toLocaleString()}đ</span>
+                          <span className="font-semibold">{historyOrder.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <form onSubmit={submitOrder} className={panelClass}>
+            <p className="font-semibold text-slate-900">Giỏ hàng</p>
+            <div className="mt-3 space-y-2 text-sm">
+              {Object.entries(cart).filter(([, entry]) => entry.quantity > 0).length === 0 && (
+                <p className="text-gray-500">Chưa có món</p>
+              )}
+              {Object.entries(cart).map(([id, entry]) => {
+                if (entry.quantity <= 0) return null
+                const item = menuMap.get(id)
+                if (!item) return null
+                const delta = getCustomizationDelta(item, entry)
+                return (
+                  <div key={id} className="rounded border border-gray-100 p-2">
+                    <div className="flex justify-between">
+                      <span>
+                        {entry.quantity}x {item.name}
+                      </span>
+                      <span>{((item.price + delta) * entry.quantity).toLocaleString()}đ</span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">{entry.note || 'Không ghi chú'}</p>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="mt-3 rounded-xl border border-sky-100 p-3">
+              <p className="text-xs font-semibold uppercase text-slate-500">Hình thức thanh toán</p>
+              {editingCurrentOrder && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Đơn hiện tại đã được tạo. Bạn chỉ đang cập nhật lại món trong đơn chờ xác nhận.
+                </p>
+              )}
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMode('POSTPAY')}
+                  disabled={editingCurrentOrder}
+                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'POSTPAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
+                >
+                  Trả sau
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentMode('PREPAY')}
+                  disabled={editingCurrentOrder}
+                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'PREPAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
+                >
+                  Trả trước
+                </button>
+              </div>
+              {paymentMode === 'PREPAY' && (
+                <select
+                  value={paymentProvider}
+                  onChange={(e) => setPaymentProvider(e.target.value as PaymentProvider)}
+                  disabled={editingCurrentOrder}
+                  className={`${fieldClass} mt-2`}
+                >
+                  <option value="VNPAY">VNPAY</option>
+                </select>
+              )}
+            </div>
+
+            <div className="mt-3 rounded-xl border border-sky-100 p-3">
+              <p className="text-xs font-semibold uppercase text-slate-500">Ma khuyen mai</p>
+              <div className="mt-2 flex gap-2">
+                <input
+                  value={promoCode}
+                  onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                  className={`${fieldClass} flex-1`}
+                  placeholder="Nhap ma giam gia"
+                />
+                <button
+                  type="button"
+                  onClick={applyPromotion}
+                  disabled={applyingPromo}
+                  className="rounded-xl border border-sky-200 px-3 py-2 text-sm disabled:opacity-60"
+                >
+                  {applyingPromo ? 'Đang áp dụng...' : 'Áp dụng'}
+                </button>
+              </div>
+              {promoPreview && (
+                <p className="mt-2 text-xs text-emerald-700">
+                  Đã áp dụng {promoPreview.code}: -{promoPreview.discountAmount.toLocaleString()}đ
+                </p>
+              )}
+            </div>
+
+            <div className="mt-3 space-y-1 border-t pt-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Tạm tính</span>
+                <span>{cartTotal.toLocaleString()}đ</span>
+              </div>
+              <div className="flex items-center justify-between text-emerald-700">
+                <span>Khuyến mãi</span>
+                <span>-{previewDiscount.toLocaleString()}đ</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold">Tong</span>
+                <span className="font-bold text-amber-700">{payableCartTotal.toLocaleString()}đ</span>
+              </div>
+            </div>
+            <button
+              type="submit"
+              className="mt-4 w-full rounded bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              disabled={submitting || resolvingTable}
+            >
+              {submitting
+                ? 'Đang gửi...'
+                : editingCurrentOrder
+                  ? 'Cập nhật đơn hàng'
+                  : paymentMode === 'PREPAY'
+                    ? 'Đặt món và thanh toán'
+                    : 'Gửi đơn chờ xác nhận'}
+            </button>
+            {editingCurrentOrder && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingCurrentOrder(false)
+                  setCart({})
+                  setPromoCode(currentOrder?.promotionCode || '')
+                  setPromoPreview(
+                    currentOrder?.promotionCode && Number(currentOrder.discountAmount || 0) > 0
+                      ? {
+                          code: String(currentOrder.promotionCode || ''),
+                          discountAmount: Number(currentOrder.discountAmount || 0),
+                          finalAmount: Number(currentOrder.totalAmount || 0),
+                        }
+                      : null,
+                  )
+                }}
+                className="mt-2 w-full rounded-xl border border-sky-200 px-4 py-2 text-sm font-medium text-slate-700"
+              >
+                Hủy sửa đơn
+              </button>
+            )}
+          </form>
+
+          <div className={panelClass}>
+            <div className="flex items-center justify-between">
+              <p className="font-semibold text-slate-900">Trạng thái đơn</p>
+              {currentOrderId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    fetchOrderStatus(currentOrderId)
+                    fetchPaymentStatus(currentOrderId)
+                  }}
+                  className="text-xs text-blue-600"
+                >
+                  Làm mới
+                </button>
+              )}
+            </div>
+            {!currentOrderId && <p className="mt-2 text-sm text-gray-500">Chưa có đơn gần đây.</p>}
+            {currentOrderId && loadingOrderStatus && <p className="mt-2 text-sm text-gray-500">Đang tải trạng thái...</p>}
+            {currentOrder && (
+              <div className="mt-2 text-sm">
+                <p>
+                  Mã đơn: <span className="font-semibold" title={currentOrder.id}>{maDonHangNgan(currentOrder.id)}</span>
+                </p>
+                <p>
+                  Trạng thái: <span className="font-semibold">{trangThaiDonHang(currentOrder.status)}</span>
+                </p>
+                {typeof currentOrder.subtotalAmount === 'number' && (
+                  <p>
+                    Tạm tính: <span className="font-semibold">{currentOrder.subtotalAmount.toLocaleString()}đ</span>
+                  </p>
+                )}
+                {!!currentOrder.discountAmount && currentOrder.discountAmount > 0 && (
+                  <p className="text-emerald-700">
+                    Giảm giá {currentOrder.promotionCode ? `(${currentOrder.promotionCode})` : ''}:{' '}
+                    <span className="font-semibold">-{currentOrder.discountAmount.toLocaleString()}đ</span>
+                  </p>
+                )}
+                <p>
+                  Tổng thanh toán: <span className="font-semibold">{currentOrder.totalAmount.toLocaleString()}đ</span>
+                </p>
+                {currentOrder.status === 'PENDING' && !currentPayment && !loadingPaymentStatus && (
+                  <button
+                    type="button"
+                    onClick={populateCartFromCurrentOrder}
+                    className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
+                  >
+                    Sửa món trong đơn
+                  </button>
+                )}
+                <div className="mt-2 space-y-1">
+                  {currentOrder.orderItems.map((item) => (
+                    <div key={item.id} className="flex justify-between rounded bg-gray-50 px-2 py-1 text-xs">
+                      <span>
+                        {item.quantity}x {item.menuItemName || menuMap.get(item.menuItemId)?.name || 'Món không xác định'}
+                      </span>
+                      <span className="font-semibold">{item.status === 'WAITING' ? 'Chờ làm' : item.status === 'PREPARING' ? 'Đang chuẩn bị' : item.status === 'DONE' ? 'Hoàn thành' : item.status}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 rounded border border-gray-100 p-2 text-xs">
+                  <p className="font-semibold text-gray-700">Thanh toan</p>
+                  {loadingPaymentStatus && <p className="mt-1 text-gray-500">Đang tải thanh toán...</p>}
+                  {!loadingPaymentStatus && !currentPayment && (
+                    <p className="mt-1 text-gray-500">Chưa tạo giao dịch thanh toán.</p>
+                  )}
+                  {currentPayment && (
+                    <div className="mt-1 space-y-1">
+                      <p>
+                        Phương thức: <span className="font-semibold">{phuongThucThanhToan(currentPayment.provider)}</span>
+                      </p>
+                      <p>
+                        Trạng thái: <span className="font-semibold">{trangThaiThanhToan(currentPayment.status)}</span>
+                      </p>
+                      {currentPayment.provider === 'VNPAY' &&
+                        currentPayment.paymentUrl && (
+                          <button
+                            type="button"
+                            onClick={() => window.open(currentPayment.paymentUrl || '', '_blank')}
+                            className="rounded border px-2 py-1"
+                          >
+                            Mở lại cổng thanh toán
+                          </button>
+                        )}
+                    </div>
+                  )}
+
+                  {currentOrder.status !== 'CANCELLED' &&
+                    currentOrder.status !== 'COMPLETED' &&
+                    currentPayment?.status !== 'PAID' && (
+                      <button
+                        type="button"
+                        onClick={requestCashPayment}
+                        disabled={requestingCashPayment}
+                        className="mt-2 rounded bg-emerald-600 px-3 py-1 text-white disabled:opacity-60"
+                      >
+                        {requestingCashPayment ? 'Đang gửi...' : 'Thanh toán tiền mặt'}
+                      </button>
+                    )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className={panelClass}>
+            <p className="font-semibold text-slate-900">Gọi phục vụ</p>
+            <select
+              value={staffReason}
+              onChange={(e) => setStaffReason(e.target.value)}
+              className={`${fieldClass} mt-2`}
+            >
+              <option>Cần hỗ trợ</option>
+              <option>Cần tính tiền</option>
+              <option>Cần thêm nước/đá</option>
+              <option>Khác</option>
+            </select>
+            {staffReason === 'Khác' && (
+              <input
+                value={customReason}
+                onChange={(e) => setCustomReason(e.target.value)}
+                className={`${fieldClass} mt-2`}
+                placeholder="Nhập lý do cụ thể"
+              />
+            )}
+            <button
+              type="button"
+              onClick={callStaff}
+              disabled={callingStaff || resolvingTable}
+              className="mt-3 w-full rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {callingStaff ? 'Đang gửi...' : 'Gửi yêu cầu gọi phục vụ'}
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      {customerAuthOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:p-4">
+          <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-lg font-bold text-slate-900">Tài khoản khách hàng</p>
+              <button
+                type="button"
+                onClick={() => setCustomerAuthOpen(false)}
+                className="rounded-xl border border-sky-200 px-2 py-1 text-xs"
+              >
+                Dong
+              </button>
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCustomerAuthTab('LOGIN')}
+                className={`rounded-xl px-3 py-2 text-sm ${customerAuthTab === 'LOGIN' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
+              >
+                Đăng nhập
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomerAuthTab('REGISTER')}
+                className={`rounded-xl px-3 py-2 text-sm ${customerAuthTab === 'REGISTER' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
+              >
+                Đăng ký
+              </button>
+            </div>
+
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCustomerAuthMode('EMAIL')}
+                className={`rounded-xl px-3 py-1.5 text-xs ${customerAuthMode === 'EMAIL' ? 'bg-sky-100 text-sky-700' : 'border border-sky-200'}`}
+              >
+                Email
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomerAuthMode('OTP')}
+                className={`rounded-xl px-3 py-1.5 text-xs ${customerAuthMode === 'OTP' ? 'bg-sky-100 text-sky-700' : 'border border-sky-200'}`}
+              >
+                So dien thoai OTP
+              </button>
+            </div>
+
+            <form onSubmit={submitCustomerAuth} className="mt-4 space-y-2">
+              {customerAuthTab === 'REGISTER' && (
+                <input
+                  value={authName}
+                  onChange={(e) => setAuthName(e.target.value)}
+                  className={fieldClass}
+                  placeholder="Ho ten"
+                  required
+                />
+              )}
+
+              {customerAuthMode === 'EMAIL' ? (
+                <>
+                  <input
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    className={fieldClass}
+                    placeholder="Email"
+                    type="email"
+                    required
+                  />
+                  {(customerAuthTab === 'REGISTER' || customerAuthTab === 'LOGIN') && (
+                    <input
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      className={fieldClass}
+                      placeholder="Mat khau"
+                      type="password"
+                      required
+                    />
+                  )}
+                  {customerAuthTab === 'REGISTER' && (
+                    <input
+                      value={authPhone}
+                      onChange={(e) => setAuthPhone(e.target.value)}
+                      className={fieldClass}
+                      placeholder="So dien thoai (tuy chon)"
+                    />
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="flex gap-2">
+                    <input
+                      value={authPhone}
+                      onChange={(e) => setAuthPhone(e.target.value)}
+                      className={`${fieldClass} flex-1`}
+                      placeholder="So dien thoai"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={requestCustomerOtp}
+                      disabled={requestingOtp}
+                      className="rounded-xl border border-sky-200 px-3 py-2 text-xs disabled:opacity-60"
+                    >
+                      {requestingOtp ? 'Đang gửi OTP' : 'Lấy OTP'}
+                    </button>
+                  </div>
+                  <input
+                    value={authOtp}
+                    onChange={(e) => setAuthOtp(e.target.value)}
+                    className={fieldClass}
+                    placeholder="Ma OTP"
+                    required
+                  />
+                  {customerAuthTab === 'REGISTER' && (
+                    <input
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      className={fieldClass}
+                      placeholder="Email (tuy chon)"
+                      type="email"
+                    />
+                  )}
+                </>
+              )}
+
+              <button
+                type="submit"
+                disabled={authSubmitting}
+                className="mt-2 w-full rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {authSubmitting
+                  ? 'Đang xử lý...'
+                  : customerAuthTab === 'LOGIN'
+                  ? 'Đăng nhập tài khoản'
+                  : 'Tạo tài khoản'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {chatOpen && (
+        <div className="fixed inset-x-3 bottom-24 z-40 max-h-[72vh] overflow-y-auto rounded-2xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-x-auto sm:right-4 sm:w-[calc(100vw-2rem)] sm:max-w-sm">
+          <div className="flex items-center justify-between">
+            <p className="font-semibold text-slate-900">Chat hỗ trợ - {tableName}</p>
+            <button
+              type="button"
+              onClick={() => setChatOpen(false)}
+              className="rounded-xl border border-sky-200 px-2 py-1 text-xs text-slate-600"
+            >
+              Dong
+            </button>
+          </div>
+
+          {chatNeedProfile ? (
+            <form onSubmit={startChatSession} className="mt-3 space-y-2">
+              <input
+                value={chatCustomerName}
+                onChange={(e) => setChatCustomerName(e.target.value)}
+                className={fieldClass}
+                placeholder="Nhap ten cua ban"
+              />
+              <input
+                value={chatCustomerPhone}
+                onChange={(e) => setChatCustomerPhone(e.target.value)}
+                className={fieldClass}
+                placeholder="Nhap so dien thoai (tuy chon)"
+              />
+              <button type="submit" className="w-full rounded-xl bg-sky-700 px-3 py-2 text-sm text-white">
+                Bat dau chat
+              </button>
+            </form>
+          ) : (
+            <>
+              {chatConnecting && <p className="mt-2 text-xs text-gray-500">Đang kết nối chat...</p>}
+              <div className="mt-3 h-64 space-y-2 overflow-y-auto rounded-xl border border-sky-100 bg-sky-50/50 p-2">
+                {messages.length === 0 && <p className="text-sm text-gray-500">Chưa có tin nhắn.</p>}
+                {messages.map((msg, idx) => (
+                  <div key={`${msg.id || 'm'}-${idx}`} className="text-sm">
+                    <span className="font-semibold">{msg.senderName || msg.senderType}:</span>{' '}
+                    {msg.content}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 flex gap-2">
+                <input
+                  value={chatText}
+                  onChange={(e) => setChatText(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && sendChat()}
+                  className={`${fieldClass} flex-1`}
+                  placeholder="Nhập tin nhắn..."
+                />
+                <button type="button" onClick={sendChat} className="rounded-xl bg-sky-700 px-3 py-2 text-sm text-white">
+                  Gửi
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={toggleChatWidget}
+        className="fixed bottom-6 right-4 z-40 rounded-full bg-sky-700 px-5 py-3 text-sm font-semibold text-white shadow-lg"
+      >
+        {chatOpen ? 'Đóng chat' : 'Chat hỗ trợ'}
+      </button>
+
+      {cartItemCount > 0 && (
+        <button
+          type="button"
+          onClick={scrollToCart}
+          className="fixed bottom-6 left-4 right-24 z-30 rounded-2xl bg-amber-600 px-4 py-3 text-left text-sm font-semibold text-white shadow-xl lg:hidden"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span>{cartItemCount} món</span>
+            <span>{payableCartTotal.toLocaleString()}đ</span>
+            <span>Xem giỏ</span>
+          </div>
+        </button>
+      )}
+    </div>
+  )
+}

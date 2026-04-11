@@ -54,7 +54,7 @@ Tạo tối thiểu:
 - `POSTGRES_PASSWORD`
 - `JWT_SECRET`
 - `INTERNAL_SERVICE_TOKEN`
-- `VIETQR_SECRET` (nếu dùng webhook VietQR)
+- `VNPAY_SECRET_KEY`
 
 ## 3.2 Tạo file override production
 
@@ -105,16 +105,8 @@ services:
       DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/paymentdb?schema=public"
       JWT_SECRET: "REPLACE_JWT_SECRET"
       INTERNAL_SERVICE_TOKEN: "REPLACE_INTERNAL_SERVICE_TOKEN"
-      VIETQR_BANK_BIN: "9704xx"
-      VIETQR_ACCOUNT_NO: "xxxxxxxxxx"
-      VIETQR_ACCOUNT_NAME: "COFFEE SHOP"
-      VIETQR_SECRET: "REPLACE_VIETQR_SECRET"
-      MOMO_RETURN_URL: "https://coffee.example.com/payment/return"
-      ZALOPAY_RETURN_URL: "https://coffee.example.com/payment/return"
-      ZALOPAY_APP_ID: "REPLACE_ZALOPAY_APP_ID"
-      ZALOPAY_KEY1: "REPLACE_ZALOPAY_KEY1"
-      ZALOPAY_KEY2: "REPLACE_ZALOPAY_KEY2"
-      # Nếu tích hợp VNPay/MoMo bản chính thức, bổ sung thêm key tương ứng tại đây.
+      VNPAY_SECRET_KEY: "REPLACE_VNPAY_SECRET_KEY"
+      VNPAY_RETURN_URL: "https://coffee.example.com/payment/return"
 
   report-service:
     environment:
@@ -214,7 +206,7 @@ cat backup-manual.sql | docker compose exec -T postgres psql -U postgres
 
 - Đã thay toàn bộ secret mặc định.
 - Đã dùng SSL certificate thật (không self-signed).
-- `APP_BASE_URL`, `MOMO_RETURN_URL`, `ZALOPAY_RETURN_URL` dùng domain production.
+- `APP_BASE_URL`, `VNPAY_RETURN_URL` dùng domain production.
 - QR phải luôn trỏ về domain public (không trỏ `localhost`/IP LAN). Sau khi đổi domain, vào màn hình `Bàn` và bấm `In QR đã chọn` để sinh/in lại QR mới.
 - Đã test end-to-end 5 luồng chính:
   - Quét QR -> đặt món
@@ -240,3 +232,4 @@ docker compose up -d --force-recreate payment-service
 # Dừng toàn bộ
 docker compose down
 ```
+
