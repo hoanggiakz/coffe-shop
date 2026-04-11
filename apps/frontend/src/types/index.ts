@@ -68,7 +68,7 @@ export interface Order {
 }
 
 // Payment
-export type PaymentMethod = 'CASH' | 'MOMO' | 'VNPAY' | 'ZALOPAY' | 'VIETQR'
+export type PaymentMethod = 'CASH' | 'VIETQR'
 export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED'
 
 export interface Payment {

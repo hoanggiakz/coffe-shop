@@ -323,15 +323,15 @@ async function run() {
       confirmedBy: 'API Smoke Staff', amountReceived: 130000,
     }, t);
   }
-  await api('Create VNPAY payment', 'POST', '/api/v1/payments', [201], {
-    orderId: st.vnpOrderId, amount: 150000, provider: 'VNPAY', tableId: st.tableB || st.tableA || undefined, customerName: 'VNPAY Customer',
+  await api('Create VIETQR payment', 'POST', '/api/v1/payments', [201], {
+    orderId: st.vnpOrderId, amount: 150000, provider: 'VIETQR', tableId: st.tableB || st.tableA || undefined, customerName: 'VIETQR Customer',
   });
   await api('Handle payment return', 'POST', '/api/v1/payments/return', [200], {
-    provider: 'VNPAY', orderId: st.vnpOrderId, resultCode: '0', message: 'success', transactionId: `txn-${runId}`,
+    provider: 'VIETQR', orderId: st.vnpOrderId, resultCode: '0', message: 'success', transactionId: `txn-${runId}`,
   });
-  await api('Webhook invalid signature check', 'POST', '/api/v1/payments/webhook', [200, 400], {
-    provider: 'VNPAY', orderId: st.vnpOrderId, transactionId: `txn-${runId}`, status: 'PAID', signature: 'invalid-signature',
-    rawData: { provider: 'VNPAY', orderId: st.vnpOrderId, transactionId: `txn-${runId}`, status: 'PAID' },
+  await api('Webhook status check', 'POST', '/api/v1/payments/webhook', [200, 400], {
+    provider: 'VIETQR', orderId: st.vnpOrderId, transactionId: `txn-${runId}`, status: 'PAID', signature: 'ignored',
+    rawData: { provider: 'VIETQR', orderId: st.vnpOrderId, transactionId: `txn-${runId}`, status: 'PAID' },
   });
 
   await api('List ingredients', 'GET', '/api/v1/ingredients', [200], undefined, t);

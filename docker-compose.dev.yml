@@ -63,6 +63,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/paymentdb?schema=public
       JWT_SECRET: dev-jwt-secret-change-me
       INTERNAL_SERVICE_TOKEN: dev-internal-token
+      ONLINE_PAYMENT_QR_URL: https://img.vietqr.io/image/VCB-1026422235-qr_only.png
     ports:
       - "3004:3004"
 

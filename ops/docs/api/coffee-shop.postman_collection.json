@@ -181,6 +181,52 @@
           }
         }
       ]
+    },
+    {
+      "name": "Payment Service",
+      "item": [
+        {
+          "name": "Get Online QR",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/payments/online/qr"
+          }
+        },
+        {
+          "name": "Create Payment (CASH)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"order-id\",\n  \"amount\": 120000,\n  \"provider\": \"CASH\",\n  \"tableId\": \"table-id\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/payments"
+          }
+        },
+        {
+          "name": "Create Payment (VIETQR)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"order-id\",\n  \"amount\": 120000,\n  \"provider\": \"VIETQR\",\n  \"tableId\": \"table-id\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/payments"
+          }
+        }
+      ]
     }
   ]
 }

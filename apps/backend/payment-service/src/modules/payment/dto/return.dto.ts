@@ -2,9 +2,9 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString } from 'class-validator';
 
 export class PaymentReturnDto {
-  @ApiProperty({ enum: ['VNPAY'], example: 'VNPAY' })
+  @ApiProperty({ enum: ['VIETQR'], example: 'VIETQR' })
   @IsString()
-  @IsIn(['VNPAY'], { message: 'Provider must be VNPAY' })
+  @IsIn(['VIETQR'], { message: 'Provider must be VIETQR' })
   provider: string;
 
   @ApiProperty({ example: 'order_123' })

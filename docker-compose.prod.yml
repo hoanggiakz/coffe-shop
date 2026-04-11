@@ -47,8 +47,7 @@ services:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/paymentdb?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?INTERNAL_SERVICE_TOKEN is required}
-      VNPAY_SECRET_KEY: ${VNPAY_SECRET_KEY:?VNPAY_SECRET_KEY is required}
-      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:?VNPAY_RETURN_URL is required}
+      ONLINE_PAYMENT_QR_URL: ${ONLINE_PAYMENT_QR_URL:-https://img.vietqr.io/image/VCB-1026422235-qr_only.png}
 
   report-service:
     environment:

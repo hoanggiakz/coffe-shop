@@ -54,7 +54,7 @@ Tạo tối thiểu:
 - `POSTGRES_PASSWORD`
 - `JWT_SECRET`
 - `INTERNAL_SERVICE_TOKEN`
-- `VNPAY_SECRET_KEY`
+- `ONLINE_PAYMENT_QR_URL` (optional, ảnh VietQR)
 
 ## 3.2 Tạo file override production
 
@@ -105,8 +105,7 @@ services:
       DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/paymentdb?schema=public"
       JWT_SECRET: "REPLACE_JWT_SECRET"
       INTERNAL_SERVICE_TOKEN: "REPLACE_INTERNAL_SERVICE_TOKEN"
-      VNPAY_SECRET_KEY: "REPLACE_VNPAY_SECRET_KEY"
-      VNPAY_RETURN_URL: "https://coffee.example.com/payment/return"
+      ONLINE_PAYMENT_QR_URL: "https://img.vietqr.io/image/VCB-1026422235-qr_only.png"
 
   report-service:
     environment:
@@ -206,7 +205,7 @@ cat backup-manual.sql | docker compose exec -T postgres psql -U postgres
 
 - Đã thay toàn bộ secret mặc định.
 - Đã dùng SSL certificate thật (không self-signed).
-- `APP_BASE_URL`, `VNPAY_RETURN_URL` dùng domain production.
+- `APP_BASE_URL` dùng domain production.
 - QR phải luôn trỏ về domain public (không trỏ `localhost`/IP LAN). Sau khi đổi domain, vào màn hình `Bàn` và bấm `In QR đã chọn` để sinh/in lại QR mới.
 - Đã test end-to-end 5 luồng chính:
   - Quét QR -> đặt món

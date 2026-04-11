@@ -11,9 +11,9 @@ export class CreatePaymentDto {
   @Min(0)
   amount: number;
 
-  @ApiProperty({ enum: ['VNPAY', 'CASH'], example: 'VNPAY' })
-  @IsIn(['VNPAY', 'CASH'], {
-    message: 'Provider must be VNPAY or CASH',
+  @ApiProperty({ enum: ['VIETQR', 'CASH'], example: 'VIETQR' })
+  @IsIn(['VIETQR', 'CASH'], {
+    message: 'Provider must be VIETQR or CASH',
   })
   provider: string;
 

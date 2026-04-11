@@ -40,11 +40,6 @@ spec:
                 secretKeyRef:
                   name: coffee-secret
                   key: INTERNAL_SERVICE_TOKEN
-            - name: VNPAY_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: coffee-secret
-                  key: VNPAY_SECRET_KEY
 ---
 apiVersion: v1
 kind: Service

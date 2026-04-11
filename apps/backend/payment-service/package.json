@@ -1,7 +1,7 @@
 {
   "name": "payment-service",
   "version": "0.0.1",
-  "description": "Production-ready Payment microservice for Coffee Shop with VNPay support",
+  "description": "Production-ready Payment microservice for Coffee Shop with VietQR and cash support",
   "author": "",
   "private": true,
   "license": "UNLICENSED",
