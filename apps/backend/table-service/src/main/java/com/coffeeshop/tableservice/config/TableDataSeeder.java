@@ -35,6 +35,17 @@ public class TableDataSeeder implements CommandLineRunner {
         }
 
         List<CoffeeTable> existingTables = tableRepository.findAll();
+        int refreshed = 0;
+        for (CoffeeTable existing : existingTables) {
+            String freshQr = qrCodeService.generateQrBase64(existing);
+            if (freshQr.equals(existing.getQrCode())) {
+                continue;
+            }
+            existing.setQrCode(freshQr);
+            tableRepository.save(existing);
+            refreshed++;
+        }
+
         Set<Integer> existingNumbers = new HashSet<>();
         for (CoffeeTable table : existingTables) {
             if (table.getNumber() != null) {
@@ -62,9 +73,9 @@ public class TableDataSeeder implements CommandLineRunner {
         }
 
         if (created > 0) {
-            log.info("TableDataSeeder created {} default tables.", created);
+            log.info("TableDataSeeder created {} default tables and refreshed {} QR codes.", created, refreshed);
         } else {
-            log.info("TableDataSeeder found enough existing tables, no seed needed.");
+            log.info("TableDataSeeder found enough existing tables, refreshed {} QR codes.", refreshed);
         }
     }
 }

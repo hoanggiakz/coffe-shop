@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 export function setupSwagger(app: INestApplication, configService: ConfigService) {
   const config = new DocumentBuilder()
     .setTitle(configService.get('APP_NAME') || 'Payment Service')
-    .setDescription('Production-ready Payment microservice with VNPay')
+    .setDescription('Production-ready Payment microservice with VietQR and Cash')
     .setVersion('1.0')
     .build();
 

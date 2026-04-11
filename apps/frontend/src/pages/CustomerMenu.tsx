@@ -7,7 +7,7 @@ import { showRealtimeNotification } from '@/utils/notifications'
 import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 
 type PaymentMode = 'POSTPAY' | 'PREPAY'
-type PaymentProvider = 'VNPAY'
+type PaymentProvider = 'VIETQR'
 
 interface CustomizationOption {
   value: string
@@ -72,11 +72,12 @@ interface PaymentStatusResponse {
   paymentId: string
   orderId: string
   status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED'
-  provider: 'VNPAY' | 'CASH'
+  provider: 'VIETQR' | 'CASH'
   paymentUrl?: string | null
   transferContent?: string | null
   vietQr?: {
     qrImageUrl: string
+    htmlTag?: string
     transferContent: string
     accountNo?: string
     accountName?: string
@@ -159,7 +160,7 @@ export default function CustomerMenu() {
   const [cart, setCart] = useState<Record<string, CartItem>>({})
   const [cartLoaded, setCartLoaded] = useState(false)
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('POSTPAY')
-  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('VNPAY')
+  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('VIETQR')
   const [promoCode, setPromoCode] = useState('')
   const [promoPreview, setPromoPreview] = useState<PromotionPreview | null>(null)
   const [applyingPromo, setApplyingPromo] = useState(false)
@@ -755,7 +756,7 @@ export default function CustomerMenu() {
     if (!orderId) return
     setLoadingPaymentStatus(true)
     try {
-      const { data } = await api.get(`/v1/payments/orders/${orderId}`)
+      const { data } = await api.get(`/v1/payments/orders/${orderId}?allowMissing=true`)
       setCurrentPayment(data)
     } catch (error: any) {
       if (error.response?.status === 404) {
@@ -915,7 +916,11 @@ export default function CustomerMenu() {
             customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
           )
           setCurrentPayment(payment)
-          if (payment?.paymentUrl) window.open(payment.paymentUrl, '_blank')
+          if (payment?.paymentUrl) {
+            window.open(payment.paymentUrl, '_blank')
+          } else if (payment?.vietQr?.qrImageUrl) {
+            window.open(payment.vietQr.qrImageUrl, '_blank')
+          }
           toast.success('Da tao don va chuyen sang cong thanh toan')
         } else {
           toast.success(`Đặt món thành công. Mã đơn: ${maDonHangNgan(newOrderId)}`)
@@ -1300,7 +1305,7 @@ export default function CustomerMenu() {
                   disabled={editingCurrentOrder}
                   className={`${fieldClass} mt-2`}
                 >
-                  <option value="VNPAY">VNPAY</option>
+                  <option value="VIETQR">VietQR</option>
                 </select>
               )}
             </div>
@@ -1455,15 +1460,28 @@ export default function CustomerMenu() {
                       <p>
                         Trạng thái: <span className="font-semibold">{trangThaiThanhToan(currentPayment.status)}</span>
                       </p>
-                      {currentPayment.provider === 'VNPAY' &&
-                        currentPayment.paymentUrl && (
-                          <button
-                            type="button"
-                            onClick={() => window.open(currentPayment.paymentUrl || '', '_blank')}
-                            className="rounded border px-2 py-1"
-                          >
-                            Mở lại cổng thanh toán
-                          </button>
+                      {currentPayment.provider === 'VIETQR' &&
+                        (currentPayment.paymentUrl || currentPayment.vietQr?.qrImageUrl) && (
+                          <div className="space-y-2">
+                            {currentPayment.paymentUrl && (
+                              <button
+                                type="button"
+                                onClick={() => window.open(currentPayment.paymentUrl || '', '_blank')}
+                                className="rounded border px-2 py-1"
+                              >
+                                Mở link thanh toán
+                              </button>
+                            )}
+                            {currentPayment.vietQr?.qrImageUrl && (
+                              <button
+                                type="button"
+                                onClick={() => window.open(currentPayment.vietQr?.qrImageUrl || '', '_blank')}
+                                className="rounded border px-2 py-1"
+                              >
+                                Mở mã VietQR
+                              </button>
+                            )}
+                          </div>
                         )}
                     </div>
                   )}

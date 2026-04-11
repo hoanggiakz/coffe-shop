@@ -14,13 +14,13 @@ export class WebhookDto {
   @IsIn(['PAID', 'FAILED'])
   status: 'PAID' | 'FAILED';
 
-  @ApiProperty({ example: 'vnpay_hmac_sha512_hash', required: false })
+  @ApiProperty({ example: 'vietqr_signature', required: false })
   @IsOptional()
   @IsString()
   signature?: string;
 
-  @ApiProperty({ example: 'VNPAY', enum: ['VNPAY'] })
-  @IsIn(['VNPAY'], { message: 'Provider must be VNPAY' })
+  @ApiProperty({ example: 'VIETQR', enum: ['VIETQR'] })
+  @IsIn(['VIETQR'], { message: 'Provider must be VIETQR' })
   @IsString()
   provider: string;
 

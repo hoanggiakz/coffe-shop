@@ -12,9 +12,6 @@ const statusColors: Record<PaymentStatus, string> = {
 
 const methodIcons: Record<PaymentMethod, string> = {
   CASH: '💵',
-  VNPAY: '🏦',
-  MOMO: '📱',
-  ZALOPAY: '🟦',
   VIETQR: '🔳',
 }
 
@@ -22,7 +19,7 @@ const mockPayments = Array.from({ length: 10 }, (_, i) => ({
   id: `PAY-${2001 + i}`,
   orderId: `ORD-${1001 + i}`,
   amount: 12.0 + i * 2.5,
-  method: (['CASH', 'VNPAY'] as PaymentMethod[])[i % 2],
+  method: (['CASH', 'VIETQR'] as PaymentMethod[])[i % 2],
   status: (['COMPLETED', 'COMPLETED', 'PENDING', 'COMPLETED'] as PaymentStatus[])[i % 4],
   time: `${10 + i}:${String((i * 13) % 60).padStart(2, '0')}`,
 }))

@@ -6,25 +6,28 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { WebhookDto } from './dto/webhook.dto';
 import { PaymentReturnDto } from './dto/return.dto';
 import { PaymentStatus } from '@prisma/client';
-import { VNPayProvider } from './providers/vnpay.provider';
 
-type SupportedProvider = 'VNPAY' | 'CASH';
+type SupportedProvider = 'VIETQR' | 'CASH';
 
 @Injectable()
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
-  private providers = new Map<string, any>();
 
   constructor(
     private prisma: PrismaService,
     private kafka: KafkaService,
     private config: ConfigService,
-  ) {
-    this.providers.set('VNPAY', new VNPayProvider(this.config));
-  }
+  ) {}
 
   private get chatServiceUrl() {
     return this.config.get<string>('CHAT_SERVICE_URL', 'http://chat-service:3007/api/chats');
+  }
+
+  private get onlineQrImageUrl() {
+    return this.config.get<string>(
+      'ONLINE_PAYMENT_QR_URL',
+      'https://img.vietqr.io/image/VCB-1026422235-qr_only.png',
+    );
   }
 
   private async fetchWithRetry(
@@ -65,22 +68,22 @@ export class PaymentService {
 
   private normalizeProvider(provider: string): SupportedProvider {
     const normalized = String(provider || '').toUpperCase();
-    if (!['VNPAY', 'CASH'].includes(normalized)) {
+    if (!['VIETQR', 'CASH'].includes(normalized)) {
       throw new BadRequestException(`Unsupported provider: ${provider}`);
     }
     return normalized as SupportedProvider;
   }
 
-  private parseRawData(rawData: Record<string, any> | string | undefined, fallback: Record<string, any>) {
-    if (!rawData) return fallback;
-    if (typeof rawData === 'string') {
-      try {
-        return JSON.parse(rawData);
-      } catch {
-        return fallback;
-      }
-    }
-    return rawData;
+  getOnlineQr() {
+    const qrImageUrl = String(this.onlineQrImageUrl || '').trim();
+    return {
+      provider: 'VIETQR',
+      qrImageUrl,
+      htmlTag: `<img src='${qrImageUrl}'/>`,
+      accountName: 'Coffee Shop',
+      accountNo: '1026422235',
+      bankCode: 'VCB',
+    };
   }
 
   private buildResponse(payment: any) {
@@ -247,37 +250,41 @@ export class PaymentService {
       return this.buildResponse(payment);
     }
 
-    const providerInstance = this.providers.get(provider);
-    if (!providerInstance) {
-      throw new BadRequestException(`Unsupported provider: ${provider}`);
-    }
-
+    const onlineQr = this.getOnlineQr();
+    const transactionId = `vietqr_${String(orderId).slice(0, 24)}_${Date.now()}`;
+    const transferContent = `PAY ${String(orderId).toUpperCase()}`;
     const payment = await this.prisma.payment.create({
       data: {
         orderId,
         tableId,
         amount,
         provider,
-        status: PaymentStatus.PENDING,
-      },
-    });
-
-    const { paymentUrl, transactionId } = await providerInstance.pay(amount, orderId);
-    const updated = await this.prisma.payment.update({
-      where: { id: payment.id },
-      data: {
+        status: PaymentStatus.WAITING_TRANSFER,
         transactionId,
-        metadata: { paymentUrl },
+        transferContent,
+        metadata: {
+          vietQr: {
+            qrImageUrl: onlineQr.qrImageUrl,
+            htmlTag: onlineQr.htmlTag,
+            accountName: onlineQr.accountName,
+            accountNo: onlineQr.accountNo,
+            bankCode: onlineQr.bankCode,
+            transferContent,
+          },
+        },
       },
     });
 
-    this.logger.log(`Created payment ${payment.id} for order ${orderId} via ${provider}`);
-    return this.buildResponse(updated);
+    this.logger.log(`Created VietQR payment ${payment.id} for order ${orderId}`);
+    return this.buildResponse(payment);
   }
 
-  async findByOrderId(orderId: string) {
+  async findByOrderId(orderId: string, options?: { allowMissing?: boolean }) {
     const payment = await this.prisma.payment.findUnique({ where: { orderId } });
     if (!payment) {
+      if (options?.allowMissing) {
+        return null;
+      }
       throw new NotFoundException(`Payment for order ${orderId} not found`);
     }
     return this.buildResponse(payment);
@@ -293,27 +300,6 @@ export class PaymentService {
 
   async handleWebhook(webhookDto: WebhookDto) {
     const provider = this.normalizeProvider(webhookDto.provider);
-    const providerPayload = this.parseRawData(webhookDto.rawData, webhookDto as any);
-
-    const providerInstance = this.providers.get(provider);
-    if (!providerInstance) {
-      throw new BadRequestException(`Unsupported provider: ${provider}`);
-    }
-
-    const signature = webhookDto.signature || '';
-    if (!providerInstance.verifySignature(providerPayload, signature)) {
-      this.logger.warn(`Invalid signature for webhook ${webhookDto.transactionId}`);
-      throw new BadRequestException('Invalid signature');
-    }
-
-    const verified = await providerInstance.verifyWebhook(providerPayload);
-    if (
-      verified.orderId !== webhookDto.orderId ||
-      verified.transactionId !== webhookDto.transactionId ||
-      verified.status !== webhookDto.status
-    ) {
-      throw new BadRequestException('Webhook data mismatch');
-    }
 
     const existingPayment = await this.prisma.payment.findUnique({
       where: { orderId: webhookDto.orderId },
@@ -329,9 +315,13 @@ export class PaymentService {
       existingPayment.id,
       webhookDto.status === 'PAID' ? PaymentStatus.PAID : PaymentStatus.FAILED,
       webhookDto.transactionId,
+      {
+        webhookAt: new Date().toISOString(),
+        webhookRaw: webhookDto.rawData || null,
+      },
     );
 
-    this.logger.log(`Updated payment ${updated.id} to ${updated.status} via webhook ${webhookDto.transactionId}`);
+    this.logger.log(`Updated VietQR payment ${updated.id} to ${updated.status} via webhook ${webhookDto.transactionId}`);
     return { success: true, paymentId: updated.id, newStatus: updated.status };
   }
 

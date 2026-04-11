@@ -12,11 +12,11 @@ export default function PaymentReturn() {
   const [message, setMessage] = useState('')
 
   const payload = useMemo(() => {
-    const orderId = searchParams.get('orderId') || searchParams.get('vnp_TxnRef') || ''
-    const provider = (searchParams.get('partnerCode') || searchParams.get('provider') || 'VNPAY').toUpperCase()
-    const resultCode = searchParams.get('resultCode') || searchParams.get('errorCode') || searchParams.get('vnp_ResponseCode') || ''
-    const transactionId = searchParams.get('transId') || searchParams.get('transactionId') || searchParams.get('vnp_TransactionNo') || ''
-    const returnMessage = searchParams.get('message') || searchParams.get('vnp_OrderInfo') || ''
+    const orderId = searchParams.get('orderId') || searchParams.get('txnRef') || ''
+    const provider = (searchParams.get('provider') || 'VIETQR').toUpperCase()
+    const resultCode = searchParams.get('resultCode') || searchParams.get('errorCode') || ''
+    const transactionId = searchParams.get('transId') || searchParams.get('transactionId') || ''
+    const returnMessage = searchParams.get('message') || ''
 
     return { orderId, provider, resultCode, transactionId, message: returnMessage }
   }, [searchParams])

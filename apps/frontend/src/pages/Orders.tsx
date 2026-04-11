@@ -46,13 +46,16 @@ interface PaymentApi {
   paymentId: string
   orderId: string
   status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED'
-  provider: 'CASH' | 'VNPAY'
+  provider: 'CASH' | 'VIETQR'
   paymentUrl?: string | null
+  vietQr?: {
+    qrImageUrl: string
+  } | null
   amountReceived?: number | null
   changeDue?: number | null
 }
 
-const paymentMethods: PaymentMethod[] = ['CASH', 'VNPAY']
+const paymentMethods: PaymentMethod[] = ['CASH', 'VIETQR']
 const orderStatuses: Array<OrderApi['status']> = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
 const selectClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
@@ -237,7 +240,11 @@ export default function Orders() {
 
   const refreshPaymentAndCompleteIfPaid = async (orderId: string) => {
     try {
-      const { data } = await api.get(`/v1/payments/orders/${orderId}`)
+      const { data } = await api.get(`/v1/payments/orders/${orderId}?allowMissing=true`)
+      if (!data) {
+        setCreatedPayment(null)
+        return
+      }
       const payment = data as PaymentApi
       setCreatedPayment(payment)
       if (payment.status === 'PAID') {
@@ -252,7 +259,10 @@ export default function Orders() {
 
   const fetchExistingPayment = async (orderId: string) => {
     try {
-      const { data } = await api.get(`/v1/payments/orders/${orderId}`)
+      const { data } = await api.get(`/v1/payments/orders/${orderId}?allowMissing=true`)
+      if (!data) {
+        return null
+      }
       return data as PaymentApi
     } catch (error: any) {
       if (error.response?.status === 404) {
@@ -317,9 +327,11 @@ export default function Orders() {
           toast.success(tv(`Tiền thừa: ${changeDue.toLocaleString()}đ`, `Change due: ${changeDue.toLocaleString()}đ`))
         }
         setPayingOrder(null)
-      } else if (payment.provider === 'VNPAY') {
+      } else if (payment.provider === 'VIETQR') {
         if (payment.paymentUrl) {
           window.open(payment.paymentUrl, '_blank')
+        } else if (payment.vietQr?.qrImageUrl) {
+          window.open(payment.vietQr.qrImageUrl, '_blank')
         }
         toast.success(tv('Đã tạo giao dịch online. Chờ webhook hoặc đối soát thanh toán', 'Online payment created. Waiting for webhook or reconciliation'))
       }

@@ -15,4 +15,4 @@ data:
   NEXT_PUBLIC_API_URL: "https://coffee.example.com"
   NEXT_PUBLIC_WS_URL: "https://coffee.example.com"
   APP_BASE_URL: "https://coffee.example.com"
-  VNPAY_RETURN_URL: "https://coffee.example.com/payment/return"
+  ONLINE_PAYMENT_QR_URL: "https://img.vietqr.io/image/VCB-1026422235-qr_only.png"

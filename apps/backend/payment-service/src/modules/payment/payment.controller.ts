@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Get, Param } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Get, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -24,7 +24,7 @@ export class PaymentController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create payment (PENDING status, returns provider URL)' })
+  @ApiOperation({ summary: 'Create payment (CASH or VIETQR)' })
   @ApiResponse({ status: 201, description: 'Payment created.' })
   @ApiBody({ type: CreatePaymentDto })
   @HttpCode(HttpStatus.CREATED)
@@ -35,8 +35,18 @@ export class PaymentController {
   @Get('orders/:orderId')
   @ApiOperation({ summary: 'Get payment by orderId (for polling)' })
   @ApiResponse({ status: 200, description: 'Payment status fetched.' })
-  findByOrder(@Param('orderId') orderId: string) {
-    return this.paymentService.findByOrderId(orderId);
+  findByOrder(
+    @Param('orderId') orderId: string,
+    @Query('allowMissing') allowMissing?: string,
+  ) {
+    return this.paymentService.findByOrderId(orderId, { allowMissing: allowMissing === 'true' });
+  }
+
+  @Get('online/qr')
+  @ApiOperation({ summary: 'Get static VietQR image for online transfer' })
+  @ApiResponse({ status: 200, description: 'Online QR fetched.' })
+  getOnlineQr() {
+    return this.paymentService.getOnlineQr();
   }
 
   @Get(':paymentId')

@@ -58,7 +58,7 @@ Ngày cập nhật: `2026-04-10`
   - Cảnh báo tồn kho thấp.
 - Payment Service:
   - Tạo payment online/offline, webhook/return, xác nhận tiền mặt.
-  - Provider VNPay/MoMo/ZaloPay/VietQR.
+  - Provider online: VietQR.
 - Report Service:
   - Dashboard tổng hợp, doanh thu, top món, tồn kho, hiệu suất.
   - Export Excel/PDF.

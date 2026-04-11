@@ -116,7 +116,7 @@ services:
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: ${TABLE_DB_PASSWORD}
       SERVER_PORT: 3003
-      APP_BASE_URL: ${APP_BASE_URL:-https://coffee.example.com}
+      APP_BASE_URL: ${APP_BASE_URL:-https://localhost}
       APP_CHAT_SERVICE_URL: http://chat-service:3007/api/chats
       APP_ORDER_SERVICE_URL: http://order-service:3001/api/orders
     depends_on:
@@ -195,7 +195,7 @@ services:
   # ── Inventory Service (Node.js / NestJS) ─────────────────
   inventory-service:
     build: ./apps/backend/inventory-service
-    command: sh -c "npx prisma db push && node dist/src/main.js"
+    command: sh -c "npx prisma db push && npx prisma db seed && node dist/src/main.js"
     expose:
       - "3005"
     environment:
@@ -239,8 +239,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       CHAT_SERVICE_URL: http://chat-service:3007/api/chats
-      VNPAY_SECRET_KEY: ${VNPAY_SECRET_KEY}
-      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-https://coffee.example.com/payment/return}
+      ONLINE_PAYMENT_QR_URL: ${ONLINE_PAYMENT_QR_URL:-https://img.vietqr.io/image/VCB-1026422235-qr_only.png}
     depends_on:
       postgres:
         condition: service_healthy

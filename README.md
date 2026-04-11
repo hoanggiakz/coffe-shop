@@ -17,7 +17,7 @@ Hệ thống phục vụ 3 nhóm người dùng:
 | `order-service` | NestJS + Prisma | Menu, đơn hàng, KDS, khuyến mãi |
 | `chat-service` | NestJS + Socket.IO | Chat realtime khách - nhân viên |
 | `inventory-service` | NestJS + Prisma | Kho nguyên liệu, nhập/xuất, cảnh báo |
-| `payment-service` | NestJS + Prisma | Cash, VNPay, MoMo, ZaloPay, VietQR |
+| `payment-service` | NestJS + Prisma | Cash, VietQR |
 | `report-service` | NestJS + Prisma | Dashboard và báo cáo |
 | `postgres` | PostgreSQL | CSDL |
 | `redis` | Redis | Realtime/cache |
@@ -115,8 +115,7 @@ Phân quyền chính:
 
 1. Xem trạng thái đơn theo thời gian thực.
 2. Nếu prepay:
-   - `VNPay`, `MoMo`, `ZaloPay`: mở link cổng thanh toán.
-   - `VietQR`: quét mã chuyển khoản hiển thị trên màn hình.
+   - `VietQR`: mở mã chuyển khoản từ API `GET /api/v1/payments/online/qr`.
 3. Có thể bấm “Thanh toán tiền mặt” để gửi yêu cầu đến nhân viên.
 
 ### Bước 5: gọi phục vụ và chat
@@ -246,6 +245,7 @@ Base URL: `https://localhost/api`
 - `GET /chats`
 - `GET /v1/ingredients/health`
 - `POST /v1/payments`
+- `GET /v1/payments/online/qr`
 - `GET /reports/health`
 
 ## 8. NFR phase 1 đã tích hợp
