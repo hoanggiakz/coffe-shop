@@ -8,7 +8,7 @@ import { showRealtimeNotification } from '@/utils/notifications'
 import { useUiStore } from '@/stores/uiStore'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
-import { maDonHangNgan } from '@/utils/display'
+import { maDonHangNgan, trangThaiDonHang } from '@/utils/display'
 
 interface TableApi {
   id: string
@@ -24,7 +24,7 @@ interface OrderItemApi {
   id: string
   menuItemId: string
   quantity: number
-  status: 'WAITING' | 'PREPARING' | 'DONE'
+  status: 'WAITING' | 'PREPARING' | 'DONE' | 'READY'
   note?: string | null
   options?: string | null
 }
@@ -53,9 +53,61 @@ interface StaffNotificationPayload {
   message: string
 }
 
-const KITCHEN_ORDER_STATUSES = new Set<OrderApi['status']>(['CONFIRMED', 'PREPARING'])
+type KdsStage = 'WAITING' | 'PREPARING' | 'READY'
+
+const KITCHEN_ORDER_STATUSES = new Set<OrderApi['status']>(['CONFIRMED', 'PREPARING', 'READY'])
 const chipButtonClass =
   'inline-flex min-h-10 items-center justify-center rounded-xl border border-sky-200 bg-white/90 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-sky-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
+
+function playKitchenOrderSound(enabled: boolean) {
+  if (!enabled || typeof window === 'undefined') return
+  try {
+    const AudioContextCtor =
+      (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext ||
+      (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextCtor) return
+    const audioContext = new AudioContextCtor()
+    const oscillator = audioContext.createOscillator()
+    const gain = audioContext.createGain()
+
+    oscillator.type = 'triangle'
+    oscillator.frequency.setValueAtTime(880, audioContext.currentTime)
+    oscillator.frequency.exponentialRampToValueAtTime(660, audioContext.currentTime + 0.22)
+    gain.gain.setValueAtTime(0.0001, audioContext.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.18, audioContext.currentTime + 0.04)
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.24)
+
+    oscillator.connect(gain)
+    gain.connect(audioContext.destination)
+    oscillator.start()
+    oscillator.stop(audioContext.currentTime + 0.25)
+    oscillator.onended = () => {
+      audioContext.close().catch(() => undefined)
+    }
+  } catch {
+    // ignore audio errors
+  }
+}
+
+function itemStatusLabel(status: OrderItemApi['status']) {
+  if (status === 'WAITING') return 'Chờ làm'
+  if (status === 'PREPARING') return 'Đang chuẩn bị'
+  return 'Sẵn sàng phục vụ'
+}
+
+function normalizeItemStatus(status: string): OrderItemApi['status'] {
+  const normalized = String(status || '').trim().toUpperCase()
+  if (normalized === 'DONE') return 'READY'
+  if (normalized === 'PREPARING' || normalized === 'WAITING' || normalized === 'READY') return normalized
+  return 'WAITING'
+}
+
+function orderKdsStage(order: OrderApi): KdsStage {
+  if (order.status === 'READY') return 'READY'
+  const hasPreparing = order.orderItems.some((item) => item.status === 'PREPARING')
+  if (order.status === 'PREPARING' || hasPreparing) return 'PREPARING'
+  return 'WAITING'
+}
 
 export default function Kitchen() {
   const { tv } = useI18n()
@@ -77,6 +129,13 @@ export default function Kitchen() {
       ])
       const normalizedOrders: OrderApi[] = (ordersRes.data || [])
         .filter((order: OrderApi) => KITCHEN_ORDER_STATUSES.has(order.status))
+        .map((order: OrderApi) => ({
+          ...order,
+          orderItems: (order.orderItems || []).map((item) => ({
+            ...item,
+            status: normalizeItemStatus(item.status),
+          })),
+        }))
         .sort((a: OrderApi, b: OrderApi) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       setOrders(normalizedOrders)
       setTables(tablesRes.data || [])
@@ -107,6 +166,7 @@ export default function Kitchen() {
     const onNotification = (payload: StaffNotificationPayload) => {
       if (payload.type === 'ORDER_NEW') {
         showRealtimeNotification(payload.title || tv('Có đơn mới', 'New order'), payload.message || tv('KDS vừa nhận đơn mới', 'KDS received a new order'))
+        playKitchenOrderSound(soundEnabled)
         loadData()
         return
       }
@@ -137,7 +197,7 @@ export default function Kitchen() {
   const updateItemStatus = async (
     orderId: string,
     itemId: string,
-    status: 'PREPARING' | 'DONE',
+    status: 'PREPARING' | 'READY',
   ) => {
     setUpdatingId(itemId)
     try {
@@ -152,17 +212,15 @@ export default function Kitchen() {
   }
 
   const completeOrder = async (order: OrderApi) => {
-    const pendingItems = order.orderItems.filter((item) => item.status !== 'DONE')
-    if (!pendingItems.length) {
-      toast.success(tv('Đơn đã hoàn thành đủ món', 'All items are already completed'))
+    const hasPendingItems = order.orderItems.some((item) => item.status !== 'READY')
+    if (hasPendingItems || order.status !== 'READY') {
+      toast.error(tv('Chỉ hoàn thành đơn khi tất cả món đã sẵn sàng', 'Complete order only when all items are ready'))
       return
     }
 
     setUpdatingId(`order:${order.id}`)
     try {
-      for (const item of pendingItems) {
-        await api.patch(`/orders/${order.id}/items/${item.id}/status`, { status: 'DONE' })
-      }
+      await api.patch(`/orders/${order.id}/status`, { status: 'COMPLETED' })
       await loadData()
       toast.success(tv(`Đã hoàn thành đơn ${maDonHangNgan(order.id)}`, `Order ${maDonHangNgan(order.id)} completed`))
     } catch (error: any) {
@@ -194,9 +252,27 @@ export default function Kitchen() {
   }
 
   const totalPendingItems = useMemo(
-    () => orders.reduce((sum, order) => sum + order.orderItems.filter((item) => item.status !== 'DONE').length, 0),
+    () => orders.reduce((sum, order) => sum + order.orderItems.filter((item) => item.status !== 'READY').length, 0),
     [orders],
   )
+
+  const kdsColumns = useMemo(() => {
+    const grouped: Record<KdsStage, OrderApi[]> = {
+      WAITING: [],
+      PREPARING: [],
+      READY: [],
+    }
+
+    orders.forEach((order) => {
+      grouped[orderKdsStage(order)].push(order)
+    })
+
+    return [
+      { key: 'WAITING' as const, title: tv('Chờ làm', 'Waiting'), orders: grouped.WAITING },
+      { key: 'PREPARING' as const, title: tv('Đang làm', 'Preparing'), orders: grouped.PREPARING },
+      { key: 'READY' as const, title: tv('Hoàn thành', 'Completed'), orders: grouped.READY },
+    ]
+  }, [orders, tv])
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -227,83 +303,94 @@ export default function Kitchen() {
         </p>
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {!loading && orders.length === 0 && (
-          <Card>
-            <p className="text-sm text-gray-500">{tv('Không có đơn đang chờ làm.', 'No orders waiting in kitchen.')}</p>
-          </Card>
-        )}
-        {orders.map((order) => (
-          <Card key={order.id}>
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="font-semibold text-slate-900 dark:text-white" title={order.id}>
-                  {maDonHangNgan(order.id)}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {tableLabel(order.tableId)} · {new Date(order.createdAt).toLocaleString()}
-                </p>
-              </div>
-              <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-medium text-sky-700">
-                {order.status}
-              </span>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {kdsColumns.map((column) => (
+          <Card key={column.key} className="min-h-[320px]">
+            <div className="mb-3 flex items-center justify-between border-b border-sky-100 pb-2">
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">{column.title}</p>
+              <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-medium text-sky-700">{column.orders.length}</span>
             </div>
 
-            <div className="mt-3 space-y-2">
-              {order.orderItems.map((item) => (
-                <div key={item.id} className="rounded-xl border border-sky-100 bg-white/85 p-3 dark:border-slate-700 dark:bg-slate-900/60">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>
-                      {item.quantity}x {itemLabel(item.menuItemId)}
-                    </span>
-                    <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">{item.status}</span>
-                  </div>
-                  {(item.note || item.options) && (
-                    <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                      {item.note && <p>Ghi chú: {item.note}</p>}
-                      {item.options && <p>Tùy chọn: {formatOptions(item.options)}</p>}
+            {column.orders.length === 0 && (
+              <p className="text-sm text-slate-500">{tv('Không có đơn', 'No orders')}</p>
+            )}
+
+            <div className="space-y-3">
+              {column.orders.map((order) => (
+                <div key={order.id} className="rounded-2xl border border-sky-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-slate-900 dark:text-white" title={order.id}>
+                        {maDonHangNgan(order.id)}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {tableLabel(order.tableId)} · {new Date(order.createdAt).toLocaleString()}
+                      </p>
                     </div>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {item.status === 'WAITING' && (
-                      <Button
-                        size="sm"
-                        className="w-full sm:w-auto"
-                        onClick={() => updateItemStatus(order.id, item.id, 'PREPARING')}
-                        loading={updatingId === item.id}
-                      >
-                        {tv('Bắt đầu', 'Start')}
-                      </Button>
-                    )}
-                    {item.status === 'PREPARING' && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="w-full sm:w-auto"
-                        onClick={() => updateItemStatus(order.id, item.id, 'DONE')}
-                        loading={updatingId === item.id}
-                      >
-                        {tv('Hoàn thành', 'Done')}
-                      </Button>
-                    )}
+                    <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-medium text-sky-700">
+                      {trangThaiDonHang(order.status)}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    {order.orderItems.map((item) => (
+                      <div key={item.id} className="rounded-xl border border-sky-100 bg-white/85 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                        <div className="flex items-center justify-between text-sm">
+                          <span>
+                            {item.quantity}x {itemLabel(item.menuItemId)}
+                          </span>
+                          <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">{itemStatusLabel(item.status)}</span>
+                        </div>
+                        {(item.note || item.options) && (
+                          <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                            {item.note && <p>Ghi chú: {item.note}</p>}
+                            {item.options && <p>Tùy chọn: {formatOptions(item.options)}</p>}
+                          </div>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {item.status === 'WAITING' && (
+                            <Button
+                              size="sm"
+                              className="w-full sm:w-auto"
+                              onClick={() => updateItemStatus(order.id, item.id, 'PREPARING')}
+                              loading={updatingId === item.id}
+                            >
+                              {tv('Bắt đầu', 'Start')}
+                            </Button>
+                          )}
+                          {item.status === 'PREPARING' && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="w-full sm:w-auto"
+                              onClick={() => updateItemStatus(order.id, item.id, 'READY')}
+                              loading={updatingId === item.id}
+                            >
+                              {tv('Sẵn sàng phục vụ', 'Ready to serve')}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-sky-100 pt-3 text-sm">
+                    <span>
+                      Món chưa xong: <strong>{order.orderItems.filter((item) => item.status !== 'READY').length}</strong>
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="w-full sm:w-auto"
+                      onClick={() => completeOrder(order)}
+                      loading={updatingId === `order:${order.id}`}
+                      disabled={order.status !== 'READY' || order.orderItems.some((item) => item.status !== 'READY')}
+                    >
+                      {tv('Hoàn thành đơn', 'Complete order')}
+                    </Button>
                   </div>
                 </div>
               ))}
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-sky-100 pt-3 text-sm">
-              <span>
-                Món chưa xong: <strong>{order.orderItems.filter((item) => item.status !== 'DONE').length}</strong>
-              </span>
-              <Button
-                size="sm"
-                variant="secondary"
-                className="w-full sm:w-auto"
-                onClick={() => completeOrder(order)}
-                loading={updatingId === `order:${order.id}`}
-              >
-                {tv('Hoàn thành đơn', 'Complete order')}
-              </Button>
             </div>
           </Card>
         ))}

@@ -1,6 +1,6 @@
 # Acceptance Criteria (Section 3)
 
-Ngày cập nhật: `2026-04-10`
+Ngày cập nhật: `2026-04-14`
 
 ## 1) Cách chạy bộ nghiệm thu tự động
 
@@ -58,6 +58,8 @@ Kết quả được ghi vào:
   - Kiểm tra `ops/docs/deployment-guide.md` có phần Docker Compose + Kubernetes.
 - `3.4.3` Không hardcode IP/mật khẩu:
   - Scan `docker-compose.yml` cho pattern secret hardcode.
+
+Ghi chú: hệ thống dùng 1 file compose duy nhất (`docker-compose.yml`) và profile tùy chọn (`monitoring`, `logging`).
 
 ### 3.5 UX
 

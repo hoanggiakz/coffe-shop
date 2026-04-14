@@ -1,4 +1,4 @@
-import { All, Controller, ForbiddenException, Get, Logger, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { All, BadRequestException, Controller, ForbiddenException, Get, Logger, Req, Res, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { SERVICE_ROUTES } from './interfaces/service-route.interface';
@@ -47,12 +47,13 @@ export class ProxyController {
   }
 
   @All('api/*path')
-  handleProxy(@Req() req: Request, @Res() res: Response) {
+  async handleProxy(@Req() req: Request, @Res() res: Response) {
     const route = SERVICE_ROUTES.find((r) => req.originalUrl.startsWith(r.path));
     if (!route) {
       return res.status(404).json({ message: 'Route not found' });
     }
     this.authorizeRequest(req);
+    await this.validateQrOrderMenuRequest(req);
 
     const proxy = this.proxies.get(route.path);
     if (!proxy) {
@@ -170,9 +171,9 @@ export class ProxyController {
       return;
     }
 
-    // Waiter/manager/admin can move order lifecycle
+    // Waiter/barista/manager/admin can move order lifecycle
     if (method === 'PATCH' && /^\/api\/orders\/[^/]+\/status$/.test(path)) {
-      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
       return;
     }
 
@@ -267,6 +268,63 @@ export class ProxyController {
       return value.some((item) => String(item || '').trim().length > 0);
     }
     return String(value || '').trim().length > 0;
+  }
+
+  private async validateQrOrderMenuRequest(req: Request) {
+    const method = req.method.toUpperCase();
+    const path = req.path;
+
+    // QR menu public flow: enforce tableId validation at gateway before proxying to order-service.
+    if (method !== 'GET' || path !== '/api/orders/menu') {
+      return;
+    }
+
+    let isStaffRequest = false;
+    if (String(req.headers.authorization || '').startsWith('Bearer ')) {
+      try {
+        const roles = this.parseRolesFromToken(req);
+        isStaffRequest = roles.length > 0;
+      } catch {
+        isStaffRequest = false;
+      }
+    }
+
+    if (isStaffRequest) {
+      return;
+    }
+
+    const tableId = String(req.query.tableId || '').trim();
+    if (!tableId) {
+      throw new BadRequestException('tableId la bat buoc cho luong quet QR');
+    }
+
+    const tableServiceUrl = this.configService.get<string>('TABLE_SERVICE_URL') || 'http://table-service:3003';
+    let response: globalThis.Response;
+    try {
+      response = await fetch(`${tableServiceUrl}/api/tables/${encodeURIComponent(tableId)}`);
+    } catch {
+      throw new ForbiddenException('Khong the ket noi table-service de xac thuc ban');
+    }
+
+    if (response.status === 404) {
+      throw new BadRequestException('tableId khong hop le');
+    }
+
+    if (!response.ok) {
+      throw new ForbiddenException('Khong the xac thuc ban tu table-service');
+    }
+
+    let payload: Record<string, any> | null = null;
+    try {
+      payload = (await response.json()) as Record<string, any>;
+    } catch {
+      payload = null;
+    }
+
+    const tableStatus = String(payload?.status || '').toUpperCase();
+    if (tableStatus === 'MAINTENANCE') {
+      throw new ForbiddenException('Ban hien khong kha dung');
+    }
   }
 
   private buildJwtSecretKey(secret: string): Buffer {

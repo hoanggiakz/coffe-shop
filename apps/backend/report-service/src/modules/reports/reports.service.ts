@@ -15,7 +15,7 @@ import {
 } from './dto/report-query.dto';
 import { CustomLogger } from '../../common/logger.service';
 
-type DateRange = { from?: string; to?: string; dateFrom?: string; dateTo?: string };
+type DateRange = { from?: string; to?: string; dateFrom?: string; dateTo?: string; branchId?: string };
 type WhereBuildResult = { clause: string; params: any[] };
 
 const PDFDocument = require('pdfkit');
@@ -78,9 +78,15 @@ export class ReportsService implements OnModuleDestroy {
   async getTopItems(query: TopItemsQueryDto = {}) {
     const limit = Math.max(1, Math.min(Number(query.limit || 10), 100));
     const dateWhere = this.buildDateWhere('o."createdAt"', query.dateFrom, query.dateTo);
+    const branchId = this.normalizeBranchId(query.branchId);
     const whereParts = ['o.status = \'COMPLETED\''];
+    const whereParams = [...dateWhere.params];
     if (dateWhere.clause) {
       whereParts.push(dateWhere.clause);
+    }
+    if (branchId) {
+      whereParams.push(branchId);
+      whereParts.push(`o."branchId" = $${whereParams.length}`);
     }
 
     const sql = `
@@ -96,10 +102,10 @@ export class ReportsService implements OnModuleDestroy {
       WHERE ${whereParts.join(' AND ')}
       GROUP BY oi."menuItemId", mi.name
       ORDER BY quantity DESC, revenue DESC
-      LIMIT $${dateWhere.params.length + 1}
+      LIMIT $${whereParams.length + 1}
     `;
 
-    const rows = await this.orderPool.query(sql, [...dateWhere.params, limit]);
+    const rows = await this.orderPool.query(sql, [...whereParams, limit]);
     return rows.rows.map((row) => ({
       menuItemId: String(row.menuItemId),
       menuItemName: String(row.menuItemName || row.menuItemId),
@@ -112,8 +118,11 @@ export class ReportsService implements OnModuleDestroy {
   async getInventoryReport(query: InventoryReportQueryDto = {}) {
     const includeMovements = query.includeMovements !== false;
     const movementLimit = Math.max(1, Math.min(Number(query.movementLimit || 300), 2000));
+    const branchId = this.normalizeBranchId(query.branchId);
+    const stockWhereClause = branchId ? 'WHERE i."branchId" = $1' : '';
 
-    const stockRows = await this.inventoryPool.query(`
+    const stockRows = await this.inventoryPool.query(
+      `
       SELECT
         i.id,
         i.name,
@@ -124,8 +133,11 @@ export class ReportsService implements OnModuleDestroy {
         COALESCE((i.stock * i."importPrice"), 0)::numeric AS "stockValue",
         i."isActive" AS "isActive"
       FROM ingredients i
+      ${stockWhereClause}
       ORDER BY i.name ASC
-    `);
+    `,
+      branchId ? [branchId] : [],
+    );
 
     const stocks = stockRows.rows.map((row) => ({
       id: String(row.id),
@@ -151,7 +163,20 @@ export class ReportsService implements OnModuleDestroy {
 
     if (includeMovements) {
       const dateWhere = this.buildDateWhere('sm."createdAt"', query.dateFrom, query.dateTo);
-      const movementWhere = dateWhere.clause ? `WHERE ${dateWhere.clause}` : '';
+      const movementConditions: string[] = [];
+      const movementParams: any[] = [];
+
+      if (dateWhere.clause) {
+        movementConditions.push(dateWhere.clause);
+        movementParams.push(...dateWhere.params);
+      }
+
+      if (branchId) {
+        movementParams.push(branchId);
+        movementConditions.push(`sm."branchId" = $${movementParams.length}`);
+      }
+
+      const movementWhere = movementConditions.length ? `WHERE ${movementConditions.join(' AND ')}` : '';
 
       const movementRows = await this.inventoryPool.query(
         `
@@ -172,9 +197,9 @@ export class ReportsService implements OnModuleDestroy {
           INNER JOIN ingredients i ON i.id = sm."ingredientId"
           ${movementWhere}
           ORDER BY sm."createdAt" DESC
-          LIMIT $${dateWhere.params.length + 1}
+          LIMIT $${movementParams.length + 1}
         `,
-        [...dateWhere.params, movementLimit],
+        [...movementParams, movementLimit],
       );
 
       movements = movementRows.rows.map((row) => ({
@@ -203,7 +228,7 @@ export class ReportsService implements OnModuleDestroy {
           GROUP BY sm.type
           ORDER BY sm.type
         `,
-        dateWhere.params,
+        movementParams,
       );
 
       movementSummary = movementSummaryRows.rows.map((row) => ({
@@ -224,7 +249,49 @@ export class ReportsService implements OnModuleDestroy {
 
   async getStaffPerformance(query: StaffPerformanceQueryDto = {}) {
     const limit = Math.max(1, Math.min(Number(query.limit || 20), 100));
+    const branchId = this.normalizeBranchId(query.branchId);
     const dateWhere = this.buildDateWhere('COALESCE(p."paidAt", p."createdAt")', query.dateFrom, query.dateTo);
+    let scopedOrderIds: string[] | null = null;
+
+    if (branchId) {
+      const orderDateWhere = this.buildDateWhere('o."createdAt"', query.dateFrom, query.dateTo);
+      const orderConditions = ['o.status = \'COMPLETED\''];
+      const orderParams = [...orderDateWhere.params];
+      if (orderDateWhere.clause) {
+        orderConditions.push(orderDateWhere.clause);
+      }
+
+      orderParams.push(branchId);
+      orderConditions.push(`o."branchId" = $${orderParams.length}`);
+
+      const scopedOrders = await this.orderPool.query(
+        `
+          SELECT o.id::text AS id
+          FROM orders o
+          WHERE ${orderConditions.join(' AND ')}
+        `,
+        orderParams,
+      );
+
+      scopedOrderIds = scopedOrders.rows.map((row) => String(row.id));
+      if (!scopedOrderIds.length) {
+        return {
+          range: this.buildRangeResponse(query),
+          totals: { totalOrders: 0, totalRevenue: 0 },
+          items: [],
+        };
+      }
+    }
+
+    const whereParts = ['p.status = \'PAID\''];
+    const whereParams = [...dateWhere.params];
+    if (dateWhere.clause) {
+      whereParts.push(dateWhere.clause);
+    }
+    if (scopedOrderIds) {
+      whereParams.push(scopedOrderIds);
+      whereParts.push(`p."orderId" = ANY($${whereParams.length}::text[])`);
+    }
 
     const sql = `
       SELECT
@@ -232,14 +299,13 @@ export class ReportsService implements OnModuleDestroy {
         COUNT(*)::int AS "orderCount",
         COALESCE(SUM(p.amount), 0)::numeric AS revenue
       FROM payments p
-      WHERE p.status = 'PAID'
-        ${dateWhere.clause ? `AND ${dateWhere.clause}` : ''}
+      WHERE ${whereParts.join(' AND ')}
       GROUP BY "staffId"
       ORDER BY revenue DESC, "orderCount" DESC
-      LIMIT $${dateWhere.params.length + 1}
+      LIMIT $${whereParams.length + 1}
     `;
 
-    const rows = await this.paymentPool.query(sql, [...dateWhere.params, limit]);
+    const rows = await this.paymentPool.query(sql, [...whereParams, limit]);
     const normalized = rows.rows.map((row) => ({
       staffId: String(row.staffId),
       orderCount: Number(row.orderCount || 0),
@@ -305,14 +371,15 @@ export class ReportsService implements OnModuleDestroy {
 
     const dateFrom = query.dateFrom || defaultFrom.toISOString().slice(0, 10);
     const dateTo = query.dateTo || now.toISOString().slice(0, 10);
+    const branchId = this.normalizeBranchId(query.branchId);
 
     const [revenue, topItems, inventory, orderStatus, hourlyOrders, staffPerformance] = await Promise.all([
-      this.getRevenueSeries({ dateFrom, dateTo }, query.groupBy || 'day'),
-      this.getTopItems({ dateFrom, dateTo, limit: 10 }),
-      this.getInventoryReport({ includeMovements: false }),
-      this.getTodayOrderStatus(),
-      this.getHourlyOrders(),
-      this.getStaffPerformance({ dateFrom, dateTo, limit: 5 }),
+      this.getRevenueSeries({ dateFrom, dateTo, branchId }, query.groupBy || 'day'),
+      this.getTopItems({ dateFrom, dateTo, limit: 10, branchId }),
+      this.getInventoryReport({ dateFrom, dateTo, includeMovements: false, branchId }),
+      this.getTodayOrderStatus(branchId || undefined),
+      this.getHourlyOrders(branchId || undefined),
+      this.getStaffPerformance({ dateFrom, dateTo, limit: 5, branchId }),
     ]);
 
     const revenueSummary = revenue.reduce(
@@ -326,7 +393,7 @@ export class ReportsService implements OnModuleDestroy {
 
     return {
       updatedAt: new Date().toISOString(),
-      range: this.buildRangeResponse({ dateFrom, dateTo }),
+      range: this.buildRangeResponse({ dateFrom, dateTo, branchId }),
       revenue: {
         totalRevenue: revenueSummary.totalRevenue,
         totalOrders: revenueSummary.totalOrders,
@@ -378,6 +445,7 @@ export class ReportsService implements OnModuleDestroy {
       const revenue = await this.getRevenueReport({
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        branchId: query.branchId,
         groupBy: query.groupBy,
       });
       return {
@@ -394,6 +462,7 @@ export class ReportsService implements OnModuleDestroy {
       const items = await this.getTopItems({
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        branchId: query.branchId,
         limit: query.limit || 10,
       });
       return {
@@ -413,6 +482,7 @@ export class ReportsService implements OnModuleDestroy {
       const inventory = await this.getInventoryReport({
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        branchId: query.branchId,
         includeMovements: query.includeMovements !== false,
       });
       const rows = inventory.stocks.map((item) => ({
@@ -431,6 +501,7 @@ export class ReportsService implements OnModuleDestroy {
       const staff = await this.getStaffPerformance({
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        branchId: query.branchId,
         limit: query.limit || 20,
       });
       return {
@@ -448,6 +519,7 @@ export class ReportsService implements OnModuleDestroy {
     const dashboard = await this.getDashboard({
       dateFrom: query.dateFrom,
       dateTo: query.dateTo,
+      branchId: query.branchId,
       groupBy: query.groupBy,
     });
     return {
@@ -529,25 +601,37 @@ export class ReportsService implements OnModuleDestroy {
   }
 
   private async getRevenueSeries(range: DateRange, groupBy: TimeGroup) {
+    const branchId = this.normalizeBranchId(range.branchId);
     const dateWhere = this.buildDateWhere(
       'o."createdAt"',
       range.from || range.dateFrom,
       range.to || range.dateTo,
       1,
     );
+
+    const whereParts = ['o.status = \'COMPLETED\''];
+    if (dateWhere.clause) {
+      whereParts.push(dateWhere.clause);
+    }
+
+    const params: any[] = [groupBy, ...dateWhere.params];
+    if (branchId) {
+      params.push(branchId);
+      whereParts.push(`o."branchId" = $${params.length}`);
+    }
+
     const sql = `
       SELECT
         date_trunc($1, o."createdAt") AS period_start,
         COALESCE(SUM(o."totalAmount"), 0)::bigint AS revenue,
         COUNT(*)::int AS "orderCount"
       FROM orders o
-      WHERE o.status = 'COMPLETED'
-        ${dateWhere.clause ? `AND ${dateWhere.clause}` : ''}
+      WHERE ${whereParts.join(' AND ')}
       GROUP BY period_start
       ORDER BY period_start ASC
     `;
 
-    const rows = await this.orderPool.query(sql, [groupBy, ...dateWhere.params]);
+    const rows = await this.orderPool.query(sql, params);
     return rows.rows.map((row) => ({
       period: new Date(row.period_start).toISOString(),
       revenue: Number(row.revenue || 0),
@@ -555,16 +639,27 @@ export class ReportsService implements OnModuleDestroy {
     }));
   }
 
-  private async getTodayOrderStatus() {
-    const rows = await this.orderPool.query(`
+  private async getTodayOrderStatus(branchId?: string) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    const whereParts = ['o."createdAt" >= date_trunc(\'day\', now())'];
+    const params: any[] = [];
+    if (normalizedBranchId) {
+      params.push(normalizedBranchId);
+      whereParts.push(`o."branchId" = $${params.length}`);
+    }
+
+    const rows = await this.orderPool.query(
+      `
       SELECT
         o.status,
         COUNT(*)::int AS count
       FROM orders o
-      WHERE o."createdAt" >= date_trunc('day', now())
+      WHERE ${whereParts.join(' AND ')}
       GROUP BY o.status
       ORDER BY o.status
-    `);
+    `,
+      params,
+    );
 
     return rows.rows.map((row) => ({
       status: String(row.status),
@@ -572,17 +667,28 @@ export class ReportsService implements OnModuleDestroy {
     }));
   }
 
-  private async getHourlyOrders() {
-    const rows = await this.orderPool.query(`
+  private async getHourlyOrders(branchId?: string) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    const whereParts = ['o."createdAt" >= (now() - interval \'24 hour\')'];
+    const params: any[] = [];
+    if (normalizedBranchId) {
+      params.push(normalizedBranchId);
+      whereParts.push(`o."branchId" = $${params.length}`);
+    }
+
+    const rows = await this.orderPool.query(
+      `
       SELECT
         date_trunc('hour', o."createdAt") AS bucket,
         COUNT(*)::int AS orders,
         COALESCE(SUM(CASE WHEN o.status = 'COMPLETED' THEN o."totalAmount" ELSE 0 END), 0)::bigint AS revenue
       FROM orders o
-      WHERE o."createdAt" >= (now() - interval '24 hour')
+      WHERE ${whereParts.join(' AND ')}
       GROUP BY bucket
       ORDER BY bucket ASC
-    `);
+    `,
+      params,
+    );
 
     return rows.rows.map((row) => ({
       timestamp: new Date(row.bucket).toISOString(),
@@ -592,9 +698,11 @@ export class ReportsService implements OnModuleDestroy {
   }
 
   private buildRangeResponse(range: DateRange) {
+    const branchId = this.normalizeBranchId(range.branchId);
     return {
       dateFrom: range.from || range.dateFrom || null,
       dateTo: range.to || range.dateTo || null,
+      branchId: branchId || null,
     };
   }
 
@@ -630,6 +738,11 @@ export class ReportsService implements OnModuleDestroy {
     if (!date) return null;
     const parsed = new Date(`${date}T23:59:59.999Z`);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  private normalizeBranchId(branchId?: string | null): string | null {
+    const normalized = String(branchId || '').trim();
+    return normalized || null;
   }
 
   private resolveDatabaseUrl(envName: string, fallbackDbName: string): string {

@@ -82,10 +82,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const chat = await this.chatService.getOrCreateChat(
         tableId, data.customerName, data.customerPhone,
       );
-      client.join(`table:${tableId}`);
+      const room = this.chatRoom(tableId);
+      const legacyRoom = this.legacyTableRoom(tableId);
+      client.join(room);
+      // Backward compatibility for existing consumers that still expect `table:{tableId}`.
+      client.join(legacyRoom);
       client.data.tableId = tableId;
       client.data.chatId = chat.id;
-      client.emit('joined', { chatId: chat.id, messages: (chat as any).messages ?? [] });
+      client.emit('joined', {
+        chatId: chat.id,
+        room,
+        messages: (chat as any).messages ?? [],
+      });
 
       const isStaffJoin = data?.senderType === 'STAFF' || client.data.isStaff === true;
       const hasMessages = Array.isArray((chat as any).messages) && (chat as any).messages.length > 0;
@@ -101,7 +109,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
       }
 
-      this.logger.log(`Client ${client.id} joined table:${tableId} chat:${chat.id}`);
+      this.logger.log(`Client ${client.id} joined ${room} chat:${chat.id}`);
     } catch (err: any) {
       client.emit('error', { message: err.message || 'Không thể join phòng' });
     }
@@ -152,7 +160,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!normalizedTableId) {
       return;
     }
-    this.server.to(`table:${normalizedTableId}`).emit('new-message', message);
+    const room = this.chatRoom(normalizedTableId);
+    this.server.to(room).emit('new-message', message);
+  }
+
+  private chatRoom(tableId: string) {
+    return `chat:${tableId}`;
+  }
+
+  private legacyTableRoom(tableId: string) {
+    return `table:${tableId}`;
   }
 
   emitStaffNotificationFromMessage(message: any, tableId?: string) {

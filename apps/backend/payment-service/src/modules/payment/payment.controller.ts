@@ -24,7 +24,7 @@ export class PaymentController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create payment (CASH or VIETQR)' })
+  @ApiOperation({ summary: 'Create payment (CASH, VIETQR, VNPAY, MOMO)' })
   @ApiResponse({ status: 201, description: 'Payment created.' })
   @ApiBody({ type: CreatePaymentDto })
   @HttpCode(HttpStatus.CREATED)

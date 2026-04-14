@@ -1,12 +1,14 @@
 # Hướng Dẫn Nghiệm Thu (Section 4)
 
-Ngày cập nhật: `2026-04-11`
+Ngày cập nhật: `2026-04-14`
 
 Tài liệu này bao gồm:
 
-- `4.1` Kiểm tra backend bằng Postman
-- `4.2` Kiểm tra frontend bằng trình duyệt
+- `4.1` Kiểm tra backend bằng Postman/API
+- `4.2` Kiểm tra frontend theo luồng nghiệp vụ
 - `4.3` Kiểm tra triển khai trên VPS sạch
+
+Chi tiết kiến trúc và API chuẩn tham chiếu tại `README.md`.
 
 ## 4.1 Kiểm tra backend bằng Postman
 
@@ -15,197 +17,125 @@ Tài liệu này bao gồm:
 1. Khởi động stack:
 
 ```powershell
+docker compose config -q
 docker compose up -d --build
 docker compose ps
 ```
 
-2. Mở Postman và import collection:
-   - File: `ops/docs/api/coffee-shop.postman_collection.json`
-3. Đặt biến `baseUrl` trong Postman:
-   - Môi trường đang chạy `docker-compose.dev.yml`: `http://localhost:3000`
-   - Môi trường mặc định (Nginx TLS): `https://localhost`
-4. Nếu dùng `https://localhost`, tắt SSL verification trong Postman (do cert local self-signed).
+2. Import Postman collection:
+   - `ops/docs/api/coffee-shop.postman_collection.json`
+3. Đặt biến `baseUrl`:
+   - Dev mode (`./deploy.sh dev`): `http://localhost:8080`
+   - Mặc định (Nginx TLS): `https://localhost`
+4. Nếu dùng `https://localhost`, tắt SSL verification trong Postman.
 
-### B. Chạy test theo thứ tự bắt buộc
+### B. Chuỗi request bắt buộc
 
-1. `POST /api/users/register`
-   - Tạo user test mới (role nhân viên hoặc khách theo kịch bản).
-   - Kỳ vọng: `201`.
-2. `POST /api/users/login`
-   - Lấy `accessToken`.
-   - Kỳ vọng: `200` và có `accessToken`.
-3. `GET /api/users/profile`
-   - Header: `Authorization: Bearer <accessToken>`.
-   - Kỳ vọng: `200`, thông tin user đúng email vừa đăng nhập.
-4. `POST /api/tables`
-   - Body ví dụ: `number`, `area`, `capacity`.
-   - Kỳ vọng: `201`, trả về `id` bàn.
-5. `GET /api/tables/{id}/qr`
-   - Dùng `id` từ bước 4.
-   - Kỳ vọng: `200`, có chuỗi `qrCode` dạng `data:image/...`.
+1. `POST /api/users/login`
+   - Kỳ vọng `200`, có `accessToken`.
+2. `GET /api/users/profile` (Bearer token)
+   - Kỳ vọng `200`.
+3. `POST /api/tables`
+   - Kỳ vọng `201`, có `id`.
+4. `GET /api/tables/{id}/qr`
+   - Kỳ vọng `200`, có `qrCode`.
+5. `GET /api/orders/menu?tableId=...`
+   - Kỳ vọng `200`, có danh sách món.
 6. `POST /api/orders`
-   - Dùng `tableId` thật và `menuItemId` hợp lệ.
-   - Kỳ vọng: `201`, trả về `order.id`.
+   - Kỳ vọng `201`, có `order.id`.
 7. `PATCH /api/orders/{id}/status`
-   - Cập nhật ví dụ: `PREPARING` hoặc `COMPLETED`.
-   - Kỳ vọng: `200`, trạng thái đơn đổi đúng.
-8. `POST /api/chats/{chatId}/messages` (hoặc tạo chat trước bằng `POST /api/chats`)
-   - Gửi nội dung: `"Cho hỏi món của tôi khi nào có?"`.
-   - Kỳ vọng: `201`, message được lưu thành công.
+   - Kỳ vọng `200`.
+8. `POST /api/chats` và `POST /api/chats/{chatId}/messages`
+   - Kỳ vọng `201`.
+9. `GET /api/v1/payments/online/qr`
+   - Kỳ vọng `200`.
+10. Health checks:
+   - `/api/users/health`
+   - `/api/tables/health`
+   - `/api/orders/health`
+   - `/api/chats/health`
+   - `/api/v1/ingredients/health`
+   - `/api/v1/payments/health`
+   - `/api/reports/health`
+11. `POST /api/users/customer/request-otp`
+   - Kỳ vọng `200`, nhận `otp` (sandbox) và `expiresInSeconds`.
+12. `POST /api/users/customer/register-otp` hoặc `POST /api/users/customer/register-email`
+   - Kỳ vọng `201`, có `accessToken`.
+13. `GET /api/orders/history?customerId=<customerId>&limit=20`
+   - Kỳ vọng `200`, dữ liệu đơn mới -> cũ.
+14. `PATCH /api/orders/{id}/status` -> `COMPLETED` với order có `customerId`
+   - Kỳ vọng `200`.
+15. `GET /api/users/customer/profile` và `GET /api/users/customer/offers` (Bearer customer token)
+   - Kỳ vọng `200`, điểm tăng theo rule `floor(amount/10000)` (1 điểm = 10.000đ).
 
 ### C. Tiêu chí pass 4.1
 
-- Tất cả request trên trả mã đúng như kỳ vọng.
+- Chuỗi request chính trả đúng status kỳ vọng.
 - Không có lỗi `5xx`.
-- Dữ liệu liên kết đúng chuỗi nghiệp vụ: `tableId -> orderId -> chatId`.
+- Liên kết dữ liệu hợp lệ: `tableId -> orderId -> chatId`.
+- Bộ `C-16/C-17/C-18` chạy qua API với kết quả hợp lệ (auth customer, order history, loyalty points).
 
 ## 4.2 Kiểm tra frontend bằng trình duyệt
 
 ### A. Chuẩn bị
 
-1. Đảm bảo stack đang chạy và `frontend` healthy.
-2. Dùng `tableId` thật đã tạo từ backend.
+1. Đảm bảo `docker compose ps` hiển thị service chính `Up/healthy`.
+2. Dùng `tableId` thật có trong hệ thống.
 3. URL truy cập:
-   - Với `docker-compose.dev.yml`: `http://localhost:3000`
-   - Với compose mặc định: `https://localhost`
+   - Dev mode: `http://localhost:3000`
+   - Mặc định: `https://localhost`
 
 ### B. Luồng khách hàng
 
-1. Truy cập:
-   - `http://localhost:3000/menu?tableId=<TABLE_ID_THAT>`
-   - Hoặc `https://localhost/menu?tableId=<TABLE_ID_THAT>`
-2. Chọn món, thêm vào giỏ, đặt hàng.
-3. Mở chat popup, gửi:
-   - `"Cho hỏi món của tôi khi nào có?"`
-4. Theo dõi trạng thái đơn hàng khi nhân viên cập nhật.
-
-Kỳ vọng pass:
-
-- Trang menu tải được và hiển thị món.
-- Tạo đơn thành công, không văng lỗi UI.
-- Tin nhắn chat hiển thị trong phiên hiện tại.
-- Trạng thái đơn tự cập nhật theo thời gian thực hoặc sau refresh.
+1. Vào `.../menu?tableId=<TABLE_ID>`.
+2. Chọn món và đặt đơn.
+3. Mở chat hỗ trợ và gửi tin nhắn.
+4. Theo dõi cập nhật trạng thái đơn.
+5. Đăng nhập customer bằng OTP hoặc email.
+6. Vào màn lịch sử đơn, thấy đơn vừa phát sinh.
+7. Kiểm tra điểm/tier hiển thị đúng sau khi đơn hoàn tất.
 
 ### C. Luồng nhân viên
 
-1. Đăng nhập bằng tài khoản có role `WAITER` hoặc `BARISTA`.
-2. Vào KDS:
-   - Thấy đơn mới từ luồng khách.
-   - Bấm `Bắt đầu làm` -> bấm `Hoàn thành`.
-3. Vào tab Chat:
-   - Thấy tin nhắn từ khách.
-   - Trả lời được.
-4. Vào Quản lý bàn:
-   - Chuyển trạng thái bàn từ `occupied` sang `available`.
+1. Đăng nhập role `WAITER` hoặc `BARISTA`.
+2. Vào `Kitchen` cập nhật trạng thái món.
+3. Vào `Chat` trả lời khách.
+4. Vào `Tables` cập nhật trạng thái bàn.
 
-Kỳ vọng pass:
+### D. Tiêu chí pass 4.2
 
-- KDS thao tác được, trạng thái món/đơn đổi đúng.
-- Chat hai chiều khách-nhân viên hoạt động.
-- Trạng thái bàn cập nhật đúng và giữ sau reload.
+- Khách đặt món thành công, không lỗi UI.
+- Nhân viên thấy và xử lý đơn trên KDS.
+- Chat 2 chiều realtime hoạt động.
+- Trạng thái bàn/đơn đồng bộ đúng sau reload.
+- Luồng `C-16/C-17/C-18` hiển thị đúng ở UI (auth, lịch sử đơn, điểm tích lũy).
 
-### D. Mẫu checklist nghiệm thu 4.2
+## 4.3 Kiểm tra triển khai trên VPS sạch
 
-- [ ] Khách vào menu bằng `tableId` thật
-- [ ] Khách đặt món thành công
-- [ ] Khách gửi chat thành công
-- [ ] Nhân viên thấy đơn mới ở KDS
-- [ ] Nhân viên cập nhật món từ bắt đầu đến hoàn thành
-- [ ] Nhân viên trả lời chat được
-- [ ] Nhân viên đổi trạng thái bàn về `available` thành công
+### A. Chuẩn bị VPS
 
-## 4.3 Kiểm tra triển khai
+1. Ubuntu 22.04 mới.
+2. Mở cổng `22`, `80`, `443`.
+3. Cài Docker + Compose plugin.
 
-Mục tiêu: trên VPS sạch `Ubuntu 22.04`, clone dự án, chạy `docker compose up -d`, truy cập được từ trình duyệt bên ngoài Internet.
-
-### A. Chuẩn bị VPS sạch
-
-1. Tạo VPS Ubuntu 22.04 mới.
-2. Mở inbound port trên Security Group/Firewall:
-   - `22/tcp` (SSH)
-   - `80/tcp` (HTTP)
-   - `443/tcp` (HTTPS, nếu bật TLS)
-3. SSH vào VPS:
-
-```bash
-ssh <user>@<public-ip>
-```
-
-### B. Cài Docker + Docker Compose plugin
-
-```bash
-sudo apt update
-sudo apt install -y ca-certificates curl gnupg git
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo systemctl enable --now docker
-```
-
-Kiểm tra:
-
-```bash
-docker --version
-docker compose version
-```
-
-### C. Clone và chạy dự án
-
-1. Clone source:
+### B. Clone và chạy
 
 ```bash
 git clone <repo-url>
-cd Microservices
-```
-
-2. Tạo file môi trường:
-
-```bash
+cd coffe-shop/Microservices
 cp .env.example .env
-```
-
-3. Chạy stack (đúng yêu cầu nghiệm thu):
-
-```bash
+docker compose config -q
 docker compose up -d --build
 docker compose ps
 ```
 
-Kỳ vọng: các service chính `Up`/`healthy` (`frontend`, `api-gateway`, `user-service`, `table-service`, `order-service`, `chat-service`, `inventory-service`, `payment-service`, `report-service`, `postgres`, `redis`).
+### C. Kiểm tra truy cập ngoài Internet
 
-### D. Kiểm tra truy cập từ trình duyệt ngoài
+- Mở `http://<public-ip>` hoặc `https://<public-ip>`.
+- Health nhanh: `http(s)://<public-ip>/api/users/health`.
 
-Từ máy khác ngoài VPS (không SSH tunnel), mở:
+### D. Tiêu chí pass 4.3
 
-- `http://<public-ip>` hoặc `https://<public-ip>` (tùy cấu hình)
-- Health check nhanh: `http://<public-ip>/api/users/health` (hoặc `https://...`)
-
-Kỳ vọng:
-
-- Trang frontend tải được.
-- API health trả `200`.
-- Không lỗi `502/504` từ reverse proxy.
-
-### E. Tiêu chí pass 4.3
-
-- VPS sạch vẫn deploy được chỉ với các bước ở trên.
-- `docker compose up -d` chạy thành công, service lên ổn định.
-- Trình duyệt ngoài Internet truy cập được frontend và ít nhất 1 endpoint health.
-
-### F. Lỗi thường gặp khi nghiệm thu 4.3
-
-- Không truy cập được từ ngoài:
-  - Chưa mở port `80/443` ở cloud firewall/security group.
-- Service lên nhưng frontend trắng:
-  - Chưa build xong image hoặc container restart liên tục (`docker compose logs -f frontend`).
-- API trả `5xx`:
-  - Sai `.env` hoặc DB chưa healthy (`docker compose ps`, `docker compose logs -f <service>`).
-
-
-
+- Triển khai được trên VPS sạch không cần sửa code.
+- Các service chính chạy ổn định.
+- Truy cập được frontend và endpoint health từ bên ngoài.

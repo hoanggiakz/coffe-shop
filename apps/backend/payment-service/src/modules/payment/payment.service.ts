@@ -7,7 +7,7 @@ import { WebhookDto } from './dto/webhook.dto';
 import { PaymentReturnDto } from './dto/return.dto';
 import { PaymentStatus } from '@prisma/client';
 
-type SupportedProvider = 'VIETQR' | 'CASH';
+type SupportedProvider = 'VIETQR' | 'CASH' | 'VNPAY' | 'MOMO';
 
 @Injectable()
 export class PaymentService {
@@ -28,6 +28,33 @@ export class PaymentService {
       'ONLINE_PAYMENT_QR_URL',
       'https://img.vietqr.io/image/VCB-1026422235-qr_only.png',
     );
+  }
+
+  private get appBaseUrl() {
+    return String(this.config.get<string>('APP_BASE_URL', 'https://localhost') || 'https://localhost').replace(
+      /\/+$/,
+      '',
+    );
+  }
+
+  private get paymentReturnBaseUrl() {
+    return `${this.appBaseUrl}/payment/return`;
+  }
+
+  private get vnpayPayUrl() {
+    return String(this.config.get<string>('VNPAY_PAY_URL', '') || '').trim();
+  }
+
+  private get vnpayTerminalCode() {
+    return String(this.config.get<string>('VNPAY_TMN_CODE', '') || '').trim();
+  }
+
+  private get momoPayUrl() {
+    return String(this.config.get<string>('MOMO_PAY_URL', '') || '').trim();
+  }
+
+  private get momoPartnerCode() {
+    return String(this.config.get<string>('MOMO_PARTNER_CODE', '') || '').trim();
   }
 
   private async fetchWithRetry(
@@ -68,10 +95,83 @@ export class PaymentService {
 
   private normalizeProvider(provider: string): SupportedProvider {
     const normalized = String(provider || '').toUpperCase();
-    if (!['VIETQR', 'CASH'].includes(normalized)) {
+    if (!['VIETQR', 'CASH', 'VNPAY', 'MOMO'].includes(normalized)) {
       throw new BadRequestException(`Unsupported provider: ${provider}`);
     }
     return normalized as SupportedProvider;
+  }
+
+  private ensureOnlineProvider(provider: SupportedProvider): Exclude<SupportedProvider, 'CASH'> {
+    if (provider === 'CASH') {
+      throw new BadRequestException('CASH does not support online webhook/return flow');
+    }
+    return provider;
+  }
+
+  private buildFrontendReturnUrl(
+    provider: 'VIETQR' | 'VNPAY' | 'MOMO',
+    payload: { orderId: string; transactionId: string; resultCode?: string; message?: string },
+  ) {
+    const url = new URL(this.paymentReturnBaseUrl);
+    url.searchParams.set('provider', provider);
+    url.searchParams.set('orderId', payload.orderId);
+    url.searchParams.set('transactionId', payload.transactionId);
+
+    if (payload.resultCode) {
+      url.searchParams.set('resultCode', payload.resultCode);
+    }
+    if (payload.message) {
+      url.searchParams.set('message', payload.message);
+    }
+
+    return url.toString();
+  }
+
+  private buildVnpayPaymentUrl(orderId: string, amount: number, transactionId: string) {
+    if (!this.vnpayPayUrl) {
+      return this.buildFrontendReturnUrl('VNPAY', {
+        orderId,
+        transactionId,
+        resultCode: 'PENDING_SETUP',
+        message: 'VNPAY gateway URL is not configured',
+      });
+    }
+
+    const url = new URL(this.vnpayPayUrl);
+    url.searchParams.set('vnp_TxnRef', orderId);
+    url.searchParams.set('vnp_Amount', String(Math.max(0, Math.round(amount)) * 100));
+    url.searchParams.set('vnp_OrderInfo', `Thanh toan don ${orderId}`);
+    url.searchParams.set('vnp_ReturnUrl', this.buildFrontendReturnUrl('VNPAY', { orderId, transactionId }));
+
+    if (this.vnpayTerminalCode) {
+      url.searchParams.set('vnp_TmnCode', this.vnpayTerminalCode);
+    }
+
+    return url.toString();
+  }
+
+  private buildMomoPaymentUrl(orderId: string, amount: number, transactionId: string) {
+    if (!this.momoPayUrl) {
+      return this.buildFrontendReturnUrl('MOMO', {
+        orderId,
+        transactionId,
+        resultCode: 'PENDING_SETUP',
+        message: 'MOMO gateway URL is not configured',
+      });
+    }
+
+    const url = new URL(this.momoPayUrl);
+    url.searchParams.set('orderId', orderId);
+    url.searchParams.set('requestId', transactionId);
+    url.searchParams.set('amount', String(Math.max(0, Math.round(amount))));
+    url.searchParams.set('orderInfo', `Thanh toan don ${orderId}`);
+    url.searchParams.set('redirectUrl', this.buildFrontendReturnUrl('MOMO', { orderId, transactionId }));
+
+    if (this.momoPartnerCode) {
+      url.searchParams.set('partnerCode', this.momoPartnerCode);
+    }
+
+    return url.toString();
   }
 
   getOnlineQr() {
@@ -250,9 +350,44 @@ export class PaymentService {
       return this.buildResponse(payment);
     }
 
-    const onlineQr = this.getOnlineQr();
-    const transactionId = `vietqr_${String(orderId).slice(0, 24)}_${Date.now()}`;
-    const transferContent = `PAY ${String(orderId).toUpperCase()}`;
+    if (provider === 'VIETQR') {
+      const onlineQr = this.getOnlineQr();
+      const transactionId = `vietqr_${String(orderId).slice(0, 24)}_${Date.now()}`;
+      const transferContent = `PAY ${String(orderId).toUpperCase()}`;
+      const payment = await this.prisma.payment.create({
+        data: {
+          orderId,
+          tableId,
+          amount,
+          provider,
+          status: PaymentStatus.WAITING_TRANSFER,
+          transactionId,
+          transferContent,
+          metadata: {
+            vietQr: {
+              qrImageUrl: onlineQr.qrImageUrl,
+              htmlTag: onlineQr.htmlTag,
+              accountName: onlineQr.accountName,
+              accountNo: onlineQr.accountNo,
+              bankCode: onlineQr.bankCode,
+              transferContent,
+            },
+          },
+        },
+      });
+
+      this.logger.log(`Created VietQR payment ${payment.id} for order ${orderId}`);
+      return this.buildResponse(payment);
+    }
+
+    const normalizedAmount = Math.max(0, Math.round(Number(amount || 0)));
+    const providerPrefix = provider.toLowerCase();
+    const transactionId = `${providerPrefix}_${String(orderId).slice(0, 24)}_${Date.now()}`;
+    const paymentUrl =
+      provider === 'VNPAY'
+        ? this.buildVnpayPaymentUrl(orderId, normalizedAmount, transactionId)
+        : this.buildMomoPaymentUrl(orderId, normalizedAmount, transactionId);
+
     const payment = await this.prisma.payment.create({
       data: {
         orderId,
@@ -261,21 +396,21 @@ export class PaymentService {
         provider,
         status: PaymentStatus.WAITING_TRANSFER,
         transactionId,
-        transferContent,
+        transferContent: `${provider} ${String(orderId).toUpperCase()}`,
         metadata: {
-          vietQr: {
-            qrImageUrl: onlineQr.qrImageUrl,
-            htmlTag: onlineQr.htmlTag,
-            accountName: onlineQr.accountName,
-            accountNo: onlineQr.accountNo,
-            bankCode: onlineQr.bankCode,
-            transferContent,
+          paymentUrl,
+          gateway: provider,
+          gatewayRequest: {
+            orderId,
+            amount: normalizedAmount,
+            transactionId,
           },
+          returnUrl: this.buildFrontendReturnUrl(provider, { orderId, transactionId }),
         },
       },
     });
 
-    this.logger.log(`Created VietQR payment ${payment.id} for order ${orderId}`);
+    this.logger.log(`Created ${provider} payment ${payment.id} for order ${orderId}`);
     return this.buildResponse(payment);
   }
 
@@ -299,7 +434,7 @@ export class PaymentService {
   }
 
   async handleWebhook(webhookDto: WebhookDto) {
-    const provider = this.normalizeProvider(webhookDto.provider);
+    const provider = this.ensureOnlineProvider(this.normalizeProvider(webhookDto.provider));
 
     const existingPayment = await this.prisma.payment.findUnique({
       where: { orderId: webhookDto.orderId },
@@ -321,12 +456,12 @@ export class PaymentService {
       },
     );
 
-    this.logger.log(`Updated VietQR payment ${updated.id} to ${updated.status} via webhook ${webhookDto.transactionId}`);
+    this.logger.log(`Updated ${provider} payment ${updated.id} to ${updated.status} via webhook ${webhookDto.transactionId}`);
     return { success: true, paymentId: updated.id, newStatus: updated.status };
   }
 
   async handleReturn(returnDto: PaymentReturnDto) {
-    const provider = this.normalizeProvider(returnDto.provider);
+    const provider = this.ensureOnlineProvider(this.normalizeProvider(returnDto.provider));
     if (!returnDto.orderId) {
       throw new BadRequestException('orderId is required');
     }
@@ -339,9 +474,9 @@ export class PaymentService {
       throw new BadRequestException(`Order ${returnDto.orderId} is not using ${provider}`);
     }
 
-    const successCodes = ['0', '00', 'SUCCESS'];
+    const successCodes = new Set(['0', '00', 'SUCCESS', 'PAID']);
     const normalizedCode = String(returnDto.resultCode ?? '').toUpperCase();
-    const newStatus = successCodes.includes(normalizedCode) ? PaymentStatus.PAID : PaymentStatus.FAILED;
+    const newStatus = successCodes.has(normalizedCode) ? PaymentStatus.PAID : PaymentStatus.FAILED;
 
     const updated = await this.updatePaymentStatus(
       payment.id,

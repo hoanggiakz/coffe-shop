@@ -5,6 +5,7 @@ import api from '@/utils/api'
 import { getSocket, disconnectSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
+import { ChatBubbleLeftRightIcon, ShoppingBagIcon, XMarkIcon, MinusIcon } from '@heroicons/react/24/outline'
 
 type PaymentMode = 'POSTPAY' | 'PREPAY'
 type PaymentProvider = 'VIETQR'
@@ -61,6 +62,7 @@ interface OrderItemStatus {
 interface OrderStatusResponse {
   id: string
   status: string
+  createdAt?: string
   subtotalAmount?: number
   discountAmount?: number
   promotionCode?: string | null
@@ -144,6 +146,34 @@ const fieldClass =
 
 const panelClass = 'rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm'
 
+function trangThaiMonTrongDon(status?: string | null): string {
+  switch (status) {
+    case 'WAITING':
+      return 'Chờ làm'
+    case 'PREPARING':
+      return 'Đang chuẩn bị'
+    case 'DONE':
+      return 'Hoàn thành'
+    default:
+      return status || '-'
+  }
+}
+
+function dinhDangThoiGianDon(value?: string | null): string {
+  if (!value) return '-'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return '-'
+  return parsed.toLocaleString('vi-VN')
+}
+
+function orderStepIndex(status?: string | null): number {
+  const normalized = String(status || '').trim().toUpperCase()
+  if (normalized === 'CANCELLED') return -1
+  if (normalized === 'COMPLETED' || normalized === 'READY' || normalized === 'SERVED') return 2
+  if (normalized === 'PREPARING' || normalized === 'CONFIRMED') return 1
+  return 0
+}
+
 export default function CustomerMenu() {
   const [searchParams] = useSearchParams()
   const qrTableId = searchParams.get('tableId') || ''
@@ -182,15 +212,19 @@ export default function CustomerMenu() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatText, setChatText] = useState('')
   const [chatOpen, setChatOpen] = useState(false)
+  const [chatMinimized, setChatMinimized] = useState(false)
   const [chatNeedProfile, setChatNeedProfile] = useState(false)
   const [chatConnecting, setChatConnecting] = useState(false)
   const [chatCustomerName, setChatCustomerName] = useState('')
   const [chatCustomerPhone, setChatCustomerPhone] = useState('')
+  const [cartDrawerOpen, setCartDrawerOpen] = useState(false)
 
   const [customerToken, setCustomerToken] = useState('')
   const [customerSession, setCustomerSession] = useState<CustomerSession | null>(null)
   const [customerOffers, setCustomerOffers] = useState<string[]>([])
   const [customerOrderHistory, setCustomerOrderHistory] = useState<OrderStatusResponse[]>([])
+  const [customerHistoryOpen, setCustomerHistoryOpen] = useState(false)
+  const [expandedHistoryOrderIds, setExpandedHistoryOrderIds] = useState<Record<string, boolean>>({})
   const [customerAuthOpen, setCustomerAuthOpen] = useState(false)
   const [customerAuthTab, setCustomerAuthTab] = useState<'LOGIN' | 'REGISTER'>('LOGIN')
   const [customerAuthMode, setCustomerAuthMode] = useState<'EMAIL' | 'OTP'>('EMAIL')
@@ -203,6 +237,8 @@ export default function CustomerMenu() {
   const [authSubmitting, setAuthSubmitting] = useState(false)
   const [loadingCustomerData, setLoadingCustomerData] = useState(false)
   const cartPanelRef = useRef<HTMLDivElement | null>(null)
+  const previousOrderStatusRef = useRef('')
+  const syncedCompletedOrderIdRef = useRef('')
 
   useEffect(() => {
     let ignore = false
@@ -398,7 +434,11 @@ export default function CustomerMenu() {
     setCustomerSession(null)
     setCustomerOffers([])
     setCustomerOrderHistory([])
+    setCustomerHistoryOpen(false)
+    setExpandedHistoryOrderIds({})
     setCustomerAuthOpen(false)
+    previousOrderStatusRef.current = ''
+    syncedCompletedOrderIdRef.current = ''
     localStorage.removeItem(customerAuthStorageKey)
   }
 
@@ -451,10 +491,37 @@ export default function CustomerMenu() {
     }
   }
 
+  const toggleHistoryOrderDetails = (orderId: string) => {
+    setExpandedHistoryOrderIds((prev) => ({
+      ...prev,
+      [orderId]: !prev[orderId],
+    }))
+  }
+
   useEffect(() => {
     if (!customerToken || !customerSession?.id) return
     loadCustomerData(customerToken, customerSession)
   }, [customerToken])
+
+  useEffect(() => {
+    const orderId = String(currentOrder?.id || '')
+    const currentStatus = String(currentOrder?.status || '')
+    const previousStatus = previousOrderStatusRef.current
+
+    if (
+      orderId &&
+      currentStatus === 'COMPLETED' &&
+      previousStatus !== 'COMPLETED' &&
+      customerToken &&
+      customerSession &&
+      syncedCompletedOrderIdRef.current !== orderId
+    ) {
+      syncedCompletedOrderIdRef.current = orderId
+      loadCustomerData(customerToken, customerSession)
+    }
+
+    previousOrderStatusRef.current = currentStatus
+  }, [currentOrder?.id, currentOrder?.status, customerToken, customerSession?.id])
 
   const requestCustomerOtp = async () => {
     const phone = authPhone.trim()
@@ -744,7 +811,9 @@ export default function CustomerMenu() {
       const { data } = await api.get(`/orders/${orderId}`)
       setCurrentOrder(data)
     } catch (error: any) {
-      if (error.response?.status !== 404) {
+      if (error.response?.status === 404) {
+        setCurrentOrder(null)
+      } else {
         toast.error(error.response?.data?.message || 'Không tải được trạng thái đơn')
       }
     } finally {
@@ -970,7 +1039,13 @@ export default function CustomerMenu() {
       toast.error('Chua xac dinh duoc ban')
       return
     }
-    setChatOpen((prev) => !prev)
+    setChatOpen((prev) => {
+      const next = !prev
+      if (next) {
+        setChatMinimized(false)
+      }
+      return next
+    })
   }
 
   const startChatSession = (e: FormEvent) => {
@@ -1003,6 +1078,7 @@ export default function CustomerMenu() {
   }
 
   const scrollToCart = () => {
+    setCartDrawerOpen(true)
     cartPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
@@ -1013,7 +1089,7 @@ export default function CustomerMenu() {
           <h1 className="text-2xl font-bold text-slate-900">{resolvingTable ? 'Đang xác định bàn...' : `Thực đơn ${tableName}`}</h1>
           <p className="mt-1 text-sm text-slate-500">Đặt món qua QR, theo dõi trạng thái và gọi nhân viên.</p>
         </div>
-        <div className="flex flex-wrap gap-2 text-xs">
+        <div className="flex items-center gap-2 text-xs">
           <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-800">
             {cartItemCount} món trong giỏ
           </span>
@@ -1025,6 +1101,19 @@ export default function CustomerMenu() {
               Đơn hiện tại: {trangThaiDonHang(currentOrder.status)}
             </span>
           )}
+          <button
+            type="button"
+            onClick={() => setCartDrawerOpen(true)}
+            className="fixed right-4 top-4 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-600 text-white shadow-md"
+            aria-label="Mở giỏ hàng"
+          >
+            <ShoppingBagIcon className="h-5 w-5" />
+            {cartItemCount > 0 && (
+              <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                {cartItemCount}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -1066,112 +1155,144 @@ export default function CustomerMenu() {
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="space-y-3 lg:col-span-2">
+        <div className="lg:col-span-2">
           {loadingMenu && <p>Đang tải menu...</p>}
-          {!loadingMenu &&
-            filteredItems.map((item) => {
-              const cartItem = cart[item.id] || ensureCartItem(item.id)
-              const selectedCount = cart[item.id]?.quantity || 0
-              return (
-              <div key={item.id} className="rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3">
+          {!loadingMenu && (
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+              {filteredItems.map((item) => {
+                const cartItem = cart[item.id] || ensureCartItem(item.id)
+                const selectedCount = cart[item.id]?.quantity || 0
+                return (
+                  <div key={item.id} className="rounded-2xl border border-sky-100 bg-white/92 p-3 shadow-sm">
                     <img
-                      src={item.image || `https://placehold.co/120x120?text=${encodeURIComponent(item.name)}`}
+                      src={item.image || `https://placehold.co/400x280?text=${encodeURIComponent(item.name)}`}
                       alt={item.name}
-                      className="h-16 w-16 rounded-xl object-cover"
+                      className="h-28 w-full rounded-xl object-cover"
                     />
-                    <div>
-                    <p className="font-semibold text-slate-900">{item.name}</p>
-                    <p className="text-sm text-slate-500">{item.description || '---'}</p>
-                  </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-sky-700">{item.price.toLocaleString()}đ</p>
-                    <p className="text-xs text-slate-500">{item.category}</p>
-                  </div>
-                </div>
-                {(item.customizations || []).map((group) => (
-                  <div key={`${item.id}-${group.id}`} className="mt-3">
-                    <p className="mb-1 text-xs font-semibold uppercase text-slate-500">{group.label}</p>
-                    {group.type === 'single' && (
-                      <select
-                        value={String(cartItem.selections[group.id] || '')}
-                        onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
-                        className={fieldClass}
+                    <div className="mt-2 flex items-start justify-between gap-2">
+                      <p className="line-clamp-2 text-sm font-semibold text-slate-900">{item.name}</p>
+                      <span className="shrink-0 text-sm font-bold text-sky-700">{item.price.toLocaleString()}đ</span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs text-slate-500">{item.description || '---'}</p>
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => increase(item.id)}
+                        className="inline-flex min-h-10 items-center rounded-xl bg-amber-600 px-3 text-sm font-semibold text-white disabled:opacity-60"
+                        disabled={!item.available}
                       >
-                        {(group.options || []).map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    {group.type === 'multi' && (
-                      <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                        {(group.options || []).map((option) => {
-                          const selectedValues = Array.isArray(cartItem.selections[group.id])
-                            ? (cartItem.selections[group.id] as string[])
-                            : []
-                          const checked = selectedValues.includes(option.value)
-                          return (
-                            <label key={option.value} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={(e) => {
-                                  const nextValues = e.target.checked
-                                    ? Array.from(new Set([...selectedValues, option.value]))
-                                    : selectedValues.filter((entry) => entry !== option.value)
-                                  updateSelection(item.id, group.id, nextValues)
-                                }}
-                              />
-                              {option.label}
-                            </label>
-                          )
-                        })}
+                        Thêm
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => decrease(item.id)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sm"
+                        >
+                          -
+                        </button>
+                        <span className="w-6 text-center text-sm font-semibold">{selectedCount}</span>
+                        <button
+                          type="button"
+                          onClick={() => increase(item.id)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sm"
+                          disabled={!item.available}
+                        >
+                          +
+                        </button>
                       </div>
+                    </div>
+
+                    {(item.customizations || []).length > 0 && (
+                      <details className="mt-2 rounded-xl border border-sky-100 bg-sky-50/40 p-2">
+                        <summary className="cursor-pointer text-xs font-semibold text-sky-700">Tùy chọn</summary>
+                        <div className="mt-2 space-y-2">
+                          {(item.customizations || []).map((group) => (
+                            <div key={`${item.id}-${group.id}`}>
+                              <p className="mb-1 text-[11px] font-semibold uppercase text-slate-500">{group.label}</p>
+                              {group.type === 'single' && (
+                                <select
+                                  value={String(cartItem.selections[group.id] || '')}
+                                  onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
+                                  className={fieldClass}
+                                >
+                                  {(group.options || []).map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                              {group.type === 'multi' && (
+                                <div className="space-y-1">
+                                  {(group.options || []).map((option) => {
+                                    const selectedValues = Array.isArray(cartItem.selections[group.id])
+                                      ? (cartItem.selections[group.id] as string[])
+                                      : []
+                                    const checked = selectedValues.includes(option.value)
+                                    return (
+                                      <label key={option.value} className="flex items-center gap-2 text-xs">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={(e) => {
+                                            const nextValues = e.target.checked
+                                              ? Array.from(new Set([...selectedValues, option.value]))
+                                              : selectedValues.filter((entry) => entry !== option.value)
+                                            updateSelection(item.id, group.id, nextValues)
+                                          }}
+                                        />
+                                        {option.label}
+                                      </label>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                              {group.type === 'text' && (
+                                <input
+                                  value={String(cartItem.selections[group.id] || '')}
+                                  onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
+                                  className={fieldClass}
+                                  placeholder={group.placeholder || 'Nhập yêu cầu'}
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
                     )}
-                    {group.type === 'text' && (
-                      <input
-                        value={String(cartItem.selections[group.id] || '')}
-                        onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
-                        className={fieldClass}
-                        placeholder={group.placeholder || 'Nhập yêu cầu'}
-                      />
-                    )}
+                    <textarea
+                      value={cartItem.note}
+                      onChange={(e) => updateNote(item.id, e.target.value)}
+                      className={`${fieldClass} mt-2`}
+                      rows={2}
+                      placeholder="Ghi chú"
+                    />
                   </div>
-                ))}
-                <textarea
-                  value={cartItem.note}
-                  onChange={(e) => updateNote(item.id, e.target.value)}
-                  className={`${fieldClass} mt-3`}
-                  rows={2}
-                  placeholder="Ghi chú cho món (tùy chọn)"
-                />
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => decrease(item.id)}
-                    className="inline-flex h-10 min-w-10 items-center justify-center rounded-xl border border-sky-200 px-3 py-1 text-sm"
-                  >
-                    -
-                  </button>
-                  <span className="w-8 text-center">{selectedCount}</span>
-                  <button
-                    type="button"
-                    onClick={() => increase(item.id)}
-                    className="inline-flex h-10 min-w-10 items-center justify-center rounded-xl border border-sky-200 px-3 py-1 text-sm"
-                    disabled={!item.available}
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            )})}
+                )
+              })}
+            </div>
+          )}
         </div>
 
-        <div ref={cartPanelRef} className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+        <div
+          ref={cartPanelRef}
+          className={`fixed inset-y-0 right-0 z-50 w-full max-w-md overflow-y-auto border-l border-sky-100 bg-white px-4 py-5 shadow-2xl transition-transform duration-300 lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:shadow-none lg:col-span-1 lg:sticky lg:top-24 lg:self-start ${
+            cartDrawerOpen ? 'translate-x-0' : 'translate-x-full'
+          }`}
+        >
+          <div className="mb-3 flex items-center justify-between lg:hidden">
+            <p className="text-sm font-semibold text-slate-900">Giỏ hàng và trạng thái bàn</p>
+            <button
+              type="button"
+              onClick={() => setCartDrawerOpen(false)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-sky-200"
+            >
+              <XMarkIcon className="h-5 w-5 text-slate-600" />
+            </button>
+          </div>
+
+          <div className="space-y-4">
           <div className={panelClass}>
             <div className="flex items-center justify-between">
               <p className="font-semibold text-slate-900">Tai khoan thanh vien</p>
@@ -1232,13 +1353,27 @@ export default function CustomerMenu() {
                 )}
                 {!loadingCustomerData && customerOrderHistory.length > 0 && (
                   <div className="rounded border border-gray-100 p-2 text-xs">
-                    <p className="font-semibold text-gray-700">Lich su don gan day</p>
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-gray-700">Lich su don gan day</p>
+                      <button
+                        type="button"
+                        onClick={() => setCustomerHistoryOpen(true)}
+                        className="rounded border border-sky-200 px-2 py-1 text-[11px] font-medium text-sky-700"
+                      >
+                        Xem chi tiet
+                      </button>
+                    </div>
                     <div className="mt-1 space-y-1">
                       {customerOrderHistory.slice(0, 4).map((historyOrder) => (
-                        <div key={historyOrder.id} className="flex items-center justify-between">
-                          <span>{maDonHangNgan(historyOrder.id)}</span>
-                          <span>{historyOrder.totalAmount.toLocaleString()}đ</span>
-                          <span className="font-semibold">{historyOrder.status}</span>
+                        <div key={historyOrder.id} className="rounded bg-gray-50 px-2 py-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span>{maDonHangNgan(historyOrder.id)}</span>
+                            <span>{historyOrder.totalAmount.toLocaleString()}đ</span>
+                            <span className="font-semibold">{trangThaiDonHang(historyOrder.status)}</span>
+                          </div>
+                          <p className="mt-1 text-[11px] text-gray-500">
+                            {dinhDangThoiGianDon(historyOrder.createdAt)}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -1412,6 +1547,22 @@ export default function CustomerMenu() {
                 <p>
                   Trạng thái: <span className="font-semibold">{trangThaiDonHang(currentOrder.status)}</span>
                 </p>
+                <div className="mt-3">
+                  {currentOrder.status === 'CANCELLED' ? (
+                    <p className="rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-700">Đơn đã hủy</p>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2 text-[11px]">
+                      {['Đã nhận', 'Đang làm', 'Hoàn thành'].map((step, index) => {
+                        const active = orderStepIndex(currentOrder.status) >= index
+                        return (
+                          <div key={step} className={`rounded-lg border px-2 py-1 text-center ${active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                            {step}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
                 {typeof currentOrder.subtotalAmount === 'number' && (
                   <p>
                     Tạm tính: <span className="font-semibold">{currentOrder.subtotalAmount.toLocaleString()}đ</span>
@@ -1441,7 +1592,7 @@ export default function CustomerMenu() {
                       <span>
                         {item.quantity}x {item.menuItemName || menuMap.get(item.menuItemId)?.name || 'Món không xác định'}
                       </span>
-                      <span className="font-semibold">{item.status === 'WAITING' ? 'Chờ làm' : item.status === 'PREPARING' ? 'Đang chuẩn bị' : item.status === 'DONE' ? 'Hoàn thành' : item.status}</span>
+                      <span className="font-semibold">{item.status === 'WAITING' ? 'Chờ làm' : item.status === 'PREPARING' ? 'Đang chuẩn bị' : item.status === 'DONE' || item.status === 'READY' ? 'Hoàn thành' : item.status}</span>
                     </div>
                   ))}
                 </div>
@@ -1532,9 +1683,123 @@ export default function CustomerMenu() {
               {callingStaff ? 'Đang gửi...' : 'Gửi yêu cầu gọi phục vụ'}
             </button>
           </div>
-
+          </div>
         </div>
       </div>
+
+      {cartDrawerOpen && (
+        <button
+          type="button"
+          onClick={() => setCartDrawerOpen(false)}
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+          aria-label="Đóng ngăn giỏ hàng"
+        />
+      )}
+
+      {customerHistoryOpen && customerSession && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:p-4">
+          <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-lg font-bold text-slate-900">Lich su don hang chi tiet</p>
+              <button
+                type="button"
+                onClick={() => setCustomerHistoryOpen(false)}
+                className="rounded-xl border border-sky-200 px-2 py-1 text-xs"
+              >
+                Dong
+              </button>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+              <p>
+                Khach hang: <span className="font-semibold text-gray-700">{customerSession.name}</span>
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (customerToken && customerSession) {
+                    loadCustomerData(customerToken, customerSession)
+                  }
+                }}
+                className="rounded border border-sky-200 px-2 py-1 font-medium text-sky-700"
+              >
+                Lam moi
+              </button>
+            </div>
+
+            {loadingCustomerData && <p className="mt-3 text-sm text-gray-500">Dang tai lich su don...</p>}
+            {!loadingCustomerData && customerOrderHistory.length === 0 && (
+              <p className="mt-3 text-sm text-gray-500">Chua co don hang nao.</p>
+            )}
+
+            {!loadingCustomerData && customerOrderHistory.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {customerOrderHistory.map((historyOrder) => {
+                  const isExpanded = !!expandedHistoryOrderIds[historyOrder.id]
+                  return (
+                    <div key={historyOrder.id} className="rounded-xl border border-gray-100 p-3 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="font-semibold text-slate-900" title={historyOrder.id}>
+                            {maDonHangNgan(historyOrder.id)}
+                          </p>
+                          <p className="text-xs text-gray-500">{dinhDangThoiGianDon(historyOrder.createdAt)}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold text-amber-700">{historyOrder.totalAmount.toLocaleString()}đ</p>
+                          <p className="text-xs font-medium text-slate-700">{trangThaiDonHang(historyOrder.status)}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 flex items-center justify-between text-xs">
+                        <p className="text-gray-500">{historyOrder.orderItems.length} mon</p>
+                        <button
+                          type="button"
+                          onClick={() => toggleHistoryOrderDetails(historyOrder.id)}
+                          className="rounded border border-sky-200 px-2 py-1 font-medium text-sky-700"
+                        >
+                          {isExpanded ? 'Thu gon' : 'Xem chi tiet mon'}
+                        </button>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="mt-2 space-y-1 rounded bg-gray-50 p-2 text-xs">
+                          {historyOrder.orderItems.map((item) => {
+                            const selections = parseOrderItemSelections(item.options)
+                            const optionValues = Object.values(selections)
+                              .flatMap((value) =>
+                                Array.isArray(value)
+                                  ? value.map((entry) => String(entry || '').trim())
+                                  : [String(value || '').trim()],
+                              )
+                              .filter(Boolean)
+
+                            return (
+                              <div key={item.id} className="rounded bg-white px-2 py-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="font-medium text-slate-800">
+                                    {item.quantity}x{' '}
+                                    {item.menuItemName || menuMap.get(item.menuItemId)?.name || 'Mon khong xac dinh'}
+                                  </p>
+                                  <p className="font-semibold text-slate-700">{trangThaiMonTrongDon(item.status)}</p>
+                                </div>
+                                {!!item.note && <p className="mt-1 text-gray-600">Ghi chu: {item.note}</p>}
+                                {optionValues.length > 0 && (
+                                  <p className="mt-1 text-gray-600">Tuy chon: {optionValues.join(', ')}</p>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {customerAuthOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:p-4">
@@ -1679,60 +1944,75 @@ export default function CustomerMenu() {
       )}
 
       {chatOpen && (
-        <div className="fixed inset-x-3 bottom-24 z-40 max-h-[72vh] overflow-y-auto rounded-2xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-x-auto sm:right-4 sm:w-[calc(100vw-2rem)] sm:max-w-sm">
+        <div className="fixed inset-x-3 bottom-24 z-40 rounded-2xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-x-auto sm:right-4 sm:w-[calc(100vw-2rem)] sm:max-w-sm">
           <div className="flex items-center justify-between">
             <p className="font-semibold text-slate-900">Chat hỗ trợ - {tableName}</p>
-            <button
-              type="button"
-              onClick={() => setChatOpen(false)}
-              className="rounded-xl border border-sky-200 px-2 py-1 text-xs text-slate-600"
-            >
-              Dong
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setChatMinimized((prev) => !prev)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-sky-200 text-slate-600"
+                aria-label="Thu gọn chat"
+              >
+                <MinusIcon className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setChatOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-sky-200 text-slate-600"
+                aria-label="Đóng chat"
+              >
+                <XMarkIcon className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          {chatNeedProfile ? (
-            <form onSubmit={startChatSession} className="mt-3 space-y-2">
-              <input
-                value={chatCustomerName}
-                onChange={(e) => setChatCustomerName(e.target.value)}
-                className={fieldClass}
-                placeholder="Nhap ten cua ban"
-              />
-              <input
-                value={chatCustomerPhone}
-                onChange={(e) => setChatCustomerPhone(e.target.value)}
-                className={fieldClass}
-                placeholder="Nhap so dien thoai (tuy chon)"
-              />
-              <button type="submit" className="w-full rounded-xl bg-sky-700 px-3 py-2 text-sm text-white">
-                Bat dau chat
-              </button>
-            </form>
-          ) : (
+          {!chatMinimized && (
             <>
-              {chatConnecting && <p className="mt-2 text-xs text-gray-500">Đang kết nối chat...</p>}
-              <div className="mt-3 h-64 space-y-2 overflow-y-auto rounded-xl border border-sky-100 bg-sky-50/50 p-2">
-                {messages.length === 0 && <p className="text-sm text-gray-500">Chưa có tin nhắn.</p>}
-                {messages.map((msg, idx) => (
-                  <div key={`${msg.id || 'm'}-${idx}`} className="text-sm">
-                    <span className="font-semibold">{msg.senderName || msg.senderType}:</span>{' '}
-                    {msg.content}
+              {chatNeedProfile ? (
+                <form onSubmit={startChatSession} className="mt-3 space-y-2">
+                  <input
+                    value={chatCustomerName}
+                    onChange={(e) => setChatCustomerName(e.target.value)}
+                    className={fieldClass}
+                    placeholder="Nhap ten cua ban"
+                  />
+                  <input
+                    value={chatCustomerPhone}
+                    onChange={(e) => setChatCustomerPhone(e.target.value)}
+                    className={fieldClass}
+                    placeholder="Nhap so dien thoai (tuy chon)"
+                  />
+                  <button type="submit" className="w-full rounded-xl bg-sky-700 px-3 py-2 text-sm text-white">
+                    Bat dau chat
+                  </button>
+                </form>
+              ) : (
+                <>
+                  {chatConnecting && <p className="mt-2 text-xs text-gray-500">Đang kết nối chat...</p>}
+                  <div className="mt-3 h-64 space-y-2 overflow-y-auto rounded-xl border border-sky-100 bg-sky-50/50 p-2">
+                    {messages.length === 0 && <p className="text-sm text-gray-500">Chưa có tin nhắn.</p>}
+                    {messages.map((msg, idx) => (
+                      <div key={`${msg.id || 'm'}-${idx}`} className="text-sm">
+                        <span className="font-semibold">{msg.senderName || msg.senderType}:</span>{' '}
+                        {msg.content}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <div className="mt-2 flex gap-2">
-                <input
-                  value={chatText}
-                  onChange={(e) => setChatText(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && sendChat()}
-                  className={`${fieldClass} flex-1`}
-                  placeholder="Nhập tin nhắn..."
-                />
-                <button type="button" onClick={sendChat} className="rounded-xl bg-sky-700 px-3 py-2 text-sm text-white">
-                  Gửi
-                </button>
-              </div>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      value={chatText}
+                      onChange={(e) => setChatText(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && sendChat()}
+                      className={`${fieldClass} flex-1`}
+                      placeholder="Nhập tin nhắn..."
+                    />
+                    <button type="button" onClick={sendChat} className="rounded-xl bg-sky-700 px-3 py-2 text-sm text-white">
+                      Gửi
+                    </button>
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
@@ -1741,24 +2021,11 @@ export default function CustomerMenu() {
       <button
         type="button"
         onClick={toggleChatWidget}
-        className="fixed bottom-6 right-4 z-40 rounded-full bg-sky-700 px-5 py-3 text-sm font-semibold text-white shadow-lg"
+        className="fixed bottom-6 right-4 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-sky-700 text-white shadow-lg"
+        aria-label="Mở chat hỗ trợ"
       >
-        {chatOpen ? 'Đóng chat' : 'Chat hỗ trợ'}
+        <ChatBubbleLeftRightIcon className="h-6 w-6" />
       </button>
-
-      {cartItemCount > 0 && (
-        <button
-          type="button"
-          onClick={scrollToCart}
-          className="fixed bottom-6 left-4 right-24 z-30 rounded-2xl bg-amber-600 px-4 py-3 text-left text-sm font-semibold text-white shadow-xl lg:hidden"
-        >
-          <div className="flex items-center justify-between gap-3">
-            <span>{cartItemCount} món</span>
-            <span>{payableCartTotal.toLocaleString()}đ</span>
-            <span>Xem giỏ</span>
-          </div>
-        </button>
-      )}
     </div>
   )
 }

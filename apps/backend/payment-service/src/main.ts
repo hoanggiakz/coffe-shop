@@ -22,6 +22,7 @@ async function bootstrap() {
     defaultVersion: '1',
   });
   app.set('trust proxy', 1);
+  app.enableShutdownHooks();
 
   // Security
   app.use(helmet());

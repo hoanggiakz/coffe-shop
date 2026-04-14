@@ -1,6 +1,8 @@
 import { IsString, IsNumber, IsIn, Min, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
+const SUPPORTED_PROVIDERS = ['VIETQR', 'CASH', 'VNPAY', 'MOMO'] as const;
+
 export class CreatePaymentDto {
   @ApiProperty({ example: 'order_123' })
   @IsString()
@@ -11,9 +13,9 @@ export class CreatePaymentDto {
   @Min(0)
   amount: number;
 
-  @ApiProperty({ enum: ['VIETQR', 'CASH'], example: 'VIETQR' })
-  @IsIn(['VIETQR', 'CASH'], {
-    message: 'Provider must be VIETQR or CASH',
+  @ApiProperty({ enum: SUPPORTED_PROVIDERS, example: 'VIETQR' })
+  @IsIn(SUPPORTED_PROVIDERS, {
+    message: 'Provider must be one of: VIETQR, CASH, VNPAY, MOMO',
   })
   provider: string;
 

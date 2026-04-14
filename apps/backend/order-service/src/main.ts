@@ -19,6 +19,7 @@ async function bootstrap() {
   app.useLogger(customLogger);
   app.set('trust proxy', 1);
   app.enableCors();
+  app.enableShutdownHooks();
   app.use(helmet());
   app.use(compression());
   app.use(

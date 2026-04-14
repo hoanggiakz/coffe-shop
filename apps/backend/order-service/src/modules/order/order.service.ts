@@ -15,6 +15,7 @@ import {
 import { CreateMenuItemManagementDto, UpdateMenuItemManagementDto } from './dto/menu-item-management.dto';
 import { CreatePromotionDto, QueryPromotionDto, UpdatePromotionDto } from './dto/promotion.dto';
 import { Prisma, PromotionScope } from '@prisma/client';
+import { KafkaService } from '../../kafka/kafka.service';
 
 const ACTIVE_ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY'] as const;
 
@@ -44,7 +45,10 @@ type EnrichedOrder = {
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private kafkaService: KafkaService,
+  ) {}
 
   private get inventoryServiceUrl() {
     return process.env.INVENTORY_SERVICE_URL || 'http://inventory-service:3005';
@@ -104,6 +108,16 @@ export class OrderService {
 
   private async sleep(ms: number) {
     await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private normalizeIncomingItemStatus(status: string) {
+    const normalized = String(status || '').trim().toUpperCase();
+    return normalized === 'READY' ? 'DONE' : normalized;
+  }
+
+  private toKitchenItemStatus(status: string) {
+    const normalized = String(status || '').trim().toUpperCase();
+    return normalized === 'DONE' ? 'READY' : normalized;
   }
 
   // ── Menu Items ──────────────────────────────────────────
@@ -1543,7 +1557,23 @@ export class OrderService {
       `Tạo đơn ${order.id} cho bàn ${dto.tableId} – subtotal ${subtotalAmount.toLocaleString()}₫, discount ${discountAmount.toLocaleString()}₫, total ${totalAmount.toLocaleString()}₫`,
     );
     const enrichedOrder = await this.enrichOrder(order);
-    await this.notifyNewOrder(enrichedOrder);
+    const kafkaPublished = await this.kafkaService.orderCreated({
+      id: enrichedOrder.id,
+      tableId: enrichedOrder.tableId,
+      status: enrichedOrder.status,
+      totalAmount: Number(enrichedOrder.totalAmount || 0),
+      items: (enrichedOrder.orderItems || []).map((item) => ({
+        id: item.id,
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        price: item.price,
+      })),
+    });
+
+    // Fallback path when Kafka is disabled/unavailable: keep realtime ORDER_NEW via chat-service.
+    if (!kafkaPublished) {
+      await this.notifyNewOrder(enrichedOrder);
+    }
     return enrichedOrder;
   }
 
@@ -1940,7 +1970,7 @@ export class OrderService {
 
   // ── KDS: cập nhật trạng thái từng món ──────────────────
   async updateItemStatus(orderId: string, itemId: string, status: string) {
-    const nextStatus = String(status || '').trim().toUpperCase();
+    const nextStatus = this.normalizeIncomingItemStatus(status);
     if (!['WAITING', 'PREPARING', 'DONE'].includes(nextStatus)) {
       throw new BadRequestException(`Trang thai mon khong hop le: ${status}`);
     }
@@ -1973,7 +2003,13 @@ export class OrderService {
     }
 
     if (nextStatus === 'DONE') {
-      await this.deductInventoryByRecipe(item.menuItemId, item.quantity, orderId, order.branchId || null);
+      await this.deductInventoryByRecipe(
+        item.id,
+        item.menuItemId,
+        item.quantity,
+        orderId,
+        order.branchId || null,
+      );
     }
 
     const updated = await this.prisma.orderItem.update({
@@ -1989,7 +2025,7 @@ export class OrderService {
     }
 
     if (previousStatus !== nextStatus) {
-      await this.notifyKitchenItemStatus(orderId, order.tableId, itemId, nextStatus);
+      await this.notifyKitchenItemStatus(orderId, order.tableId, itemId, this.toKitchenItemStatus(nextStatus));
     }
 
     // Nếu tất cả items đều DONE → tự động chuyển order sang READY
@@ -2004,15 +2040,50 @@ export class OrderService {
       await this.notifyKitchenOrderReady(orderId, order.tableId);
     }
 
-    return updated;
+    return {
+      ...updated,
+      status: this.toKitchenItemStatus(updated.status),
+    };
   }
 
   private async deductInventoryByRecipe(
+    orderItemId: string,
     menuItemId: string,
     orderQuantity: number,
     orderId: string,
     branchId?: string | null,
   ) {
+    const ingredientsToExport = await this.buildInventoryExportItemsFromRecipe(menuItemId, orderQuantity);
+
+    if (!ingredientsToExport.length) {
+      return;
+    }
+
+    const kafkaPublished = await this.kafkaService.itemCompleted({
+      orderId,
+      orderItemId,
+      menuItemId,
+      quantity: orderQuantity,
+      branchId: branchId || null,
+      ingredients: ingredientsToExport,
+      occurredAt: new Date().toISOString(),
+    });
+
+    if (kafkaPublished) {
+      this.logger.log(
+        `Da phat ItemCompleted cho order ${orderId}, item ${orderItemId} (${ingredientsToExport.length} nguyen lieu)`,
+      );
+      return;
+    }
+
+    await this.deductInventoryBulk(ingredientsToExport, {
+      orderId,
+      menuItemId,
+      branchId: branchId || undefined,
+    });
+  }
+
+  private async buildInventoryExportItemsFromRecipe(menuItemId: string, orderQuantity: number) {
     const recipe = await this.prisma.menuItemIngredient.findMany({
       where: { menuItemId },
       orderBy: { createdAt: 'asc' },
@@ -2020,7 +2091,7 @@ export class OrderService {
 
     if (!recipe.length) {
       this.logger.warn(`Mon ${menuItemId} chua khai bao cong thuc nguyen lieu, bo qua tru kho`);
-      return;
+      return [] as Array<{ ingredientId: string; quantity: number; note?: string }>;
     }
 
     const ingredientsToExport: Array<{ ingredientId: string; quantity: number; note?: string }> = [];
@@ -2037,15 +2108,7 @@ export class OrderService {
       });
     }
 
-    if (!ingredientsToExport.length) {
-      return;
-    }
-
-    await this.deductInventoryBulk(ingredientsToExport, {
-      orderId,
-      menuItemId,
-      branchId: branchId || undefined,
-    });
+    return ingredientsToExport;
   }
 
   private async deductInventoryBulk(

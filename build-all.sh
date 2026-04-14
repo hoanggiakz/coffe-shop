@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "[build] Building backend services with Docker Compose..."
-docker compose -f docker-compose.yml build \
+docker compose build \
   api-gateway \
   user-service \
   table-service \

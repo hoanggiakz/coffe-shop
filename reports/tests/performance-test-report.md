@@ -1,33 +1,39 @@
 # Performance Test Report (100 Concurrent Users)
 
-- Date: `2026-04-10`
-- Script: `scripts/perf-100-users.mjs`
+- Updated: `2026-04-14`
+- Source script: `ops/scripts/perf-100-users.mjs`
 
 ## Command
 
 ```bash
-BASE_URL=https://localhost TARGET_PATH=/api/orders/health CONCURRENCY=100 ROUNDS=5 node scripts/perf-100-users.mjs
+BASE_URL=https://localhost \
+TARGET_PATH=/api/orders/health \
+CONCURRENCY=100 \
+ROUNDS=5 \
+node ops/scripts/perf-100-users.mjs
 ```
 
 ## Output fields
 
 - `totalRequests`
-- `concurrency` (must be `100`)
+- `concurrency` (kỳ vọng `100`)
 - `rounds`
 - `failures`
 - `successRate`
 - `avgMs`
 - `p95Ms`
+- `requestsPerSecond`
 
-## Pass criteria (baseline)
+## Baseline pass criteria
 
 - `successRate >= 99%`
 - `p95Ms <= 1000`
+- `failures = 0`
+
+## Latest local snapshot
+
+- Chưa chạy lại trong đợt cập nhật docs.
 
 ## Notes
 
-- Tune target path and rounds based on deployment capacity.
-
-## Current execution status
-
-- Not executed in this local editing session.
+- Kết quả perf phụ thuộc cấu hình máy và tải hệ thống tại thời điểm chạy.
