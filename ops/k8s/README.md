@@ -1,12 +1,13 @@
 # Kubernetes Manifests
 
-## Included resources
+Tài liệu deploy Kubernetes đã được gộp vào `ops/docs/deployment-guide.md` để tránh trùng lặp.
+
+## Danh sách manifest
 
 - `configmap.yaml`
 - `secret.example.yaml`
 - `postgres.yaml`
 - `redis.yaml`
-- `api-gateway.yaml`
 - `user-service.yaml`
 - `table-service.yaml`
 - `order-service.yaml`
@@ -14,10 +15,11 @@
 - `inventory-service.yaml`
 - `payment-service.yaml`
 - `report-service.yaml`
+- `api-gateway.yaml`
 - `frontend.yaml`
 - `ingress.yaml`
 
-## Apply order
+## Lệnh áp dụng nhanh
 
 ```bash
 kubectl apply -f ops/k8s/configmap.yaml
@@ -36,6 +38,4 @@ kubectl apply -f ops/k8s/frontend.yaml
 kubectl apply -f ops/k8s/ingress.yaml
 ```
 
-Update image names and secret values before using in production.
-
-
+Nhớ cập nhật image/tag và secret thật trước khi triển khai production.

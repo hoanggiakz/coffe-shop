@@ -1,42 +1,107 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-# This workflow will install Deno then run `deno lint` and `deno test`.
-# For more information see: https://github.com/denoland/setup-deno
-
-name: Deno
+name: CI
 
 on:
-  push:
-    branches: ["main"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "develop", "deverlop"]
+  push:
+    branches: ["main", "develop", "deverlop"]
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  node-build-and-test:
+    name: Node Build/Test (${{ matrix.service }})
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - apps/backend/api-gateway
+          - apps/backend/order-service
+          - apps/backend/chat-service
+          - apps/backend/inventory-service
+          - apps/backend/payment-service
+          - apps/backend/report-service
+          - apps/frontend
     steps:
-      - name: Setup repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Deno
-        # uses: denoland/setup-deno@v1
-        uses: denoland/setup-deno@61fe2df320078202e33d7d5ad347e7dcfa0e8f31  # v1.1.2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          deno-version: v1.x
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
 
-      # Uncomment this step to verify the use of 'deno fmt' on each commit.
-      # - name: Verify formatting
-      #   run: deno fmt --check
+      - name: Install dependencies
+        working-directory: ${{ matrix.service }}
+        run: npm ci
 
-      - name: Run linter
-        run: deno lint
+      - name: Build
+        working-directory: ${{ matrix.service }}
+        run: npm run build
 
-      - name: Run tests
-        run: deno test -A
+      - name: Unit test
+        working-directory: ${{ matrix.service }}
+        run: |
+          if npm run | grep -qE "^[[:space:]]+test"; then
+            npm test -- --runInBand --passWithNoTests
+          else
+            echo "No test script for ${{ matrix.service }}, skipping."
+          fi
+
+  java-build-and-test:
+    name: Java Build/Test (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - apps/backend/user-service
+          - apps/backend/table-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run checkstyle + tests + jacoco (Gradle Docker)
+        run: |
+          docker run --rm \
+            -v "$PWD/${{ matrix.service }}:/app" \
+            -w /app \
+            gradle:8-jdk17-alpine \
+            gradle checkstyleMain test jacocoTestReport --no-daemon
+
+  compose-validate:
+    name: Compose Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker compose
+        run: docker compose config -q
+
+  deploy:
+    name: Deploy (main only)
+    runs-on: ubuntu-latest
+    needs:
+      - node-build-and-test
+      - java-build-and-test
+      - compose-validate
+    if: github.ref == 'refs/heads/main' && secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_SSH_KEY != ''
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.DEPLOY_PATH }}
+            git fetch --all
+            git checkout main
+            git pull --ff-only origin main
+            docker compose up -d --build

@@ -1,6 +1,8 @@
 import { IsString, IsOptional, IsIn } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
+const WEBHOOK_PROVIDERS = ['VIETQR', 'VNPAY', 'MOMO'] as const;
+
 export class WebhookDto {
   @ApiProperty({ example: 'order_123' })
   @IsString()
@@ -19,8 +21,8 @@ export class WebhookDto {
   @IsString()
   signature?: string;
 
-  @ApiProperty({ example: 'VIETQR', enum: ['VIETQR'] })
-  @IsIn(['VIETQR'], { message: 'Provider must be VIETQR' })
+  @ApiProperty({ example: 'VIETQR', enum: WEBHOOK_PROVIDERS })
+  @IsIn(WEBHOOK_PROVIDERS, { message: 'Provider must be VIETQR, VNPAY or MOMO' })
   @IsString()
   provider: string;
 

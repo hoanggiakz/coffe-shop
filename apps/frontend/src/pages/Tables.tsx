@@ -6,6 +6,7 @@ import api from '@/utils/api'
 import { TableStatus } from '@/types'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { maDonHangNgan, trangThaiBan, trangThaiDonHang } from '@/utils/display'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 
 interface TableApi {
   id: string
@@ -44,6 +45,7 @@ const fieldClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
 
 export default function Tables() {
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const [tables, setTables] = useState<TableApi[]>([])
   const [orders, setOrders] = useState<OrderApi[]>([])
   const [menuItems, setMenuItems] = useState<MenuItemApi[]>([])
@@ -80,9 +82,9 @@ export default function Tables() {
   const loadTables = async () => {
     try {
       const [tableRes, orderRes, menuRes] = await Promise.all([
-        api.get('/tables'),
-        api.get('/orders'),
-        api.get('/orders/menu'),
+        api.get('/tables', { params: { branchId: selectedBranchId || undefined } }),
+        api.get('/orders', { params: { branchId: selectedBranchId || undefined } }),
+        api.get('/orders/menu', { params: { branchId: selectedBranchId || undefined } }),
       ])
       const nextTables = Array.isArray(tableRes.data) ? (tableRes.data as TableApi[]) : []
       const nextOrders = Array.isArray(orderRes.data) ? (orderRes.data as OrderApi[]) : []
@@ -110,7 +112,7 @@ export default function Tables() {
 
   useEffect(() => {
     loadTables()
-  }, [])
+  }, [selectedBranchId])
 
   const createTable = async (e: FormEvent) => {
     e.preventDefault()
@@ -124,7 +126,7 @@ export default function Tables() {
         number: Number(form.number),
         capacity: Number(form.capacity),
         area: form.area,
-        branchId: form.branchId || undefined,
+        branchId: form.branchId || selectedBranchId || undefined,
       })
       setForm({
         number: '',
@@ -176,7 +178,7 @@ export default function Tables() {
         number: Number(editForm.number),
         capacity: Number(editForm.capacity),
         area: editForm.area,
-        branchId: editForm.branchId || null,
+        branchId: editForm.branchId || selectedBranchId || null,
         status: editForm.status,
       })
       toast.success('Đã cập nhật thông tin bàn')
@@ -410,22 +412,22 @@ export default function Tables() {
     if (state === 'MAINTENANCE') {
       return {
         label: 'Bảo trì',
-        className: 'bg-slate-200 text-slate-700',
-        borderClass: 'border-slate-300',
+        className: 'bg-red-100 text-red-700',
+        borderClass: 'border-red-200',
       }
     }
     if (state === 'WAITING_PAYMENT') {
       return {
         label: 'Chờ thanh toán',
-        className: 'bg-rose-100 text-rose-700',
-        borderClass: 'border-rose-200',
+        className: 'bg-red-100 text-red-700',
+        borderClass: 'border-red-200',
       }
     }
     if (state === 'OCCUPIED') {
       return {
         label: 'Đang dùng',
-        className: 'bg-amber-100 text-amber-700',
-        borderClass: 'border-amber-200',
+        className: 'bg-yellow-100 text-yellow-700',
+        borderClass: 'border-yellow-200',
       }
     }
     return {

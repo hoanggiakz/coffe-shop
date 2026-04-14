@@ -9,6 +9,7 @@ import { useI18n } from '@/utils/i18n'
 import { trangThaiHoatDong } from '@/utils/display'
 import { disconnectSocket, getSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 
 type Ingredient = {
   id: string
@@ -92,6 +93,7 @@ function toDateInputValue(date: Date) {
 
 export default function Inventory() {
   const { tv } = useI18n()
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -104,7 +106,7 @@ export default function Inventory() {
   const [includeInactive, setIncludeInactive] = useState(false)
   const [lowOnly, setLowOnly] = useState(false)
   const [keyword, setKeyword] = useState('')
-  const [branchId, setBranchId] = useState('')
+  const [branchId, setBranchId] = useState(selectedBranchId)
   const [editingIngredientId, setEditingIngredientId] = useState<string | null>(null)
   const [ingredientForm, setIngredientForm] = useState(defaultIngredientForm)
 
@@ -199,6 +201,10 @@ export default function Inventory() {
   useEffect(() => {
     void loadAll()
   }, [])
+
+  useEffect(() => {
+    setBranchId(selectedBranchId)
+  }, [selectedBranchId])
 
   useEffect(() => {
     const socket = getSocket()
@@ -450,8 +456,8 @@ export default function Inventory() {
           </span>
           <Input
             placeholder="Mã chi nhánh"
-            value={branchId}
-            onChange={(e) => setBranchId(e.target.value)}
+            value={branchId || 'Tất cả chi nhánh'}
+            disabled
             className="w-full sm:w-40"
           />
           <Button className="w-full sm:w-auto" onClick={syncFromMenu} loading={syncing}>

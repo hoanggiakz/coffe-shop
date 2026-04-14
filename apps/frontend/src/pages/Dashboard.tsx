@@ -8,6 +8,7 @@ import { showRealtimeNotification } from '@/utils/notifications'
 import { StatsCardsSkeleton, TableSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 import { maDonHangNgan, trangThaiDonHang } from '@/utils/display'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import {
   BellAlertIcon,
   CheckBadgeIcon,
@@ -15,6 +16,7 @@ import {
   ShoppingCartIcon,
   TableCellsIcon,
 } from '@heroicons/react/24/outline'
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED'
 
@@ -95,6 +97,7 @@ function statusBadgeClass(status: OrderStatus): string {
 
 export default function Dashboard() {
   const user = useAuthStore((state) => state.user)
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const { tv } = useI18n()
   const [tables, setTables] = useState<TableApi[]>([])
   const [orders, setOrders] = useState<OrderApi[]>([])
@@ -172,8 +175,8 @@ export default function Dashboard() {
   const loadOverview = async (fromPolling = false) => {
     try {
       const [tableRes, orderRes] = await Promise.all([
-        api.get('/tables'),
-        api.get('/orders'),
+        api.get('/tables', { params: { branchId: selectedBranchId || undefined } }),
+        api.get('/orders', { params: { branchId: selectedBranchId || undefined } }),
       ])
 
       const nextTables = Array.isArray(tableRes.data) ? (tableRes.data as TableApi[]) : []
@@ -220,7 +223,7 @@ export default function Dashboard() {
       loadOverview(true)
     }, 10000)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [selectedBranchId])
 
   useEffect(() => {
     const socket = getSocket()
@@ -264,7 +267,7 @@ export default function Dashboard() {
       socket.off('staff-notification', onStaffNotification)
       disconnectSocket()
     }
-  }, [user?.id, user?.name])
+  }, [selectedBranchId, user?.id, user?.name])
 
   const activeTables = useMemo(
     () => tables.filter((table) => table.status === 'OCCUPIED').length,
@@ -304,6 +307,16 @@ export default function Dashboard() {
     { name: tv('Doanh thu tạm thời', 'Temporary revenue'), value: formatMoney(temporaryRevenue), icon: CurrencyDollarIcon, color: 'text-green-600' },
   ]
 
+  const orderStatusChartData = useMemo(
+    () => [
+      { name: tv('Chờ nhận', 'Pending'), value: orders.filter((order) => order.status === 'PENDING').length },
+      { name: tv('Đang làm', 'Preparing'), value: orders.filter((order) => order.status === 'PREPARING').length },
+      { name: tv('Sẵn sàng', 'Ready'), value: orders.filter((order) => order.status === 'READY').length },
+      { name: tv('Hoàn tất', 'Completed'), value: orders.filter((order) => order.status === 'COMPLETED').length },
+    ],
+    [orders],
+  )
+
   return (
     <div className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -336,6 +349,22 @@ export default function Dashboard() {
           </Card>
         ))}
       </div>}
+
+      {!loading && (
+        <Card title={tv('Biểu đồ đơn theo trạng thái', 'Order status chart')} subtitle={tv('Biểu đồ cột đơn giản', 'Simple bar chart')}>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={orderStatusChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis allowDecimals={false} />
+                <Tooltip />
+                <Bar dataKey="value" fill="#0284c7" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card title={tv('Đơn gần nhất', 'Recent orders')} subtitle={tv('5 đơn mới nhất', 'Latest 5 orders')}>

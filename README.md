@@ -1,316 +1,404 @@
-# Hệ thống Quản lý Quán Cà phê (Microservices)
+# Hệ Thống Quản Lý Quán Cà Phê (Microservices)
 
 Hệ thống phục vụ 3 nhóm người dùng:
 
-- Khách hàng: quét QR, xem menu, đặt món, theo dõi đơn, gọi phục vụ, chat, thanh toán.
-- Nhân viên: nhận và xử lý đơn, quản lý bàn, KDS, chat với khách, xác nhận thu tiền.
+- Khách hàng: quét QR bàn, xem menu, đặt món, theo dõi đơn, chat hỗ trợ, thanh toán.
+- Nhân viên: nhận đơn, xử lý KDS, quản lý bàn, xác nhận thanh toán tiền mặt, hỗ trợ chat.
 - Quản lý/Admin: quản lý nhân sự, menu, kho, khuyến mãi, chi nhánh, báo cáo.
 
-## 1. Tổng quan kiến trúc
+## 1. Kiến trúc hiện tại
 
-| Service | Công nghệ | Vai trò |
+| Service | Công nghệ runtime | Vai trò |
 |---|---|---|
-| `frontend` | React + Vite + Nginx | Giao diện người dùng |
-| `api-gateway` | NestJS | Cổng API tập trung, phân quyền request |
-| `user-service` | Spring Boot | Auth/JWT, khách hàng, nhân sự, chi nhánh |
-| `table-service` | Spring Boot | Bàn, QR bàn, gọi phục vụ |
-| `order-service` | NestJS + Prisma | Menu, đơn hàng, KDS, khuyến mãi |
-| `chat-service` | NestJS + Socket.IO | Chat realtime khách - nhân viên |
-| `inventory-service` | NestJS + Prisma | Kho nguyên liệu, nhập/xuất, cảnh báo |
-| `payment-service` | NestJS + Prisma | Cash, VietQR |
-| `report-service` | NestJS + Prisma | Dashboard và báo cáo |
-| `postgres` | PostgreSQL | CSDL |
-| `redis` | Redis | Realtime/cache |
+| `frontend` | React + Vite + Nginx | UI + reverse proxy |
+| `api-gateway` | NestJS | Proxy tập trung, kiểm soát quyền theo role |
+| `user-service` | Spring Boot | Auth/JWT, customer, staff, branches |
+| `table-service` | Spring Boot | Quản lý bàn, QR, gọi phục vụ |
+| `order-service` | NestJS + Prisma | Menu, đơn hàng, KDS, promotions |
+| `chat-service` | NestJS + Socket.IO | Chat realtime theo bàn + staff notifications |
+| `inventory-service` | NestJS + Prisma | Kho, nhập/xuất/kiểm kê, đồng bộ menu |
+| `payment-service` | NestJS + Prisma | Thanh toán CASH/VietQR/VNPay/MoMo |
+| `report-service` | NestJS + Prisma | Báo cáo doanh thu/kho/nhân sự/dashboard |
+| `postgres` | PostgreSQL | Dữ liệu chính |
+| `redis` | Redis | Cache/realtime |
 
-## Cấu trúc thư mục
+## 2. Cấu trúc thư mục
 
 ```text
 Microservices/
-├── apps/backend/
-│   ├── api-gateway/
-│   ├── user-service/
-│   ├── table-service/
-│   ├── order-service/
-│   ├── chat-service/
-│   ├── inventory-service/
-│   ├── payment-service/
-│   └── report-service/
-├── apps/frontend/
-├── ops/docs/
-├── ops/scripts/
-├── ops/k8s/
-├── docker-compose*.yml
-└── README.md
+├── apps/
+│   ├── backend/
+│   │   ├── api-gateway/
+│   │   ├── user-service/
+│   │   ├── table-service/
+│   │   ├── order-service/
+│   │   ├── chat-service/
+│   │   ├── inventory-service/
+│   │   ├── payment-service/
+│   │   └── report-service/
+│   └── frontend/
+├── ops/
+│   ├── docs/
+│   ├── scripts/
+│   └── k8s/
+├── docker-compose.yml
+├── .env.example
+├── deploy.sh
+├── seed-database.sh
+└── README_DEPLOY.md
 ```
-
-## 2. Truy cập hệ thống
-
-- FE chính: `https://localhost`
-- HTTP: `http://localhost` (redirect sang HTTPS)
-- API qua gateway: `https://localhost/api/...`
-- WebSocket: dùng cùng domain frontend
-
-Lưu ý:
-
-- Chứng chỉ local là self-signed nên trình duyệt có thể cảnh báo ở lần mở đầu.
-- Nếu test bằng điện thoại, điện thoại và máy chủ phải cùng mạng LAN.
 
 ## 3. Chạy hệ thống
 
-Xem tài liệu chi tiết:
-
-- Chạy local/dev: [HUONG_DAN_CHAY_BE_FE.md](HUONG_DAN_CHAY_BE_FE.md)
-- Deploy production: [README_DEPLOY.md](README_DEPLOY.md)
-- Nghiệm thu Section 4 (4.1, 4.2, 4.3): [ops/docs/ACCEPTANCE_GUIDE.md](ops/docs/ACCEPTANCE_GUIDE.md)
-
-Khởi động nhanh:
+### 3.1 Chạy nhanh mặc định (local TLS)
 
 ```powershell
 docker compose up -d --build
 docker compose ps
 ```
 
-## 4. Tài khoản mặc định để test
+Truy cập:
+
+- FE: `https://localhost` (HTTP `http://localhost` sẽ redirect).
+- API qua gateway: `https://localhost/api/...`
+- WebSocket chat: `wss://localhost/chat`
+
+### 3.2 Chạy dev (phục vụ phát triển frontend nhanh)
+
+```bash
+./deploy.sh dev
+./seed-database.sh
+```
+
+Truy cập:
+
+- FE dev port: `http://localhost:3000`
+- API Gateway: `http://localhost:8080`
+- Chat WS trực tiếp: `ws://localhost:3007/chat`
+
+### 3.3 Bật stack tùy chọn cùng 1 compose file
+
+```bash
+docker compose --profile monitoring up -d
+docker compose --profile logging up -d
+```
+
+### 3.4 Chuẩn bị môi trường test toàn bộ service
+
+```powershell
+.\ops\scripts\prepare-test-env.ps1
+.\ops\scripts\run-full-api-test.ps1
+```
+
+Chi tiết test tay từng service: `ops/docs/test-services-guide.md`.
+
+## 4. Routing API qua gateway (đúng theo code hiện tại)
+
+Gateway nhận tất cả request `api/*` và proxy theo prefix:
+
+- `/api/users` -> `user-service`
+- `/api/tables` -> `table-service`
+- `/api/orders` -> `order-service`
+- `/api/chats` -> `chat-service`
+- `/api/v1/ingredients` -> `inventory-service`
+- `/api/v1/payments` -> `payment-service`
+- `/api/reports` -> `report-service`
+
+Một số quy tắc quyền chính ở gateway:
+
+- Public: `POST /api/users/login`, nhóm `/api/users/customer/*`.
+- Public cho luồng khách: `GET /api/orders/menu`, `POST /api/orders`, `GET /api/orders/history`, `GET /api/tables`, `GET /api/tables/{id}/qr`.
+  - Với `GET /api/orders/menu` ở luồng QR khách: gateway bắt buộc kiểm tra `tableId` với `table-service` trước khi proxy sang `order-service`.
+- Chỉ `ADMIN`/`MANAGER`: quản trị staff/branch, menu admin, promotions admin, reports.
+- Staff role (`ADMIN|MANAGER|WAITER|BARISTA|STAFF`): profile, attendance, chat staff.
+- KDS item status (`PATCH /api/orders/:id/items/:itemId/status`): `ADMIN|MANAGER|BARISTA`.
+- Xác nhận cash (`POST /api/v1/payments/:paymentId/confirm-cash`): staff role phù hợp.
+
+## 5. API luồng chính (đang dùng bởi frontend)
+
+Base URL khi qua Nginx: `https://localhost/api`
+
+### 5.1 Auth / user
+
+- `POST /users/login`
+- `POST /users/register`
+- `GET /users/profile`
+- `POST /users/customer/request-otp`
+- `POST /users/customer/register-email`
+- `POST /users/customer/register-otp`
+- `POST /users/customer/login-email`
+- `POST /users/customer/login-otp`
+- `GET /users/customer/profile`
+- `GET /users/customer/offers`
+- `POST /users/customer/points/accrual`
+- `GET /users/staff`
+- `POST /users/staff`
+- `PATCH /users/staff/{id}`
+- `DELETE /users/staff/{id}`
+- `GET /users/staff/schedules`
+- `POST /users/staff/schedules`
+- `DELETE /users/staff/schedules/{id}`
+- `POST /users/staff/attendance/check-in`
+- `POST /users/staff/attendance/check-out`
+- `GET /users/staff/attendance`
+- `GET /users/staff/shift-overview`
+- `GET /users/staff/payroll`
+- `GET /users/admin/branches`
+- `GET /users/admin/branches/{id}`
+- `POST /users/admin/branches`
+- `PATCH /users/admin/branches/{id}`
+- `DELETE /users/admin/branches/{id}`
+
+### 5.2 Tables + QR + gọi phục vụ
+
+- `GET /tables`
+- `GET /tables/{id}`
+- `POST /tables`
+- `PATCH /tables/{id}`
+- `DELETE /tables/{id}`
+- `PATCH /tables/{id}/status`
+- `GET /tables/{id}/qr`
+- `POST /tables/qr/batch`
+- `POST /tables/{id}/call-staff`
+
+### 5.3 Orders / menu / KDS / promotions
+
+- `GET /orders/menu`
+- `POST /orders`
+- `GET /orders`
+- `GET /orders/history`
+- `GET /orders/promotions/validate`
+- `GET /orders/{id}`
+- `PATCH /orders/{id}/status`
+- `PATCH /orders/{id}/items`
+- `PATCH /orders/{id}/customer-items`
+- `PATCH /orders/{id}/items/{itemId}/status`
+  - KDS item status chấp nhận cả `PREPARING` và `READY` (tương thích ngược vẫn nhận `DONE`).
+- `POST /orders/table-actions/transfer`
+- `GET|POST|PATCH|DELETE /orders/admin/menu/categories*`
+- `GET|POST|PATCH|DELETE /orders/admin/menu/options/groups*`
+- `POST /orders/admin/menu/options/groups/{groupId}/values`
+- `PATCH|DELETE /orders/admin/menu/options/values/{id}`
+- `GET|POST|PATCH|DELETE /orders/admin/menu/items*`
+- `GET|POST|PATCH /orders/admin/promotions*`
+- `POST /orders/admin/promotions/{id}/disable`
+
+### 5.4 Chat
+
+- REST staff:
+  - `GET /chats`
+  - `POST /chats`
+  - `POST /chats/staff-notifications`
+  - `POST /chats/{id}/messages`
+  - `GET /chats/{id}/messages`
+  - `PATCH /chats/{id}/close`
+- WebSocket namespace:
+  - `/chat` với các event `join`, `join-staff`, `send-message`.
+
+### 5.5 Inventory / Payment / Reports
+
+- Inventory (`/v1/ingredients`):
+  - `GET /v1/ingredients`
+  - `POST /v1/ingredients`
+  - `PATCH /v1/ingredients/{id}`
+  - `DELETE /v1/ingredients/{id}`
+  - `POST /v1/ingredients/stock/import`
+  - `POST /v1/ingredients/stock/receipts`
+  - `POST /v1/ingredients/stock/adjust`
+  - `POST /v1/ingredients/stock/export-bulk`
+  - `GET /v1/ingredients/stock/movements`
+  - `POST /v1/ingredients/sync-menu`
+- Payment (`/v1/payments`):
+  - `POST /v1/payments`
+  - Provider hỗ trợ: `CASH`, `VIETQR`, `VNPAY`, `MOMO`
+  - `GET /v1/payments/orders/{orderId}`
+  - `GET /v1/payments/online/qr`
+  - `GET /v1/payments/{paymentId}`
+  - `POST /v1/payments/webhook`
+  - `POST /v1/payments/return`
+  - `POST /v1/payments/{paymentId}/confirm-cash`
+- Reports (`/reports`):
+  - `GET /reports/dashboard`
+  - `GET /reports/daily-stats`
+  - `GET /reports/revenue`
+  - `GET /reports/top-items`
+  - `GET /reports/inventory`
+  - `GET /reports/staff-performance`
+  - `GET /reports/export`
+
+### 5.6 Khách hàng (nâng cao: C-16..C-18)
+
+| ID | Tên chức năng | API chính (qua `/api`) | Ghi chú bám code hiện tại |
+|---|---|---|---|
+| `C-16` | Đăng ký / Đăng nhập | `POST /users/customer/request-otp`, `POST /users/customer/register-otp`, `POST /users/customer/login-otp`, `POST /users/customer/register-email`, `POST /users/customer/login-email` | Hỗ trợ cả OTP số điện thoại và email. |
+| `C-17` | Lịch sử đơn hàng | `GET /orders/history?customerId=...` (hoặc `email`/`phone`) | `limit` mặc định `20`, tối đa `50`. Trả về đơn theo thứ tự mới -> cũ. |
+| `C-18` | Tích điểm | `GET /users/customer/profile`, `GET /users/customer/offers`, `POST /users/customer/points/accrual` | Rule hiện tại: `1 điểm = 10.000đ` (`floor(amount/10000)`). Khi đơn chuyển `COMPLETED` và có `customerId`, `order-service` gọi accrual tự động. |
+
+### 5.7 Quản lý / Admin (M-01..M-26)
+
+| Nhóm | Trạng thái | Bám theo code hiện tại |
+|---|---|---|
+| `M-01..M-03` Nhân sự / phân ca / chấm công | ✅ | `user-service` + màn `StaffManagement` |
+| `M-04..M-06` Danh mục / món / tùy chọn | ✅ | `order-service` admin menu + màn `Menu` |
+| `M-07..M-11` Kho / nhập hàng / kiểm kê / cảnh báo / lịch sử | ✅ | `inventory-service` + màn `Inventory` |
+| `M-12..M-13` Công thức + tự động trừ kho khi món `READY` | ✅ | `order-service` phát `ItemCompleted`, `inventory-service` consume để trừ kho (fallback gọi API trực tiếp khi Kafka unavailable) |
+| `M-14..M-16` Bàn + QR + in QR | ✅ | `table-service` + màn `Tables` (`/tables/{id}/qr`, `/tables/qr/batch`) |
+| `M-17` Xóa / vô hiệu hóa bàn | ✅ | API đang dùng trạng thái `MAINTENANCE` (tương đương `UNAVAILABLE`) hoặc xóa cứng khi không có đơn active |
+| `M-18..M-19` Khuyến mãi | ✅ | `order-service` promotions admin + màn `Promotions` |
+| `M-20..M-24` Báo cáo / top món / tồn kho / hiệu suất / dashboard | ✅ | `report-service` + màn `Reports` |
+| `M-25` Thêm chi nhánh | ✅ | `POST /users/admin/branches` + màn `Branches` |
+| `M-26` Chuyển đổi chi nhánh | ✅ | Bộ lọc chi nhánh chung ở header (`ADMIN/MANAGER`), áp dụng cho `Dashboard`, `Menu`, `Tables`, `Orders`, `Inventory`, `Reports` |
+
+### 5.8 Tích hợp ngoài (I-01..I-04)
+
+| ID | Trạng thái | Ghi chú triển khai hiện tại |
+|---|---|---|
+| `I-01` VNPay | ✅ (khung tích hợp) | `payment-service` nhận provider `VNPAY`, tạo `paymentUrl`, hỗ trợ `return`/`webhook`. Với production cần bổ sung ký request theo spec VNPay và secret thật. |
+| `I-02` MoMo | ✅ (khung tích hợp) | `payment-service` nhận provider `MOMO`, tạo `paymentUrl`, hỗ trợ `return`/`webhook`. Với production cần signing/verification theo spec MoMo. |
+| `I-03` Webhook VietQR | ✅ | `POST /v1/payments/webhook` cập nhật trạng thái thanh toán và phát sự kiện hoàn tất. |
+| `I-04` Email thông báo (tùy chọn) | ✅ (mức kho) | `inventory-service` gửi email cảnh báo tồn kho thấp qua SMTP (`LOW_STOCK_ALERT_EMAILS`). |
+
+### 5.9 Luồng Đặt Món Qua QR (Chuẩn Sequence)
+
+```mermaid
+sequenceDiagram
+    participant Khách
+    participant Web (FE)
+    participant API Gateway
+    participant Table Service
+    participant Order Service
+    participant Kafka
+    participant KDS (Bếp)
+
+    Khách->>Web (FE): Quét QR (URL có tableId)
+    Web (FE)->>API Gateway: GET /api/orders/menu?tableId=xxx
+    API Gateway->>Table Service: Xác thực bàn theo tableId
+    Table Service-->>API Gateway: OK (bàn hợp lệ)
+    API Gateway->>Order Service: Lấy menu theo tableId/branch
+    Order Service-->>API Gateway: Menu items
+    API Gateway-->>Web (FE): Trả menu
+    Khách->>Web (FE): Chọn món, gửi đơn
+    Web (FE)->>API Gateway: POST /api/orders {tableId, items}
+    API Gateway->>Order Service: Tạo order
+    Order Service->>Order Service: Lưu order, trạng thái PENDING
+    Order Service->>Kafka: Gửi event OrderCreated
+    Kafka-->>KDS (Bếp): OrderCreated
+    KDS (Bếp)-->>Bếp: Hiển thị đơn mới
+    Order Service-->>API Gateway: {orderId, status}
+    API Gateway-->>Web (FE): Thành công
+    Web (FE)-->>Khách: Hiển thị order info
+```
+
+Ghi chú runtime: nếu `KAFKA_BROKERS` chưa cấu hình, hệ thống fallback sang thông báo realtime trực tiếp từ `order-service` qua `chat-service` để không gián đoạn luồng đang chạy.
+
+### 5.10 Luồng Tạo Bàn Và Sinh QR
+
+```mermaid
+sequenceDiagram
+    participant Manager
+    participant Staff Web (FE)
+    participant API Gateway
+    participant Table Service
+    participant QRCode Lib
+    participant DB
+
+    Manager->>Staff Web (FE): Nhập số bàn, khu vực, sức chứa
+    Staff Web (FE)->>API Gateway: POST /api/tables
+    API Gateway->>Table Service: Create table
+    Table Service->>DB: Insert table (sinh tableId UUID)
+    Table Service->>QRCode Lib: Generate QR cho URL /menu?tableId=...
+    QRCode Lib-->>Table Service: Ảnh base64
+    Table Service->>DB: Update qrCode (base64)
+    Table Service-->>API Gateway: Trả table + qrCode
+    API Gateway-->>Staff Web (FE): Thành công
+    Staff Web (FE)-->>Manager: Xem / tải / in QR
+```
+
+Ghi chú bám code:
+- `tableId` được sinh từ DB (`UUID`) trong `table-service`.
+- QR tạo bằng ZXing và lưu trường `qrCode` dạng `data:image/png;base64,...`.
+- FE hỗ trợ `GET /api/tables/{id}/qr`, `POST /api/tables/qr/batch` để tải/in dán.
+
+### 5.11 Luồng Chat Hỗ Trợ
+
+```mermaid
+sequenceDiagram
+    participant Khách
+    participant Customer Web (FE)
+    participant Chat Service (WS)
+    participant DB
+    participant Staff Web (FE)
+
+    Khách->>Customer Web (FE): Mở chat hỗ trợ
+    Customer Web (FE)->>Chat Service (WS): emit join {tableId,...}
+    Chat Service (WS)->>DB: getOrCreate chat OPEN theo tableId
+    Chat Service (WS)-->>Customer Web (FE): joined {chatId, messages}
+    Customer Web (FE)->>Chat Service (WS): emit send-message
+    Chat Service (WS)->>DB: Lưu message
+    Chat Service (WS)-->>Customer Web (FE): new-message (room chat:{tableId})
+    Chat Service (WS)-->>Staff Web (FE): new-message (room chat:{tableId})
+    Staff Web (FE)->>Chat Service (WS): emit send-message
+    Chat Service (WS)->>DB: Lưu message
+    Chat Service (WS)-->>Khách: new-message
+```
+
+Ghi chú bám code:
+- Room chuẩn đang dùng là `chat:{tableId}`.
+- Service vẫn join thêm room legacy `table:{tableId}` để tương thích ngược.
+
+## 6. Tài khoản mặc định test
 
 | Vai trò | Email | Mật khẩu |
 |---|---|---|
 | Admin | `admin.test@coffeeshop.local` | `Admin@123` |
-| Quản lý | `manager.central@coffeeshop.local` | `Manager@123` |
-| Quản lý | `manager.riverside@coffeeshop.local` | `Manager@123` |
-| Phục vụ | `waiter.test@coffeeshop.local` | `Waiter@123` |
-| Pha chế | `barista.test@coffeeshop.local` | `Barista@123` |
-| Nhân viên | `staff.test@coffeeshop.local` | `Staff@123` |
-| Khách hàng | `customer.test@coffeeshop.local` | `Customer@123` |
+| Manager | `manager.central@coffeeshop.local` | `Manager@123` |
+| Manager | `manager.riverside@coffeeshop.local` | `Manager@123` |
+| Waiter | `waiter.test@coffeeshop.local` | `Waiter@123` |
+| Barista | `barista.test@coffeeshop.local` | `Barista@123` |
+| Staff | `staff.test@coffeeshop.local` | `Staff@123` |
+| Customer | `customer.test@coffeeshop.local` | `Customer@123` |
 
-Phân quyền chính:
+## 7. Các URL UI quan trọng
 
-- Chỉ `ADMIN`/`MANAGER` được tạo tài khoản nhân viên.
-- Nhân viên thường chỉ có quyền xem hoặc thao tác nghiệp vụ theo role, không có quyền quản trị nhân sự toàn phần.
-
-## 5. Hướng dẫn sử dụng chi tiết theo vai trò
-
-## 5.1 Khách hàng (Customer)
-
-### Bước 1: vào menu bằng QR
-
-1. Quét mã QR dán tại bàn.
-2. Hệ thống mở trang `/menu?tableId=...&tableNumber=...&branchId=...`.
-3. Nếu QR hợp lệ, header sẽ hiển thị đúng số bàn.
-
-### Bước 2: chọn món và tùy chỉnh
-
-1. Tìm món theo danh mục/từ khóa.
-2. Chọn size/topping/ghi chú nếu món hỗ trợ.
-3. Thêm món vào giỏ.
-
-### Bước 3: đặt đơn
-
-1. Chọn hình thức:
-   - `Trả sau` (post-pay): gửi đơn trước, thanh toán sau.
-   - `Trả trước` (prepay): tạo đơn và chuyển sang cổng thanh toán.
-2. (Tuỳ chọn) nhập mã khuyến mãi.
-3. Bấm đặt món.
-
-### Bước 4: theo dõi đơn và thanh toán
-
-1. Xem trạng thái đơn theo thời gian thực.
-2. Nếu prepay:
-   - `VietQR`: mở mã chuyển khoản từ API `GET /api/v1/payments/online/qr`.
-3. Có thể bấm “Thanh toán tiền mặt” để gửi yêu cầu đến nhân viên.
-
-### Bước 5: gọi phục vụ và chat
-
-1. Bấm `Gọi phục vụ`, chọn lý do.
-2. Mở `Chat hỗ trợ` để nhắn tin trực tiếp với nhân viên.
-
-## 5.2 Nhân viên (Staff)
-
-### Đăng nhập
-
-1. Vào `https://localhost/login`.
-2. Đăng nhập bằng tài khoản role tương ứng.
-
-### Dashboard
-
-- Xem số bàn đang dùng, đơn chờ xử lý, doanh thu tạm tính.
-- Nhận thông báo realtime khi có đơn mới/gọi phục vụ/chat.
-
-### Quản lý bàn (S-05/S-06/S-07)
-
-1. Vào trang `Bàn`.
-2. Theo dõi trạng thái bàn theo màu.
-3. Thực hiện:
-   - tạo đơn hộ khách,
-   - chuyển bàn,
-   - ghép bàn.
-
-### Quản lý đơn (S-08/S-09/S-10/S-11)
-
-1. Vào `Đơn hàng/POS`.
-2. Lọc theo trạng thái, bàn, thời gian.
-3. Xác nhận đơn hoặc cập nhật món (theo quyền).
-4. Xác nhận thanh toán tiền mặt khi khách trả tại quầy.
-
-### KDS cho bếp (S-12/S-13/S-14/S-15)
-
-1. Vào `Bếp/KDS`.
-2. Xử lý theo luồng:
-   - bắt đầu làm,
-   - hoàn thành món,
-   - hoàn thành đơn.
-3. Màn hình tự cập nhật realtime.
-
-### Chat với khách (S-16/S-17/S-18)
-
-1. Vào `Chat`.
-2. Chọn phiên chat theo bàn.
-3. Trả lời và đóng chat khi kết thúc.
-
-### Chấm công và ca làm
-
-- Nhân viên có thể vào ca/ra ca bằng mã nhân viên hoặc QR cá nhân.
-- Xem lịch sử chấm công của chính mình.
-
-## 5.3 Quản lý / Admin
-
-### Nhân sự (M-01/M-02/M-03)
-
-1. Vào `Quản lý nhân sự`.
-2. Tạo/sửa/xóa tài khoản nhân viên (theo quyền).
-3. Phân ca, xem ca làm, theo dõi chấm công.
-4. In thẻ nhân viên có mã QR cá nhân.
-
-### Menu (M-04/M-05/M-06)
-
-1. Tạo danh mục món.
-2. Tạo món: tên, mô tả, giá, ảnh.
-3. Cấu hình size/topping và công thức nguyên liệu cho món.
-
-### Kho (M-07 đến M-13)
-
-1. Tạo nguyên liệu và định mức tồn tối thiểu.
-2. Lập phiếu nhập kho.
-3. Kiểm kê/điều chỉnh tồn.
-4. Khi món hoàn thành ở KDS, hệ thống tự trừ kho theo công thức.
-
-### Bàn và QR (M-14/M-15/M-16)
-
-1. Tạo bàn mới.
-2. Sinh QR cho từng bàn.
-3. Tải hoặc in hàng loạt QR.
-
-### Khuyến mãi (M-17/M-18)
-
-1. Tạo mã giảm giá theo `%` hoặc số tiền.
-2. Cấu hình thời gian hiệu lực, giới hạn lượt dùng, phạm vi áp dụng.
-3. Bật/tắt chương trình.
-
-### Báo cáo (M-19 đến M-23)
-
-1. Vào `Báo cáo`.
-2. Chọn khoảng thời gian.
-3. Xem:
-   - doanh thu,
-   - top món,
-   - tồn kho,
-   - hiệu suất nhân viên.
-4. Xuất file Excel/PDF (nếu endpoint tương ứng được bật).
-
-### Chi nhánh (M-24/M-25)
-
-- Admin tạo chi nhánh, quản lý phạm vi menu/kho/nhân sự theo chi nhánh.
-
-## 6. Danh sách link UI để test nhanh
-
-- Đăng nhập: `https://localhost/login`
+- Login: `https://localhost/login`
 - Dashboard: `https://localhost/`
-- Bàn: `https://localhost/tables`
-- Đơn hàng/POS: `https://localhost/orders`
-- Kho: `https://localhost/inventory`
-- Khuyến mãi: `https://localhost/promotions`
-- Báo cáo: `https://localhost/reports`
-- Chat staff: `https://localhost/chat`
-- Bếp/KDS: `https://localhost/kitchen`
+- Tables: `https://localhost/tables`
+- Orders: `https://localhost/orders`
+- Menu management: `https://localhost/menu-management`
+- Inventory: `https://localhost/inventory`
+- Promotions: `https://localhost/promotions`
+- Reports: `https://localhost/reports`
+- Kitchen: `https://localhost/kitchen`
+- Staff chat: `https://localhost/chat`
+- Staff management: `https://localhost/staff`
+- Branches: `https://localhost/branches`
+- Customer menu: `https://localhost/menu?tableId=<TABLE_ID>`
 
-## 7. API quan trọng để kiểm tra nhanh
+## 8. Tài liệu liên quan (đã giảm trùng lặp)
 
-Base URL: `https://localhost/api`
+- Triển khai production chi tiết: [README_DEPLOY.md](README_DEPLOY.md)
+- Deployment tóm tắt (dev/prod + k8s): [ops/docs/deployment-guide.md](ops/docs/deployment-guide.md)
+- Nghiệm thu: [ops/docs/ACCEPTANCE_GUIDE.md](ops/docs/ACCEPTANCE_GUIDE.md)
+- Hướng dẫn test từng service: [ops/docs/test-services-guide.md](ops/docs/test-services-guide.md)
+- Kiến trúc: [ops/docs/architecture.md](ops/docs/architecture.md)
+- Checklist bàn giao: [ops/docs/DELIVERABLES.md](ops/docs/DELIVERABLES.md)
+- Postman collection: [ops/docs/api/coffee-shop.postman_collection.json](ops/docs/api/coffee-shop.postman_collection.json)
+- Reports index: [reports/README.md](reports/README.md)
+- NFR readiness (4.1-4.6): [reports/nfr/non-functional-readiness.md](reports/nfr/non-functional-readiness.md)
 
-- `POST /users/login`
-- `GET /users/health`
-- `GET /tables`
-- `POST /tables/{id}/call-staff`
-- `GET /orders`
-- `POST /orders`
-- `GET /chats`
-- `GET /v1/ingredients/health`
-- `POST /v1/payments`
-- `GET /v1/payments/online/qr`
-- `GET /reports/health`
+## 9. Lỗi thường gặp
 
-## 8. NFR phase 1 đã tích hợp
-
-- JWT guard và kiểm soát quyền ở gateway/service.
-- Đóng port nội bộ backend, chỉ expose qua reverse proxy.
-- TLS reverse proxy tại frontend (Nginx).
-- Retry policy cho một số gọi liên service.
-- Backup PostgreSQL định kỳ qua `db-backup`.
-
-## 9. Lỗi thường gặp và cách xử lý
-
-### `docker compose ps` báo không kết nối daemon
+### `docker compose ps` không kết nối daemon
 
 - Docker Desktop chưa chạy.
-- Mở Docker Desktop, chờ `Engine running`, chạy lại.
+- Mở Docker Desktop và chờ `Engine running`.
+
+### Lỗi cert khi mở `https://localhost`
+
+- Chứng chỉ local là self-signed.
+- Chấp nhận cảnh báo ở lần truy cập đầu.
 
 ### Quét QR trên điện thoại bị lỗi
 
-- QR có thể đang trỏ host/IP cũ.
-- Tạo/in lại QR mới từ trang `Bàn`.
-- Đảm bảo điện thoại cùng mạng LAN với máy chủ.
-
-### `403 Forbidden` trên trang khách
-
-- Thường do xung đột token staff/customer hoặc session cũ.
-- Mở tab ẩn danh hoặc xóa site data rồi quét lại QR.
-
-### `429 Too Many Requests`
-
-- Hệ thống có rate-limit bảo vệ API.
-- Chờ hết window hoặc giảm tần suất gọi liên tục.
-
-### Lỗi cổng thanh toán
-
-- Kiểm tra biến môi trường cổng thanh toán trong `docker-compose.yml`.
-- Kiểm tra `returnUrl` đúng domain/host đang truy cập.
-
-## 10. Ghi chú phát triển
-
-- Repo có tài liệu chạy riêng: [HUONG_DAN_CHAY_BE_FE.md](HUONG_DAN_CHAY_BE_FE.md).
-- Cấu hình FE local dev đã chuẩn hóa cho cổng hiện tại (`http://localhost` / `https://localhost`).
-
-## 11. Gói bàn giao
-
-- Checklist bàn giao: [ops/docs/DELIVERABLES.md](ops/docs/DELIVERABLES.md)
-- Chuẩn đầu ra theo phase: [ops/docs/PHASED_OUTPUTS.md](ops/docs/PHASED_OUTPUTS.md)
-- Tiêu chí nghiệm thu chi tiết: [ops/docs/ACCEPTANCE_CRITERIA.md](ops/docs/ACCEPTANCE_CRITERIA.md)
-- Kiến trúc và luồng dữ liệu: [ops/docs/architecture.md](ops/docs/architecture.md)
-- Hướng dẫn triển khai dev/prod: [ops/docs/deployment-guide.md](ops/docs/deployment-guide.md)
-- API collection (Postman): [ops/docs/api/coffee-shop.postman_collection.json](ops/docs/api/coffee-shop.postman_collection.json)
-- Test reports: `reports/tests/`
-- Phase readiness reports: `reports/phases/`
-- Acceptance report: `reports/acceptance/`
-- K8s manifests: `ops/k8s/`
-
-Script bàn giao bắt buộc:
-
-```bash
-./build-all.sh
-./seed-database.sh
-./deploy.sh dev
-./deploy.sh prod
-node ops/scripts/check-acceptance-criteria.mjs
-```
-
-
-
+- Điện thoại và máy host phải cùng mạng LAN.
+- QR cần được tạo lại nếu đổi domain/IP.

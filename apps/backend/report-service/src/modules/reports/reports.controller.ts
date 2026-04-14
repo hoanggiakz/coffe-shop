@@ -23,6 +23,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'M-19 Revenue report by date range and period' })
   @ApiQuery({ name: 'dateFrom', required: false, example: '2026-03-01' })
   @ApiQuery({ name: 'dateTo', required: false, example: '2026-03-31' })
+  @ApiQuery({ name: 'branchId', required: false, example: 'branch_central' })
   @ApiQuery({ name: 'groupBy', required: false, enum: ['day', 'week', 'month', 'year'] })
   @ApiResponse({ status: 200 })
   async getRevenue(@Query() query: RevenueReportQueryDto) {
@@ -33,6 +34,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'M-20 Top selling items in a period' })
   @ApiQuery({ name: 'dateFrom', required: false, example: '2026-03-01' })
   @ApiQuery({ name: 'dateTo', required: false, example: '2026-03-31' })
+  @ApiQuery({ name: 'branchId', required: false, example: 'branch_central' })
   @ApiQuery({ name: 'limit', required: false, example: 10 })
   @ApiResponse({ status: 200 })
   async getTopItems(@Query() query: TopItemsQueryDto) {
@@ -43,6 +45,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'M-21 Inventory report: current stock and movement history' })
   @ApiQuery({ name: 'dateFrom', required: false, example: '2026-03-01' })
   @ApiQuery({ name: 'dateTo', required: false, example: '2026-03-31' })
+  @ApiQuery({ name: 'branchId', required: false, example: 'branch_central' })
   @ApiQuery({ name: 'includeMovements', required: false, example: true })
   @ApiQuery({ name: 'movementLimit', required: false, example: 300 })
   @ApiResponse({ status: 200 })
@@ -54,6 +57,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'M-22 Staff performance report' })
   @ApiQuery({ name: 'dateFrom', required: false, example: '2026-03-01' })
   @ApiQuery({ name: 'dateTo', required: false, example: '2026-03-31' })
+  @ApiQuery({ name: 'branchId', required: false, example: 'branch_central' })
   @ApiQuery({ name: 'limit', required: false, example: 20 })
   @ApiResponse({ status: 200 })
   async getStaffPerformance(@Query() query: StaffPerformanceQueryDto) {
@@ -64,6 +68,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'M-23 Visual dashboard data (revenue, orders, inventory)' })
   @ApiQuery({ name: 'dateFrom', required: false, example: '2026-03-01' })
   @ApiQuery({ name: 'dateTo', required: false, example: '2026-03-31' })
+  @ApiQuery({ name: 'branchId', required: false, example: 'branch_central' })
   @ApiQuery({ name: 'groupBy', required: false, enum: ['day', 'week', 'month', 'year'] })
   @ApiResponse({ status: 200 })
   async getDashboard(@Query() query: DashboardQueryDto) {
@@ -85,6 +90,7 @@ export class ReportsController {
   @ApiQuery({ name: 'format', required: true, enum: ['excel', 'pdf'] })
   @ApiQuery({ name: 'dateFrom', required: false, example: '2026-03-01' })
   @ApiQuery({ name: 'dateTo', required: false, example: '2026-03-31' })
+  @ApiQuery({ name: 'branchId', required: false, example: 'branch_central' })
   @ApiResponse({ status: 200, description: 'File stream' })
   async exportReport(@Query() query: ExportReportQueryDto, @Res() res: Response) {
     const exported = await this.reportsService.exportReport(query);

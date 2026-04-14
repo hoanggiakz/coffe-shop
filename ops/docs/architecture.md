@@ -1,19 +1,19 @@
 # Coffee Shop Microservices Architecture
 
-## 1. Service topology
+## 1) Topology
 
 ```mermaid
 flowchart LR
-    Client[Web / Mobile Client]
-    Frontend[frontend]
+    Client[Browser / Mobile]
+    Frontend[frontend<br/>React + Nginx]
     Gateway[api-gateway]
-    User[user-service]
-    Table[table-service]
-    Order[order-service]
-    Chat[chat-service]
-    Inventory[inventory-service]
-    Payment[payment-service]
-    Report[report-service]
+    User[user-service<br/>Spring]
+    Table[table-service<br/>Spring]
+    Order[order-service<br/>NestJS]
+    Chat[chat-service<br/>NestJS + Socket.IO]
+    Inventory[inventory-service<br/>NestJS]
+    Payment[payment-service<br/>NestJS]
+    Report[report-service<br/>NestJS]
     Postgres[(PostgreSQL)]
     Redis[(Redis)]
 
@@ -40,23 +40,71 @@ flowchart LR
     Gateway --> Redis
 ```
 
-## 2. Main data flows
+## 2) Gateway route map
 
-### Order flow
-1. Customer selects table and menu from frontend.
-2. Request goes to `api-gateway`, then `order-service`.
-3. `order-service` stores order and order items in PostgreSQL.
-4. Staff updates item status (KDS) through `order-service`.
-5. When item completed, inventory deduction is triggered using seeded menu recipe.
+- `/api/users` -> `user-service`
+- `/api/tables` -> `table-service`
+- `/api/orders` -> `order-service`
+- `/api/chats` -> `chat-service`
+- `/api/v1/ingredients` -> `inventory-service`
+- `/api/v1/payments` -> `payment-service`
+- `/api/reports` -> `report-service`
+
+## 3) Main business flows
+
+### Order/KDS flow
+
+1. FE gọi `GET /api/orders/menu?tableId=...` qua gateway.
+2. Gateway xác thực `tableId` với `table-service` trước khi chuyển tiếp.
+3. `order-service` trả menu theo branch/table context.
+4. FE tạo đơn `POST /api/orders`.
+5. `order-service` lưu order `PENDING`, publish `OrderCreated` lên Kafka.
+6. KDS nhận thông báo đơn mới và hiển thị cho bếp.
+
+```mermaid
+sequenceDiagram
+    participant Khách
+    participant Web as Web (FE)
+    participant Gateway as API Gateway
+    participant Table as Table Service
+    participant Order as Order Service
+    participant Kafka
+    participant KDS
+    participant Bep as Bếp
+
+    Khách->>Web: Quét QR (tableId)
+    Web->>Gateway: GET /api/orders/menu?tableId=xxx
+    Gateway->>Table: Xác thực bàn
+    Table-->>Gateway: Bàn hợp lệ
+    Gateway->>Order: Lấy menu
+    Order-->>Gateway: Menu
+    Gateway-->>Web: Trả menu
+    Web->>Gateway: POST /api/orders
+    Gateway->>Order: Tạo order
+    Order->>Order: Persist PENDING
+    Order->>Kafka: OrderCreated
+    Kafka-->>KDS: OrderCreated
+    KDS-->>Bep: Hiển thị đơn mới
+```
+
+Ghi chú: khi `KAFKA_BROKERS` chưa bật, hệ thống dùng đường fallback realtime (`order-service` -> `chat-service` -> `staff:global`) để giữ nguyên trải nghiệm vận hành.
 
 ### Chat flow
-1. Customer/staff connects Socket.IO namespace `/chat`.
-2. Chat session metadata and messages are saved by `chat-service`.
-3. Redis is used for realtime fan-out / adapter.
+
+1. Client connect Socket.IO namespace `/chat`.
+2. `chat-service` tạo/ghép session theo `tableId`.
+3. Message được lưu DB và broadcast tới room `table:<tableId>`.
+4. Staff nhận notification qua room `staff:global`.
 
 ### Payment flow
-1. Frontend creates payment request through gateway.
-2. `payment-service` processes method (cash / gateway provider).
-3. Payment state is persisted and can be reported by `report-service`.
 
+1. FE tạo payment qua `/api/v1/payments`.
+2. `payment-service` xử lý CASH hoặc online QR.
+3. Staff xác nhận tiền mặt qua `/confirm-cash`.
+4. Kết quả payment được dùng cho reporting.
 
+### Inventory flow
+
+1. Manager thao tác nhập/xuất/điều chỉnh nguyên liệu.
+2. `inventory-service` ghi stock movements.
+3. Khi bật Kafka (`KAFKA_BROKERS`), consumer xử lý `ItemCompleted` để trừ kho tự động.

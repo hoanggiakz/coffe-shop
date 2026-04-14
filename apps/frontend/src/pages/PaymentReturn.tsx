@@ -12,10 +12,35 @@ export default function PaymentReturn() {
   const [message, setMessage] = useState('')
 
   const payload = useMemo(() => {
-    const orderId = searchParams.get('orderId') || searchParams.get('txnRef') || ''
-    const provider = (searchParams.get('provider') || 'VIETQR').toUpperCase()
-    const resultCode = searchParams.get('resultCode') || searchParams.get('errorCode') || ''
-    const transactionId = searchParams.get('transId') || searchParams.get('transactionId') || ''
+    const orderId =
+      searchParams.get('orderId') ||
+      searchParams.get('txnRef') ||
+      searchParams.get('vnp_TxnRef') ||
+      searchParams.get('orderInfo') ||
+      ''
+
+    const explicitProvider = String(searchParams.get('provider') || '').toUpperCase()
+    const inferredProvider = searchParams.get('vnp_TxnRef')
+      ? 'VNPAY'
+      : searchParams.get('partnerCode')
+        ? 'MOMO'
+        : 'VIETQR'
+    const provider = explicitProvider || inferredProvider
+
+    const resultCode =
+      searchParams.get('resultCode') ||
+      searchParams.get('errorCode') ||
+      searchParams.get('vnp_ResponseCode') ||
+      searchParams.get('transResult') ||
+      ''
+
+    const transactionId =
+      searchParams.get('transId') ||
+      searchParams.get('transactionId') ||
+      searchParams.get('vnp_TransactionNo') ||
+      searchParams.get('requestId') ||
+      ''
+
     const returnMessage = searchParams.get('message') || ''
 
     return { orderId, provider, resultCode, transactionId, message: returnMessage }
@@ -38,7 +63,8 @@ export default function PaymentReturn() {
             : tv('Thanh toán thất bại hoặc bị hủy.', 'Payment failed or cancelled.'),
         )
       } catch (error: any) {
-        const fallback = payload.resultCode === '0' || payload.resultCode === '00'
+        const normalizedCode = String(payload.resultCode || '').toUpperCase()
+        const fallback = normalizedCode === '0' || normalizedCode === '00' || normalizedCode === 'SUCCESS'
           ? tv('Hệ thống đang xác thực thanh toán, vui lòng thử lại sau.', 'Awaiting payment verification, please retry.')
           : tv('Không thể xác nhận thanh toán. Vui lòng liên hệ nhân viên.', 'Unable to confirm payment. Please contact staff.')
         setStatus('failed')

@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export const TIME_GROUPS = ['day', 'week', 'month', 'year'] as const;
 export type TimeGroup = (typeof TIME_GROUPS)[number];
@@ -18,6 +18,11 @@ export class ReportRangeQueryDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (value === null || value === undefined ? undefined : String(value).trim()))
+  @IsString()
+  branchId?: string;
 }
 
 export class RevenueReportQueryDto extends ReportRangeQueryDto {

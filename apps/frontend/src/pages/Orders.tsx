@@ -7,6 +7,7 @@ import { PaymentMethod } from '@/types'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 
 interface TableApi {
   id: string
@@ -26,7 +27,8 @@ interface OrderItemApi {
   menuItemName?: string | null
   quantity: number
   price: number
-  status: 'WAITING' | 'PREPARING' | 'DONE'
+  note?: string | null
+  status: 'WAITING' | 'PREPARING' | 'DONE' | 'READY'
 }
 
 interface OrderApi {
@@ -46,7 +48,7 @@ interface PaymentApi {
   paymentId: string
   orderId: string
   status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED'
-  provider: 'CASH' | 'VIETQR'
+  provider: 'CASH' | 'VIETQR' | 'VNPAY' | 'MOMO'
   paymentUrl?: string | null
   vietQr?: {
     qrImageUrl: string
@@ -55,13 +57,14 @@ interface PaymentApi {
   changeDue?: number | null
 }
 
-const paymentMethods: PaymentMethod[] = ['CASH', 'VIETQR']
+const paymentMethods: PaymentMethod[] = ['CASH', 'VIETQR', 'VNPAY', 'MOMO']
 const orderStatuses: Array<OrderApi['status']> = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
 const selectClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
 
 export default function Orders() {
   const { tv } = useI18n()
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const [tables, setTables] = useState<TableApi[]>([])
   const [menuItems, setMenuItems] = useState<MenuItemApi[]>([])
   const [orders, setOrders] = useState<OrderApi[]>([])
@@ -76,6 +79,7 @@ export default function Orders() {
   const [detailOrder, setDetailOrder] = useState<OrderApi | null>(null)
   const [editingOrder, setEditingOrder] = useState<OrderApi | null>(null)
   const [editCart, setEditCart] = useState<Record<string, number>>({})
+  const [editNotes, setEditNotes] = useState<Record<string, string>>({})
   const [updatingOrder, setUpdatingOrder] = useState(false)
   const [payingOrder, setPayingOrder] = useState<OrderApi | null>(null)
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('CASH')
@@ -99,10 +103,13 @@ export default function Orders() {
       if (dateTo) {
         params.dateTo = `${dateTo}T23:59:59.999Z`
       }
+      if (selectedBranchId) {
+        params.branchId = selectedBranchId
+      }
 
       const [tablesRes, menuRes, ordersRes] = await Promise.all([
-        api.get('/tables'),
-        api.get('/orders/menu'),
+        api.get('/tables', { params: { branchId: selectedBranchId || undefined } }),
+        api.get('/orders/menu', { params: { branchId: selectedBranchId || undefined } }),
         api.get('/orders', { params }),
       ])
       setTables(tablesRes.data || [])
@@ -120,7 +127,7 @@ export default function Orders() {
 
   useEffect(() => {
     loadData()
-  }, [selectedStatus, filterTableId, dateFrom, dateTo])
+  }, [selectedStatus, filterTableId, dateFrom, dateTo, selectedBranchId])
 
   const increase = (menuItemId: string) => {
     setCart((prev) => ({ ...prev, [menuItemId]: (prev[menuItemId] || 0) + 1 }))
@@ -195,8 +202,17 @@ export default function Orders() {
       acc[item.menuItemId] = (acc[item.menuItemId] || 0) + item.quantity
       return acc
     }, {})
+    const noteByMenuItem = order.orderItems.reduce<Record<string, string>>((acc, item) => {
+      const existing = String(acc[item.menuItemId] || '').trim()
+      const current = String(item.note || '').trim()
+      if (!existing && current) {
+        acc[item.menuItemId] = current
+      }
+      return acc
+    }, {})
     setEditingOrder(order)
     setEditCart(grouped)
+    setEditNotes(noteByMenuItem)
   }
 
   const updateEditQuantity = (menuItemId: string, delta: number) => {
@@ -206,6 +222,11 @@ export default function Orders() {
       const updated = current + delta
       if (updated <= 0) {
         delete next[menuItemId]
+        setEditNotes((prev) => {
+          const nextNotes = { ...prev }
+          delete nextNotes[menuItemId]
+          return nextNotes
+        })
       } else {
         next[menuItemId] = updated
       }
@@ -217,7 +238,11 @@ export default function Orders() {
     if (!editingOrder) return
     const items = Object.entries(editCart)
       .filter(([, quantity]) => quantity > 0)
-      .map(([menuItemId, quantity]) => ({ menuItemId, quantity }))
+      .map(([menuItemId, quantity]) => ({
+        menuItemId,
+        quantity,
+        note: String(editNotes[menuItemId] || '').trim() || undefined,
+      }))
 
     if (!items.length) {
       toast.error(tv('Đơn phải còn ít nhất 1 món', 'Order must contain at least one item'))
@@ -230,6 +255,7 @@ export default function Orders() {
       toast.success('Cập nhật món trong đơn thành công')
       setEditingOrder(null)
       setEditCart({})
+      setEditNotes({})
       await loadData()
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Không cập nhật được đơn', 'Unable to update order'))
@@ -327,10 +353,10 @@ export default function Orders() {
           toast.success(tv(`Tiền thừa: ${changeDue.toLocaleString()}đ`, `Change due: ${changeDue.toLocaleString()}đ`))
         }
         setPayingOrder(null)
-      } else if (payment.provider === 'VIETQR') {
+      } else {
         if (payment.paymentUrl) {
           window.open(payment.paymentUrl, '_blank')
-        } else if (payment.vietQr?.qrImageUrl) {
+        } else if (payment.provider === 'VIETQR' && payment.vietQr?.qrImageUrl) {
           window.open(payment.vietQr.qrImageUrl, '_blank')
         }
         toast.success(tv('Đã tạo giao dịch online. Chờ webhook hoặc đối soát thanh toán', 'Online payment created. Waiting for webhook or reconciliation'))
@@ -702,11 +728,14 @@ export default function Orders() {
             <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-sky-100 p-2 text-sm">
               {detailOrder.orderItems.map((item) => {
                 return (
-                  <div key={item.id} className="flex items-center justify-between">
-                    <span>
-                      {item.quantity}x {orderItemLabel(item)} ({item.status === 'WAITING' ? 'Chờ làm' : item.status === 'PREPARING' ? 'Đang chuẩn bị' : 'Hoàn thành'})
-                    </span>
-                    <span>{(item.quantity * item.price).toLocaleString()}đ</span>
+                  <div key={item.id} className="space-y-0.5">
+                    <div className="flex items-center justify-between">
+                      <span>
+                        {item.quantity}x {orderItemLabel(item)} ({item.status === 'WAITING' ? 'Chờ làm' : item.status === 'PREPARING' ? 'Đang chuẩn bị' : 'Hoàn thành'})
+                      </span>
+                      <span>{(item.quantity * item.price).toLocaleString()}đ</span>
+                    </div>
+                    {!!item.note && <p className="text-xs text-slate-500">Ghi chú: {item.note}</p>}
                   </div>
                 )
               })}
@@ -731,20 +760,36 @@ export default function Orders() {
               {menuItems
                 .filter((item) => item.available || editCart[item.id])
                 .map((item) => (
-                  <div key={item.id} className="flex items-center justify-between text-sm">
-                    <div>
+                  <div key={item.id} className="space-y-2 rounded-xl border border-sky-100 bg-white/80 p-2 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+                    <div className="flex items-center justify-between">
+                      <div>
                       <p className="font-medium">{item.name}</p>
                       <p className="text-xs text-gray-500">{item.price.toLocaleString()}đ</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => updateEditQuantity(item.id, -1)}>
+                          -
+                        </button>
+                        <span>{editCart[item.id] || 0}</span>
+                        <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => updateEditQuantity(item.id, 1)}>
+                          +
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => updateEditQuantity(item.id, -1)}>
-                        -
-                      </button>
-                      <span>{editCart[item.id] || 0}</span>
-                      <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => updateEditQuantity(item.id, 1)}>
-                        +
-                      </button>
-                    </div>
+                    {(editCart[item.id] || 0) > 0 && (
+                      <input
+                        type="text"
+                        className={selectClass}
+                        placeholder="Ghi chú cho món (ít đá, ít ngọt...)"
+                        value={editNotes[item.id] || ''}
+                        onChange={(e) =>
+                          setEditNotes((prev) => ({
+                            ...prev,
+                            [item.id]: e.target.value,
+                          }))
+                        }
+                      />
+                    )}
                   </div>
                 ))}
             </div>
@@ -755,15 +800,16 @@ export default function Orders() {
             </div>
 
             <div className="mt-4 flex gap-2">
-              <Button
-                variant="secondary"
-                className="flex-1"
-                onClick={() => {
-                  setEditingOrder(null)
-                  setEditCart({})
-                }}
-              >
-                Hủy
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => {
+                    setEditingOrder(null)
+                    setEditCart({})
+                    setEditNotes({})
+                  }}
+                >
+                  Hủy
               </Button>
               <Button className="flex-1" onClick={saveOrderItems} loading={updatingOrder}>
                 Lưu thay đổi

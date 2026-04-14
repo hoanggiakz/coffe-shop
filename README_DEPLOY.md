@@ -35,7 +35,7 @@ docker compose version
 
 ```bash
 git clone git@github.com:hoanggiakz/coffe-shop.git
-cd coffe-shop
+cd coffe-shop/Microservices
 git checkout deverlop
 ```
 
@@ -55,77 +55,40 @@ Tạo tối thiểu:
 - `JWT_SECRET`
 - `INTERNAL_SERVICE_TOKEN`
 - `ONLINE_PAYMENT_QR_URL` (optional, ảnh VietQR)
+- `VNPAY_PAY_URL`, `VNPAY_TMN_CODE` (optional, nếu bật VNPay)
+- `MOMO_PAY_URL`, `MOMO_PARTNER_CODE` (optional, nếu bật MoMo)
+- `KAFKA_BROKERS` (optional, nếu bật flow event `OrderCreated` -> KDS qua Kafka)
 
-## 3.2 Tạo file override production
+## 3.2 Tạo file `.env` cho production
 
-Tạo file `docker-compose.prod.yml` tại thư mục gốc (cùng cấp `docker-compose.yml`):
+Từ file mẫu `.env.example`, tạo `.env` và thay toàn bộ secret bằng giá trị thật:
 
-```yaml
-services:
-  postgres:
-    environment:
-      POSTGRES_PASSWORD: "REPLACE_POSTGRES_PASSWORD"
+```bash
+cp .env.example .env
+```
 
-  api-gateway:
-    environment:
-      JWT_SECRET: "REPLACE_JWT_SECRET"
+Ví dụ các biến bắt buộc tối thiểu trong `.env`:
 
-  user-service:
-    environment:
-      SPRING_DATASOURCE_PASSWORD: "REPLACE_POSTGRES_PASSWORD"
-      JWT_SECRET: "REPLACE_JWT_SECRET"
-
-  table-service:
-    environment:
-      SPRING_DATASOURCE_PASSWORD: "REPLACE_POSTGRES_PASSWORD"
-      APP_BASE_URL: "https://coffee.example.com"
-
-  order-service:
-    environment:
-      DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/orderdb?schema=public"
-      INTERNAL_SERVICE_TOKEN: "REPLACE_INTERNAL_SERVICE_TOKEN"
-
-  chat-service:
-    environment:
-      DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/chatdb?schema=public"
-
-  inventory-service:
-    environment:
-      DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/inventorydb?schema=public"
-      JWT_SECRET: "REPLACE_JWT_SECRET"
-      INTERNAL_SERVICE_TOKEN: "REPLACE_INTERNAL_SERVICE_TOKEN"
-      SMTP_HOST: "smtp.your-provider.com"
-      SMTP_PORT: 587
-      SMTP_USER: "noreply@coffee.example.com"
-      SMTP_PASS: "REPLACE_SMTP_PASSWORD"
-      SMTP_FROM: "\"Coffee Shop\" <noreply@coffee.example.com>"
-
-  payment-service:
-    environment:
-      DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/paymentdb?schema=public"
-      JWT_SECRET: "REPLACE_JWT_SECRET"
-      INTERNAL_SERVICE_TOKEN: "REPLACE_INTERNAL_SERVICE_TOKEN"
-      ONLINE_PAYMENT_QR_URL: "https://img.vietqr.io/image/VCB-1026422235-qr_only.png"
-
-  report-service:
-    environment:
-      DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/reportdb?schema=public"
-      ORDER_DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/orderdb?schema=public"
-      INVENTORY_DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/inventorydb?schema=public"
-      PAYMENT_DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/paymentdb?schema=public"
-      USER_DATABASE_URL: "postgresql://postgres:REPLACE_POSTGRES_PASSWORD@postgres:5432/userdb?schema=public"
-      JWT_SECRET: "REPLACE_JWT_SECRET"
-
-  db-backup:
-    environment:
-      POSTGRES_PASSWORD: "REPLACE_POSTGRES_PASSWORD"
+```dotenv
+POSTGRES_PASSWORD=REPLACE_POSTGRES_PASSWORD
+JWT_SECRET=REPLACE_JWT_SECRET
+INTERNAL_SERVICE_TOKEN=REPLACE_INTERNAL_SERVICE_TOKEN
+APP_BASE_URL=https://coffee.example.com
+ALLOWED_ORIGINS=https://coffee.example.com
+SMTP_HOST=smtp.your-provider.com
+SMTP_USER=noreply@coffee.example.com
+SMTP_PASS=REPLACE_SMTP_PASSWORD
+ONLINE_PAYMENT_QR_URL=https://img.vietqr.io/image/VCB-1026422235-qr_only.png
+VNPAY_PAY_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+VNPAY_TMN_CODE=REPLACE_VNPAY_TMN_CODE
+MOMO_PAY_URL=https://test-payment.momo.vn/v2/gateway/pay
+MOMO_PARTNER_CODE=REPLACE_MOMO_PARTNER_CODE
+KAFKA_BROKERS=kafka-1:9092,kafka-2:9092
 ```
 
 ## 3.3 SSL certificate thật (khuyến nghị bắt buộc)
 
-Hiện image `frontend` tự tạo self-signed cert khi build. Với production, mount cert thật (Let's Encrypt hoặc cert thương mại).
-
-Thêm vào `docker-compose.prod.yml`:
+Hiện image `frontend` tự tạo self-signed cert khi build. Với production, mount cert thật (Let's Encrypt hoặc cert thương mại) trực tiếp vào service `frontend` trong `docker-compose.yml`:
 
 ```yaml
 services:
@@ -138,13 +101,14 @@ services:
 ## 4. Deploy lần đầu
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose config -q
+docker compose up -d --build
 ```
 
 Kiểm tra:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+docker compose ps
 ```
 
 ## 5. Health-check sau deploy
@@ -172,7 +136,7 @@ git fetch origin
 git checkout deverlop
 git pull --ff-only origin deverlop
 
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose up -d --build
 ```
 
 ## 7. Rollback nhanh
@@ -180,7 +144,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```bash
 git log --oneline -n 20
 git checkout <COMMIT_OK>
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose up -d --build
 ```
 
 ## 8. Backup và restore database
@@ -188,6 +152,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ## 8.1 Backup
 
 Service `db-backup` tự dump theo chu kỳ vào thư mục host `./backups`.
+Mặc định giữ backup `30` ngày (`BACKUP_RETENTION_DAYS=30`), có thể chỉnh qua `.env`.
 
 Backup thủ công ngay lập tức:
 
@@ -207,14 +172,31 @@ cat backup-manual.sql | docker compose exec -T postgres psql -U postgres
 - Đã dùng SSL certificate thật (không self-signed).
 - `APP_BASE_URL` dùng domain production.
 - QR phải luôn trỏ về domain public (không trỏ `localhost`/IP LAN). Sau khi đổi domain, vào màn hình `Bàn` và bấm `In QR đã chọn` để sinh/in lại QR mới.
-- Đã test end-to-end 5 luồng chính:
+- Đã test end-to-end 10 luồng chính:
   - Quét QR -> đặt món
+  - Tạo bàn mới -> sinh QR -> xem/tải/in QR
   - Nhân viên nhận và xác nhận đơn
-  - KDS cập nhật trạng thái món
+  - KDS cập nhật trạng thái món (`WAITING -> PREPARING -> READY`)
   - Tự động trừ kho theo công thức
   - Chat realtime khách - nhân viên
+  - Khách mở chat và join room theo `tableId`, nhân viên nhận/trả lời realtime
+  - Khách đăng ký/đăng nhập bằng OTP hoặc email (`C-16`)
+  - Khách xem lịch sử đơn (`C-17`)
+  - Khách xem điểm tích lũy sau khi đơn hoàn tất (`C-18`, rule `1 điểm = 10.000đ`)
+- Đã kiểm tra luồng event bếp: `ItemCompleted` từ `order-service` được `inventory-service` consume để trừ kho (hoặc fallback API khi Kafka unavailable).
+- Luồng đặt món QR phải đi theo chuỗi:
+  - FE `GET /api/orders/menu?tableId=...` -> Gateway validate table với `table-service` -> `order-service` trả menu -> `POST /api/orders` -> `OrderCreated` lên Kafka -> KDS nhận đơn mới.
 - Đã kiểm tra backup file được sinh đúng lịch.
 - Đã cấu hình giám sát log và cảnh báo resource (CPU/RAM/Disk).
+- Nếu bật VNPay/MoMo: đã cấu hình đầy đủ signing key/secret theo cổng thanh toán và test luồng return/webhook thật.
+- Đã đối chiếu NFR 4.1-4.6 theo code hiện tại tại `reports/nfr/non-functional-readiness.md`.
+
+Nếu cần stack quan sát trong cùng file compose:
+
+```bash
+docker compose --profile monitoring up -d
+docker compose --profile logging up -d
+```
 
 ## 10. Lệnh vận hành nhanh
 
@@ -231,4 +213,12 @@ docker compose up -d --force-recreate payment-service
 # Dừng toàn bộ
 docker compose down
 ```
+
+## 11. Tham chiếu test service
+
+Để chuẩn bị môi trường test và kiểm thử từng service theo API hiện tại, dùng:
+
+- `ops/scripts/prepare-test-env.ps1`
+- `ops/scripts/run-full-api-test.ps1`
+- `ops/docs/test-services-guide.md`
 

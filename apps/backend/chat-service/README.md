@@ -1,28 +1,40 @@
 # Chat Service
 
-Production-ready real-time chat service for coffee shop tables using Socket.io + Redis for scalability.
+NestJS service cho chat realtime giữa khách theo bàn và nhân viên.
 
-## Quick Start
+## Runtime
+
+- Port container: `3007`
+- REST base path: `/api/chats`
+- WebSocket namespace: `/chat`
+
+## REST API chính
+
+- `GET /api/chats/health`
+- `GET /api/chats`
+- `POST /api/chats`
+- `POST /api/chats/staff-notifications`
+- `POST /api/chats/:id/messages`
+- `PATCH /api/chats/:id/close`
+- `GET /api/chats/:id/messages`
+
+## WebSocket events
+
+- Client -> server: `join`, `join-staff`, `send-message`
+- Server -> client: `joined`, `joined-staff`, `new-message`, `staff-notification`, `error`
+- Phòng chat theo bàn: `chat:{tableId}` (service vẫn join thêm `table:{tableId}` để tương thích ngược).
+
+Frontend hiện tại kết nối bằng:
+
+- Dev: `ws://localhost:3007/chat`
+- Qua Nginx: `wss://<host>/chat`
+
+## Chạy trong hệ thống
+
+Từ thư mục `Microservices/`:
 
 ```bash
-cd chat-service
-npm install
-npx prisma generate
-npx prisma db push
-npm run start:dev
+docker compose up -d --build chat-service
 ```
 
-## WebSocket Endpoint
-- Connect: `ws://localhost:3007/chat?tableId=table123`
-- Events: `join-room`, `send-message`
-
-## Docker
-```bash
-docker-compose up -d
-```
-
-## Architecture
-- Rooms: `chat:${tableId}`
-- DB: Prisma PostgreSQL (Chat, Message)
-- Scaling: Redis Socket.io adapter
-- Consistent with other microservices
+Hoặc chạy toàn hệ thống theo `README.md`.

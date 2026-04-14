@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import api from '@/utils/api'
 import { loaiTuyChonMon, trangThaiHoatDong } from '@/utils/display'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 
 type MenuCategory = {
   id: string
@@ -80,6 +81,7 @@ const defaultItemForm = {
 }
 
 export default function Menu() {
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const [includeInactive, setIncludeInactive] = useState(false)
   const [categories, setCategories] = useState<MenuCategory[]>([])
   const [groups, setGroups] = useState<OptionGroup[]>([])
@@ -87,7 +89,7 @@ export default function Menu() {
   const [ingredients, setIngredients] = useState<IngredientOption[]>([])
   const [keyword, setKeyword] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('ALL')
-  const [branchId, setBranchId] = useState('')
+  const [branchId, setBranchId] = useState(selectedBranchId)
 
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [categoryForm, setCategoryForm] = useState({ name: '', description: '', sortOrder: '0', isActive: true })
@@ -165,6 +167,10 @@ export default function Menu() {
   useEffect(() => {
     void loadAll()
   }, [includeInactive, branchId])
+
+  useEffect(() => {
+    setBranchId(selectedBranchId)
+  }, [selectedBranchId])
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -337,7 +343,7 @@ export default function Menu() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Quản lý thực đơn (M-04/M-05/M-06)</h1>
         <div className="flex items-center gap-2">
-          <Input placeholder="Mã chi nhánh" value={branchId} onChange={(e) => setBranchId(e.target.value)} />
+          <Input placeholder="Mã chi nhánh" value={branchId || 'Tất cả chi nhánh'} disabled />
           <label className="inline-flex items-center gap-2 text-sm">
             <input type="checkbox" checked={includeInactive} onChange={(e) => setIncludeInactive(e.target.checked)} />
             Hiển thị cả mục đã ngừng hoạt động

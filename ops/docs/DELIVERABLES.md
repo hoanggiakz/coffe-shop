@@ -1,65 +1,73 @@
 # Delivery Package Checklist
 
 ## 1) Source code
-- `apps/backend/api-gateway` (Node.js)
-- `apps/backend/user-service` (Spring Boot)
-- `apps/backend/table-service` (Spring Boot)
-- `apps/backend/order-service` (Node.js)
-- `apps/backend/chat-service` (Node.js + Socket.IO)
-- `frontend` (React + Vite)
 
-## 2) Required scripts
+- `apps/frontend`
+- `apps/backend/api-gateway`
+- `apps/backend/user-service`
+- `apps/backend/table-service`
+- `apps/backend/order-service`
+- `apps/backend/chat-service`
+- `apps/backend/inventory-service`
+- `apps/backend/payment-service`
+- `apps/backend/report-service`
+
+## 2) Runtime scripts
+
+- `deploy.sh`
 - `seed-database.sh`
 - `build-all.sh`
-- `deploy.sh`
 
-## 3) Environment and compose
-- `docker-compose.yml`
-- `docker-compose.dev.yml`
-- `docker-compose.prod.yml`
-- `.env.example` (root + service-level examples)
+## 3) Compose and environment
 
-## 4) Technical docs
-- `README.md`
-- `README_DEPLOY.md`
+- `docker-compose.yml` (single compose file)
+- profiles `monitoring`/`logging` trong `docker-compose.yml`
+- `.env.example`
+
+## 4) Main documentation
+
+- `README.md` (nguồn chính: kiến trúc, runbook, API flow)
+- `README_DEPLOY.md` (production)
+- `ops/docs/deployment-guide.md` (bản tóm tắt deploy + k8s)
 - `ops/docs/architecture.md`
-- `ops/docs/deployment-guide.md`
 - `ops/docs/PHASED_OUTPUTS.md`
 - `ops/docs/ACCEPTANCE_CRITERIA.md`
+- `ops/docs/ACCEPTANCE_GUIDE.md`
 - `ops/docs/api/coffee-shop.postman_collection.json`
 
-## 5) Database schema and seed
+## 5) DB schema and seed
+
 - Prisma schemas: `*/prisma/schema.prisma`
 - Seed scripts:
-  - `apps/backend/user-service` auto seeder (`TestAccountSeeder`)
-  - `apps/backend/table-service` auto seeder (`TableDataSeeder`) with at least 10 tables
-  - `apps/backend/order-service/prisma/seed.(ts|js)` for menu/promotions/recipes
-  - `apps/backend/inventory-service/prisma/seed.js` for ingredients baseline
+  - `apps/backend/order-service/prisma/seed.(ts|js)`
+  - `apps/backend/inventory-service/prisma/seed.js`
+- Auto seeder:
+  - `apps/backend/user-service` (`TestAccountSeeder`)
+  - `apps/backend/table-service` (`TableDataSeeder`)
 
-## 6) Test artifacts
-- Unit tests (sanity baseline) for each required service
-- Integration smoke script: `ops/scripts/integration-test.sh`
-- 100 concurrent users performance script: `ops/scripts/perf-100-users.mjs`
-- Phase check scripts:
-  - `ops/scripts/check-mvp-phase.mjs`
-  - `ops/scripts/check-advanced-phase.mjs`
-  - `ops/scripts/check-acceptance-criteria.mjs`
-  - `ops/scripts/order-create-latency.mjs`
-  - `apps/frontend/scripts/ws-latency-50.mjs`
-- Reports:
-  - `reports/tests/unit-test-report.md`
-  - `reports/tests/integration-test-report.md`
-  - `reports/tests/performance-test-report.md`
-  - `reports/phases/mvp-readiness.md`
-  - `reports/phases/advanced-readiness.md`
-  - `reports/acceptance/acceptance-live.md`
+## 6) Test and quality artifacts
 
-## 7) Kubernetes manifests (optional package included)
+- `ops/scripts/check-mvp-phase.mjs`
+- `ops/scripts/check-advanced-phase.mjs`
+- `ops/scripts/check-acceptance-criteria.mjs`
+- `ops/scripts/integration-test.sh`
+- `ops/scripts/perf-100-users.mjs`
+- `ops/scripts/order-create-latency.mjs`
+- `apps/frontend/scripts/ws-latency-50.mjs`
+
+Reports:
+
+- `reports/README.md`
+- `reports/tests/unit-test-report.md`
+- `reports/tests/integration-test-report.md`
+- `reports/tests/performance-test-report.md`
+- `reports/phases/mvp-readiness.md`
+- `reports/phases/advanced-readiness.md`
+- `reports/acceptance/acceptance-live.md`
+
+## 7) Kubernetes manifests
+
 - `ops/k8s/configmap.yaml`
 - `ops/k8s/secret.example.yaml`
-- `ops/k8s/*.yaml` deployments/services
+- `ops/k8s/*.yaml` (deployments/services)
 - `ops/k8s/ingress.yaml`
-
-
-
-

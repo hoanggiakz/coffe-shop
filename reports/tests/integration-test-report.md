@@ -1,15 +1,15 @@
 # Integration Test Report
 
-- Date: `2026-04-10`
-- Script: `scripts/integration-test.sh`
+- Updated: `2026-04-14`
+- Source script: `ops/scripts/integration-test.sh`
 
 ## Command
 
 ```bash
-BASE_URL=https://localhost ./scripts/integration-test.sh
+BASE_URL=https://localhost ./ops/scripts/integration-test.sh
 ```
 
-## Coverage
+## Coverage (smoke)
 
 - `GET /api/users/health`
 - `GET /api/tables/health`
@@ -22,9 +22,13 @@ BASE_URL=https://localhost ./scripts/integration-test.sh
 
 ## Pass criteria
 
-- All requests return HTTP `2xx`.
-- Script exits with code `0`.
+- Tất cả request trả HTTP `2xx`.
+- Script exit code `0`.
 
-## Current execution status
+## Latest local snapshot
 
-- Not executed in this local editing session.
+- Chưa chạy lại trong đợt cập nhật docs.
+
+## Notes
+
+- Báo cáo này mô tả phạm vi test; kết quả thực tế cần chạy lại script theo thời điểm nghiệm thu.

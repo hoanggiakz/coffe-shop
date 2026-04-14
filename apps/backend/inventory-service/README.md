@@ -1,43 +1,41 @@
 # Inventory Service
 
-Production-ready NestJS microservice for managing coffee shop ingredients stock.
+NestJS service quản lý nguyên liệu và biến động kho.
 
-## Features
-- CRUD ingredients (name, unit, stock, minStock)
-- Stock import/export with history tracking
-- Automatic stock deduction on `ItemCompleted` Kafka events from order-service
-- JWT auth, Swagger docs, Winston logging
-- Prisma + PostgreSQL
+## Runtime
 
-## Quick Start
-```bash
-cd inventory-service
-npm install
-npx prisma generate
-npx prisma db push
-npm run start:dev
-```
+- Port container: `3005`
+- Global prefix: `/api`
+- URI versioning: `v1`
+- Base path qua gateway: `/api/v1/ingredients`
 
-## APIs (localhost:3005/api/v1)
-- `POST /ingredients` - Create ingredient
-- `GET /ingredients` - List ingredients  
-- `POST /ingredients/stock/import` - Import stock
+## API chính
 
-**Auth**: Bearer JWT (get from user-service)
+- `GET /api/v1/ingredients/health`
+- `GET /api/v1/ingredients`
+- `POST /api/v1/ingredients`
+- `PATCH /api/v1/ingredients/:id`
+- `DELETE /api/v1/ingredients/:id`
+- `POST /api/v1/ingredients/stock/import`
+- `POST /api/v1/ingredients/stock/receipts`
+- `POST /api/v1/ingredients/stock/adjust`
+- `POST /api/v1/ingredients/stock/export-bulk`
+- `GET /api/v1/ingredients/stock/movements`
+- `POST /api/v1/ingredients/sync-menu`
+
+`InventoryController` dùng `JwtAuthGuard`, vì vậy endpoint nghiệp vụ yêu cầu Bearer token.
 
 ## Kafka
-Consumes `ItemCompleted` from order-service → auto deduct stock.
 
-## Docker
+- Có consumer topic `ItemCompleted` để đồng bộ trừ kho tự động theo payload công thức nguyên liệu từ `order-service`.
+- Nếu `KAFKA_BROKERS` rỗng, service vẫn chạy nhưng bỏ qua luồng Kafka.
+
+## Chạy trong hệ thống
+
+Từ thư mục `Microservices/`:
+
 ```bash
-docker-compose up --build
+docker compose up -d --build inventory-service
 ```
 
-## Env
-```
-DATABASE_URL="postgresql://..."
-KAFKA_BROKERS="localhost:9092"
-JWT_SECRET="your-secret"
-PORT=3005
-```
-
+Hoặc chạy toàn hệ thống theo `README.md`.

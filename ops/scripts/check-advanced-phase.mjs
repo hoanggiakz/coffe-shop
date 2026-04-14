@@ -84,13 +84,13 @@ async function main() {
     add('WARN', 'PWA manifest', 'Not found (PWA not fully enabled yet)');
   }
 
-  if (exists('monitoring/prometheus.yml') || exists('docker-compose.monitoring.yml')) {
+  if (exists('monitoring/prometheus.yml')) {
     add('PASS', 'Monitoring stack files', 'Monitoring config found');
   } else {
     add('WARN', 'Monitoring stack files', 'Prometheus/Grafana config not found');
   }
 
-  if (exists('logging/elk-stack.yml') || exists('docker-compose.logging.yml')) {
+  if (exists('logging/elk-stack.yml')) {
     add('PASS', 'Centralized logging files', 'Logging stack found');
   } else {
     add('WARN', 'Centralized logging files', 'ELK/logging stack not found');

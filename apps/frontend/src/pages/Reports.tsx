@@ -19,6 +19,7 @@ import api from '@/utils/api'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 import { vaiTroNhanVien } from '@/utils/display'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 
 type TimeGroup = 'day' | 'week' | 'month' | 'year'
 type ExportType = 'revenue' | 'top-items' | 'inventory' | 'staff-performance' | 'dashboard'
@@ -115,6 +116,7 @@ const selectClass =
 
 export default function Reports() {
   const { tv } = useI18n()
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const now = new Date()
   const oneMonthAgo = new Date()
   oneMonthAgo.setDate(now.getDate() - 30)
@@ -138,19 +140,19 @@ export default function Reports() {
     try {
       const [dashboardRes, revenueRes, topRes, inventoryRes, staffRes] = await Promise.all([
         api.get('/reports/dashboard', {
-          params: { dateFrom, dateTo, groupBy },
+          params: { dateFrom, dateTo, groupBy, branchId: selectedBranchId || undefined },
         }),
         api.get('/reports/revenue', {
-          params: { dateFrom, dateTo, groupBy },
+          params: { dateFrom, dateTo, groupBy, branchId: selectedBranchId || undefined },
         }),
         api.get('/reports/top-items', {
-          params: { dateFrom, dateTo, limit: 10 },
+          params: { dateFrom, dateTo, branchId: selectedBranchId || undefined, limit: 10 },
         }),
         api.get('/reports/inventory', {
-          params: { dateFrom, dateTo, includeMovements: false },
+          params: { dateFrom, dateTo, branchId: selectedBranchId || undefined, includeMovements: false },
         }),
         api.get('/reports/staff-performance', {
-          params: { dateFrom, dateTo, limit: 10 },
+          params: { dateFrom, dateTo, branchId: selectedBranchId || undefined, limit: 10 },
         }),
       ])
 
@@ -168,14 +170,14 @@ export default function Reports() {
 
   useEffect(() => {
     void loadReports()
-  }, [dateFrom, dateTo, groupBy])
+  }, [dateFrom, dateTo, groupBy, selectedBranchId])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       void loadReports()
     }, 30000)
     return () => window.clearInterval(timer)
-  }, [dateFrom, dateTo, groupBy])
+  }, [dateFrom, dateTo, groupBy, selectedBranchId])
 
   const revenueChartData = useMemo(
     () =>
@@ -200,7 +202,15 @@ export default function Reports() {
   const handleExport = async () => {
     try {
       const response = await api.get('/reports/export', {
-        params: { reportType: exportType, format: exportFormat, dateFrom, dateTo, groupBy, limit: 20 },
+        params: {
+          reportType: exportType,
+          format: exportFormat,
+          dateFrom,
+          dateTo,
+          groupBy,
+          branchId: selectedBranchId || undefined,
+          limit: 20,
+        },
         responseType: 'blob',
       })
       const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/octet-stream' })

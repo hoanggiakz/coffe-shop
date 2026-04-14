@@ -3,6 +3,8 @@ import { useAuthStore } from '@/stores/authStore'
 import { useI18n } from '@/utils/i18n'
 import { useUiStore } from '@/stores/uiStore'
 import { vaiTroNhanVien } from '@/utils/display'
+import BranchScopeSelector from './BranchScopeSelector'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 
 interface HeaderProps {
   onToggleSidebar: () => void
@@ -16,6 +18,7 @@ export default function Header({
   notificationsCount = 0,
 }: HeaderProps) {
   const { user, logout } = useAuthStore()
+  const resetBranchScope = useBranchScopeStore((state) => state.resetBranchScope)
   const dark = useUiStore((state) => state.darkMode)
   const toggleDark = useUiStore((state) => state.toggleDarkMode)
   const { t } = useI18n()
@@ -44,6 +47,8 @@ export default function Header({
       </div>
 
       <div className="flex items-center gap-2 sm:gap-3">
+        <BranchScopeSelector />
+
         <div className="hidden items-center rounded-xl border border-sky-100 bg-sky-50/80 px-3 py-1 text-xs font-medium text-sky-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 sm:flex">
           Chuẩn giao diện: Tiếng Việt
         </div>
@@ -77,7 +82,10 @@ export default function Header({
             <p className="text-xs text-gray-500 dark:text-gray-400">{vaiTroNhanVien(user?.role)}</p>
           </div>
           <button
-            onClick={logout}
+            onClick={() => {
+              resetBranchScope()
+              logout()
+            }}
             className="ml-2 text-xs text-gray-500 transition-colors hover:text-red-500"
           >
             {t('logout')}
