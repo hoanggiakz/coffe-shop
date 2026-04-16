@@ -178,6 +178,12 @@ Invoke-RestMethod -Uri "$BaseUrl/api/v1/payments/$paymentId/confirm-cash" -Metho
 
 Kỳ vọng: tạo payment CASH trạng thái chờ, confirm cash thành công và chuyển `PAID`.
 
+Đối với payment online, không xác nhận thủ công. Dùng endpoint verify:
+
+```powershell
+Invoke-RestMethod -Uri "$BaseUrl/api/v1/payments/$paymentId/verify" -Method POST -ContentType "application/json" -Body '{}'
+```
+
 ### 4.8 Report Service (`/api/reports`)
 
 ```powershell
