@@ -1,4 +1,4 @@
-FROM node:20-bullseye-slim AS builder
+FROM node:20.19-bullseye-slim AS builder
 
 WORKDIR /app
 COPY package*.json ./
