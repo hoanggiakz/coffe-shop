@@ -68,8 +68,17 @@ export interface Order {
 }
 
 // Payment
-export type PaymentMethod = 'CASH' | 'VIETQR' | 'VNPAY' | 'MOMO'
-export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED'
+export type PaymentMethod = 'CASH' | 'VIETQR' | 'VNPAY'
+export type PaymentStatus =
+  | 'PENDING'
+  | 'WAITING_TRANSFER'
+  | 'WAITING_CASH'
+  | 'PAID'
+  | 'FAILED'
+  | 'EXPIRED'
+  | 'CANCELLED'
+  | 'COMPLETED'
+  | 'REFUNDED'
 
 export interface Payment {
   id: string

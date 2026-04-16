@@ -4,6 +4,7 @@ export const STAFF_ROLES = ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF'] as
 export type StaffRole = (typeof STAFF_ROLES)[number]
 
 const STAFF_ROLE_SET = new Set<string>(STAFF_ROLES)
+const NO_ROLES: readonly StaffRole[] = []
 
 const routeAccessMap: Record<string, readonly StaffRole[]> = {
   '/': STAFF_ROLES,
@@ -48,7 +49,7 @@ export function canAccessPath(pathname: string, role?: User['role'] | string | n
   if (!normalizedRole) return false
 
   const allowed = routeAccessMap[pathname]
-  if (!allowed) return true
+  if (!allowed) return false
   return allowed.includes(normalizedRole)
 }
 
@@ -59,5 +60,5 @@ export function getDefaultPathForRole(role?: User['role'] | string | null): stri
 }
 
 export function getAllowedRolesForPath(pathname: string): readonly StaffRole[] {
-  return routeAccessMap[pathname] || STAFF_ROLES
+  return routeAccessMap[pathname] || NO_ROLES
 }

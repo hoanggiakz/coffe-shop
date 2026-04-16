@@ -109,8 +109,6 @@ export function phuongThucThanhToan(method?: string | null): string {
       return 'VietQR'
     case 'VNPAY':
       return 'VNPay'
-    case 'MOMO':
-      return 'MoMo'
     default:
       return method || '-'
   }
@@ -120,10 +118,20 @@ export function trangThaiThanhToan(status?: string | null): string {
   switch (status) {
     case 'PENDING':
       return 'Đang chờ'
+    case 'WAITING_TRANSFER':
+      return 'Chờ chuyển khoản'
+    case 'WAITING_CASH':
+      return 'Chờ thu tiền mặt'
+    case 'PAID':
+      return 'Đã thanh toán'
     case 'COMPLETED':
       return 'Hoàn tất'
     case 'FAILED':
       return 'Thất bại'
+    case 'EXPIRED':
+      return 'Hết hạn'
+    case 'CANCELLED':
+      return 'Đã hủy'
     case 'REFUNDED':
       return 'Đã hoàn tiền'
     default:

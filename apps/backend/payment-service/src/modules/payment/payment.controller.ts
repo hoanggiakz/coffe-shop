@@ -6,6 +6,7 @@ import { WebhookDto } from './dto/webhook.dto';
 import { PaymentReturnDto } from './dto/return.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ConfirmCashDto } from './dto/confirm-cash.dto';
+import { VerifyPaymentDto } from './dto/verify-payment.dto';
 
 @ApiTags('Payments')
 @Controller('payments')
@@ -24,7 +25,7 @@ export class PaymentController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create payment (CASH, VIETQR, VNPAY, MOMO)' })
+  @ApiOperation({ summary: 'Create payment (CASH, VIETQR, VNPAY)' })
   @ApiResponse({ status: 201, description: 'Payment created.' })
   @ApiBody({ type: CreatePaymentDto })
   @HttpCode(HttpStatus.CREATED)
@@ -54,6 +55,15 @@ export class PaymentController {
   @ApiResponse({ status: 200, description: 'Payment fetched.' })
   findByPaymentId(@Param('paymentId') paymentId: string) {
     return this.paymentService.findByPaymentId(paymentId);
+  }
+
+  @Post(':paymentId/verify')
+  @ApiOperation({ summary: 'Verify online transaction status with provider/webhook evidence' })
+  @ApiResponse({ status: 200, description: 'Payment verification completed.' })
+  @ApiBody({ type: VerifyPaymentDto, required: false })
+  @HttpCode(HttpStatus.OK)
+  verifyPayment(@Param('paymentId') paymentId: string, @Body() dto: VerifyPaymentDto) {
+    return this.paymentService.verifyOnlinePayment(paymentId, dto.transactionId);
   }
 
   @Post('webhook')

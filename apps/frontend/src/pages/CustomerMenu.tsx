@@ -49,6 +49,66 @@ interface ChatMessage {
   createdAt?: string
 }
 
+function parseTaggedMeta(content: string, tag: string): Record<string, string> {
+  const prefix = `[${tag}]`
+  const raw = content.startsWith(prefix) ? content.slice(prefix.length).trim() : content
+  return raw
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .reduce<Record<string, string>>((acc, pair) => {
+      const index = pair.indexOf('=')
+      if (index <= 0) return acc
+      const key = pair.slice(0, index).trim()
+      const value = pair.slice(index + 1).trim()
+      if (key) acc[key] = value
+      return acc
+    }, {})
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function formatSystemChatContent(content: string): string {
+  const raw = String(content || '').trim()
+  if (!raw.startsWith('[')) return raw
+
+  if (raw.startsWith('[ORDER_NEW]')) {
+    const meta = parseTaggedMeta(raw, 'ORDER_NEW')
+    const tableText =
+      meta.tableNumber && meta.tableNumber !== 'null' && meta.tableNumber !== 'undefined'
+        ? `Bàn ${meta.tableNumber}`
+        : meta.tableId
+          ? `Bàn ${meta.tableId}`
+          : 'Bàn không xác định'
+    const decodedSummary = meta.summary ? safeDecodeURIComponent(meta.summary) : ''
+    if (decodedSummary) return decodedSummary
+
+    const itemCount = Number(meta.items || 0)
+    const total = Number(meta.total || 0)
+    return `${tableText} | ${itemCount > 0 ? `${itemCount} món` : 'Chưa có món'} | Tổng tiền ${total.toLocaleString('vi-VN')}đ`
+  }
+
+  if (raw.startsWith('[CALL_STAFF]')) {
+    return raw.replace('[CALL_STAFF]', '').trim() || 'Khách đang cần hỗ trợ'
+  }
+
+  if (raw.startsWith('[KDS_ITEM_STATUS]')) {
+    return raw.replace('[KDS_ITEM_STATUS]', '').trim() || 'Bếp đã cập nhật trạng thái món'
+  }
+
+  if (raw.startsWith('[KDS_ORDER_READY]')) {
+    return raw.replace('[KDS_ORDER_READY]', '').trim() || 'Đơn đã sẵn sàng phục vụ'
+  }
+
+  return raw.replace(/\[[A-Z_]+\]\s*/, '').trim()
+}
+
 interface OrderItemStatus {
   id: string
   menuItemId: string
@@ -73,7 +133,7 @@ interface OrderStatusResponse {
 interface PaymentStatusResponse {
   paymentId: string
   orderId: string
-  status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED'
+  status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED' | 'EXPIRED' | 'CANCELLED'
   provider: 'VIETQR' | 'CASH'
   paymentUrl?: string | null
   transferContent?: string | null
@@ -625,7 +685,11 @@ export default function CustomerMenu() {
     const onNewMessage = (message: ChatMessage) => {
       setMessages((prev) => [...prev, message])
       if (message.senderType === 'STAFF') {
-        showRealtimeNotification(message.senderName || 'Nhân viên', message.content)
+        const isSystem = String(message.senderName || '').trim().toUpperCase() === 'SYSTEM'
+        showRealtimeNotification(
+          isSystem ? 'Hệ thống' : message.senderName || 'Nhân viên',
+          isSystem ? formatSystemChatContent(message.content) : message.content,
+        )
       }
     }
     const onSocketError = (payload: { message?: string }) => {
@@ -1994,8 +2058,15 @@ export default function CustomerMenu() {
                     {messages.length === 0 && <p className="text-sm text-gray-500">Chưa có tin nhắn.</p>}
                     {messages.map((msg, idx) => (
                       <div key={`${msg.id || 'm'}-${idx}`} className="text-sm">
-                        <span className="font-semibold">{msg.senderName || msg.senderType}:</span>{' '}
-                        {msg.content}
+                        <span className="font-semibold">
+                          {String(msg.senderName || '').trim().toUpperCase() === 'SYSTEM'
+                            ? 'Hệ thống'
+                            : msg.senderName || msg.senderType}
+                          :
+                        </span>{' '}
+                        {String(msg.senderName || '').trim().toUpperCase() === 'SYSTEM'
+                          ? formatSystemChatContent(msg.content)
+                          : msg.content}
                       </div>
                     ))}
                   </div>

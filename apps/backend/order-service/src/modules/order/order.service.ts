@@ -2192,6 +2192,29 @@ export class OrderService {
     try {
       const chatId = await this.getOrCreateOpenChatId(order.tableId, order.customerName || undefined);
       const items = Array.isArray(order.orderItems) ? order.orderItems : [];
+      const missingMenuItemIds = [
+        ...new Set(
+          items
+            .flatMap((item) => {
+              const menuItemId = String(item.menuItemId || '').trim();
+              const menuItemName = String(item.menuItemName || '').trim();
+              if (!menuItemId || menuItemName) {
+                return [];
+              }
+              return [menuItemId];
+            }),
+        ),
+      ];
+      const menuNamesById = new Map<string, string>();
+      if (missingMenuItemIds.length > 0) {
+        const menuItems = await this.prisma.menuItem.findMany({
+          where: { id: { in: missingMenuItemIds } },
+          select: { id: true, name: true },
+        });
+        for (const menuItem of menuItems) {
+          menuNamesById.set(menuItem.id, menuItem.name);
+        }
+      }
       const itemCount = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
       const tableLabel =
         order.tableNumber !== null && order.tableNumber !== undefined
@@ -2200,7 +2223,13 @@ export class OrderService {
       const itemSummary = items
         .slice(0, 4)
         .map((item) => {
-          const itemName = String(item.menuItemName || item.menuItemId || 'Món không xác định').trim();
+          const normalizedMenuItemId = String(item.menuItemId || '').trim();
+          const itemName = String(
+            item.menuItemName ||
+              menuNamesById.get(normalizedMenuItemId) ||
+              normalizedMenuItemId ||
+              'Món không xác định',
+          ).trim();
           return `${Number(item.quantity || 0)}x ${itemName}`;
         })
         .join(', ');

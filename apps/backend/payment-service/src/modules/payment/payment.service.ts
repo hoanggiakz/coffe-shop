@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { KafkaService } from '../../kafka/kafka.service';
 import { ConfigService } from '@nestjs/config';
@@ -7,7 +8,16 @@ import { WebhookDto } from './dto/webhook.dto';
 import { PaymentReturnDto } from './dto/return.dto';
 import { PaymentStatus } from '@prisma/client';
 
-type SupportedProvider = 'VIETQR' | 'CASH' | 'VNPAY' | 'MOMO';
+type SupportedProvider = 'VIETQR' | 'CASH' | 'VNPAY';
+type OnlineProvider = Exclude<SupportedProvider, 'CASH'>;
+type ReturnStatusHint = PaymentStatus | 'SUCCESS_HINT' | null;
+
+const TERMINAL_PAYMENT_STATUSES = new Set<PaymentStatus>([
+  PaymentStatus.PAID,
+  PaymentStatus.FAILED,
+  PaymentStatus.EXPIRED,
+  PaymentStatus.CANCELLED,
+]);
 
 @Injectable()
 export class PaymentService {
@@ -49,12 +59,28 @@ export class PaymentService {
     return String(this.config.get<string>('VNPAY_TMN_CODE', '') || '').trim();
   }
 
-  private get momoPayUrl() {
-    return String(this.config.get<string>('MOMO_PAY_URL', '') || '').trim();
+  private get vnpayHashSecret() {
+    return String(this.config.get<string>('VNPAY_HASH_SECRET', '') || '').trim();
   }
 
-  private get momoPartnerCode() {
-    return String(this.config.get<string>('MOMO_PARTNER_CODE', '') || '').trim();
+  private get vnpayQueryUrl() {
+    return String(this.config.get<string>('VNPAY_QUERY_URL', '') || '').trim();
+  }
+
+  private get vietQrQueryUrl() {
+    return String(this.config.get<string>('VIETQR_QUERY_URL', '') || '').trim();
+  }
+
+  private get onlinePaymentTimeoutMinutes() {
+    const value = Number(this.config.get<string>('ONLINE_PAYMENT_TIMEOUT_MINUTES', '30'));
+    if (!Number.isFinite(value) || value <= 0) {
+      return 30;
+    }
+    return value;
+  }
+
+  private get commonWebhookSecret() {
+    return String(this.config.get<string>('PAYMENT_WEBHOOK_SECRET', '') || '').trim();
   }
 
   private async fetchWithRetry(
@@ -95,21 +121,289 @@ export class PaymentService {
 
   private normalizeProvider(provider: string): SupportedProvider {
     const normalized = String(provider || '').toUpperCase();
-    if (!['VIETQR', 'CASH', 'VNPAY', 'MOMO'].includes(normalized)) {
+    if (!['VIETQR', 'CASH', 'VNPAY'].includes(normalized)) {
       throw new BadRequestException(`Unsupported provider: ${provider}`);
     }
     return normalized as SupportedProvider;
   }
 
-  private ensureOnlineProvider(provider: SupportedProvider): Exclude<SupportedProvider, 'CASH'> {
+  private ensureOnlineProvider(provider: SupportedProvider): OnlineProvider {
     if (provider === 'CASH') {
       throw new BadRequestException('CASH does not support online webhook/return flow');
     }
     return provider;
   }
 
+  private normalizePaymentStatus(raw: unknown): PaymentStatus | null {
+    const normalized = String(raw || '').trim().toUpperCase();
+    if (!normalized) {
+      return null;
+    }
+
+    const aliases: Record<string, PaymentStatus> = {
+      PENDING: PaymentStatus.WAITING_TRANSFER,
+      WAITING: PaymentStatus.WAITING_TRANSFER,
+      WAITING_TRANSFER: PaymentStatus.WAITING_TRANSFER,
+      PROCESSING: PaymentStatus.WAITING_TRANSFER,
+      IN_PROGRESS: PaymentStatus.WAITING_TRANSFER,
+      PAID: PaymentStatus.PAID,
+      SUCCESS: PaymentStatus.PAID,
+      COMPLETED: PaymentStatus.PAID,
+      DONE: PaymentStatus.PAID,
+      SETTLED: PaymentStatus.PAID,
+      FAILED: PaymentStatus.FAILED,
+      FAIL: PaymentStatus.FAILED,
+      ERROR: PaymentStatus.FAILED,
+      DECLINED: PaymentStatus.FAILED,
+      REJECTED: PaymentStatus.FAILED,
+      EXPIRED: PaymentStatus.EXPIRED,
+      TIMEOUT: PaymentStatus.EXPIRED,
+      TIMED_OUT: PaymentStatus.EXPIRED,
+      CANCELLED: PaymentStatus.CANCELLED,
+      CANCELED: PaymentStatus.CANCELLED,
+      USER_CANCELLED: PaymentStatus.CANCELLED,
+      USER_CANCELED: PaymentStatus.CANCELLED,
+      ABORTED: PaymentStatus.CANCELLED,
+    };
+
+    return aliases[normalized] || null;
+  }
+
+  private mapReturnCodeToStatusHint(resultCode?: string | null): ReturnStatusHint {
+    const code = String(resultCode || '').trim().toUpperCase();
+    if (!code) {
+      return null;
+    }
+
+    const successCodes = new Set(['0', '00', 'SUCCESS', 'PAID', 'APPROVED']);
+    if (successCodes.has(code)) {
+      return 'SUCCESS_HINT';
+    }
+
+    const cancelledCodes = new Set(['CANCEL', 'CANCELED', 'CANCELLED', 'ABORTED', 'USER_CANCELLED', 'USER_CANCELED']);
+    if (cancelledCodes.has(code)) {
+      return PaymentStatus.CANCELLED;
+    }
+
+    const expiredCodes = new Set(['EXPIRED', 'TIMEOUT', 'TIMED_OUT']);
+    if (expiredCodes.has(code)) {
+      return PaymentStatus.EXPIRED;
+    }
+
+    const failedCodes = new Set(['FAIL', 'FAILED', 'ERROR', 'DECLINED', 'REJECTED']);
+    if (failedCodes.has(code)) {
+      return PaymentStatus.FAILED;
+    }
+
+    return null;
+  }
+
+  private getProviderWebhookSecret(provider: OnlineProvider) {
+    const providerKey = `${provider}_WEBHOOK_SECRET`;
+    const providerSecret = String(this.config.get<string>(providerKey, '') || '').trim();
+    return providerSecret || this.commonWebhookSecret;
+  }
+
+  private stripSignaturePrefix(signature: string) {
+    const value = String(signature || '').trim();
+    if (value.startsWith('sha256=')) {
+      return value.slice('sha256='.length);
+    }
+    return value;
+  }
+
+  private safeCompare(left: string, right: string) {
+    const l = Buffer.from(left, 'utf8');
+    const r = Buffer.from(right, 'utf8');
+    if (l.length !== r.length) {
+      return false;
+    }
+    return timingSafeEqual(l, r);
+  }
+
+  private verifyIncomingWebhookSignature(provider: OnlineProvider, webhookDto: WebhookDto) {
+    const secret = this.getProviderWebhookSecret(provider);
+    if (!secret) {
+      return;
+    }
+
+    const receivedSignature = this.stripSignaturePrefix(String(webhookDto.signature || ''));
+    if (!receivedSignature) {
+      throw new BadRequestException(`Missing webhook signature for ${provider}`);
+    }
+
+    const rawPayload =
+      typeof webhookDto.rawData === 'string'
+        ? webhookDto.rawData
+        : JSON.stringify(
+            webhookDto.rawData || {
+              orderId: webhookDto.orderId,
+              transactionId: webhookDto.transactionId,
+              status: webhookDto.status,
+              provider: webhookDto.provider,
+            },
+          );
+
+    const expected = createHmac('sha256', secret).update(rawPayload).digest('hex');
+    if (!this.safeCompare(expected, receivedSignature)) {
+      throw new BadRequestException(`Invalid webhook signature for ${provider}`);
+    }
+  }
+
+  private getOnlineProviderStatusQueryUrl(provider: OnlineProvider) {
+    if (provider === 'VNPAY') return this.vnpayQueryUrl;
+    return this.vietQrQueryUrl;
+  }
+
+  private isPaymentTerminal(status: PaymentStatus) {
+    return TERMINAL_PAYMENT_STATUSES.has(status);
+  }
+
+  private getPaymentExpiryDate(payment: any): Date {
+    const metadata =
+      payment.metadata && typeof payment.metadata === 'object' && !Array.isArray(payment.metadata)
+        ? (payment.metadata as Record<string, any>)
+        : {};
+
+    const expiresAtRaw = metadata.expiresAt ? new Date(String(metadata.expiresAt)) : null;
+    if (expiresAtRaw && !Number.isNaN(expiresAtRaw.getTime())) {
+      return expiresAtRaw;
+    }
+
+    const fallback = new Date(payment.createdAt);
+    fallback.setMinutes(fallback.getMinutes() + this.onlinePaymentTimeoutMinutes);
+    return fallback;
+  }
+
+  private resolveProviderStatusFromPayload(rawPayload: any, paymentAmount: number) {
+    const raw = rawPayload && typeof rawPayload === 'object' ? rawPayload : {};
+    const transactionFound =
+      raw.transactionFound === false ||
+      raw.found === false ||
+      raw.exists === false ||
+      raw.notFound === true ||
+      String(raw.code || '').toUpperCase() === 'NOT_FOUND'
+        ? false
+        : true;
+
+    const amountKeys = ['receivedAmount', 'amountReceived', 'settledAmount', 'paidAmount'];
+    for (const key of amountKeys) {
+      const value = Number(raw[key]);
+      if (Number.isFinite(value) && value >= paymentAmount && transactionFound) {
+        return {
+          status: PaymentStatus.PAID,
+          transactionFound,
+          transactionId: String(raw.transactionId || raw.transId || raw.id || '').trim() || null,
+        };
+      }
+    }
+
+    const paidFlags = [raw.paid, raw.isPaid, raw.success, raw.completed];
+    if (paidFlags.some((flag) => flag === true) && transactionFound) {
+      return {
+        status: PaymentStatus.PAID,
+        transactionFound,
+        transactionId: String(raw.transactionId || raw.transId || raw.id || '').trim() || null,
+      };
+    }
+
+    const candidates = [
+      raw.status,
+      raw.paymentStatus,
+      raw.transactionStatus,
+      raw.resultStatus,
+      raw.state,
+      raw.result,
+      raw.code,
+    ];
+
+    for (const candidate of candidates) {
+      const mapped = this.normalizePaymentStatus(candidate);
+      if (!mapped) continue;
+      if (mapped === PaymentStatus.PAID && !transactionFound) continue;
+      return {
+        status: mapped,
+        transactionFound,
+        transactionId: String(raw.transactionId || raw.transId || raw.id || '').trim() || null,
+      };
+    }
+
+    return {
+      status: PaymentStatus.WAITING_TRANSFER,
+      transactionFound,
+      transactionId: String(raw.transactionId || raw.transId || raw.id || '').trim() || null,
+    };
+  }
+
+  private async verifyWithProviderApi(payment: any, provider: OnlineProvider, transactionIdHint?: string) {
+    const queryUrl = this.getOnlineProviderStatusQueryUrl(provider);
+    if (!queryUrl) {
+      return {
+        status: PaymentStatus.WAITING_TRANSFER,
+        transactionFound: false,
+        transactionId: transactionIdHint || payment.transactionId || null,
+        raw: { reason: 'provider-query-url-not-configured' },
+      };
+    }
+
+    let statusUrl: URL;
+    try {
+      statusUrl = new URL(queryUrl);
+    } catch {
+      return {
+        status: PaymentStatus.WAITING_TRANSFER,
+        transactionFound: false,
+        transactionId: transactionIdHint || payment.transactionId || null,
+        raw: { reason: `invalid-provider-query-url:${queryUrl}` },
+      };
+    }
+
+    statusUrl.searchParams.set('provider', provider);
+    statusUrl.searchParams.set('paymentId', payment.id);
+    statusUrl.searchParams.set('orderId', payment.orderId);
+    statusUrl.searchParams.set('amount', String(Number(payment.amount)));
+    if (payment.transferContent) {
+      statusUrl.searchParams.set('transferContent', String(payment.transferContent));
+    }
+    if (transactionIdHint || payment.transactionId) {
+      statusUrl.searchParams.set('transactionId', String(transactionIdHint || payment.transactionId));
+    }
+
+    try {
+      const response = await this.fetchWithRetry(statusUrl.toString(), { method: 'GET' }, { attempts: 2 });
+      if (!response.ok) {
+        return {
+          status: PaymentStatus.WAITING_TRANSFER,
+          transactionFound: false,
+          transactionId: transactionIdHint || payment.transactionId || null,
+          raw: { reason: `provider-http-${response.status}` },
+        };
+      }
+
+      let payload: any;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = { status: await response.text() };
+      }
+
+      const resolved = this.resolveProviderStatusFromPayload(payload, Number(payment.amount));
+      return {
+        ...resolved,
+        raw: payload,
+      };
+    } catch (error) {
+      return {
+        status: PaymentStatus.WAITING_TRANSFER,
+        transactionFound: false,
+        transactionId: transactionIdHint || payment.transactionId || null,
+        raw: { reason: (error as Error).message || 'provider-request-failed' },
+      };
+    }
+  }
+
   private buildFrontendReturnUrl(
-    provider: 'VIETQR' | 'VNPAY' | 'MOMO',
+    provider: 'VIETQR' | 'VNPAY',
     payload: { orderId: string; transactionId: string; resultCode?: string; message?: string },
   ) {
     const url = new URL(this.paymentReturnBaseUrl);
@@ -127,49 +421,70 @@ export class PaymentService {
     return url.toString();
   }
 
+  private formatVnpayDate(value: Date) {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return (
+      `${value.getFullYear()}` +
+      `${pad(value.getMonth() + 1)}` +
+      `${pad(value.getDate())}` +
+      `${pad(value.getHours())}` +
+      `${pad(value.getMinutes())}` +
+      `${pad(value.getSeconds())}`
+    );
+  }
+
+  private encodeVnpayQueryComponent(input: string) {
+    return encodeURIComponent(input).replace(/%20/g, '+');
+  }
+
+  private buildVnpaySignData(params: Record<string, string>) {
+    return Object.keys(params)
+      .sort()
+      .map((key) => `${this.encodeVnpayQueryComponent(key)}=${this.encodeVnpayQueryComponent(params[key])}`)
+      .join('&');
+  }
+
   private buildVnpayPaymentUrl(orderId: string, amount: number, transactionId: string) {
-    if (!this.vnpayPayUrl) {
+    if (!this.vnpayPayUrl || !this.vnpayTerminalCode || !this.vnpayHashSecret) {
       return this.buildFrontendReturnUrl('VNPAY', {
         orderId,
         transactionId,
         resultCode: 'PENDING_SETUP',
-        message: 'VNPAY gateway URL is not configured',
+        message: 'VNPAY config missing (payUrl/tmnCode/hashSecret)',
       });
     }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + this.onlinePaymentTimeoutMinutes * 60 * 1000);
+    const returnUrl = this.buildFrontendReturnUrl('VNPAY', { orderId, transactionId });
+
+    const params: Record<string, string> = {
+      vnp_Amount: String(Math.max(0, Math.round(amount)) * 100),
+      vnp_Command: 'pay',
+      vnp_CreateDate: this.formatVnpayDate(now),
+      vnp_CurrCode: 'VND',
+      vnp_ExpireDate: this.formatVnpayDate(expiresAt),
+      vnp_IpAddr: '127.0.0.1',
+      vnp_Locale: 'vn',
+      vnp_OrderInfo: `Thanh toan don ${orderId}`,
+      vnp_OrderType: 'other',
+      vnp_ReturnUrl: returnUrl,
+      vnp_TmnCode: this.vnpayTerminalCode,
+      vnp_TxnRef: orderId,
+      vnp_Version: '2.1.0',
+    };
+
+    const signData = this.buildVnpaySignData(params);
+    const secureHash = createHmac('sha512', this.vnpayHashSecret).update(signData, 'utf8').digest('hex');
 
     const url = new URL(this.vnpayPayUrl);
-    url.searchParams.set('vnp_TxnRef', orderId);
-    url.searchParams.set('vnp_Amount', String(Math.max(0, Math.round(amount)) * 100));
-    url.searchParams.set('vnp_OrderInfo', `Thanh toan don ${orderId}`);
-    url.searchParams.set('vnp_ReturnUrl', this.buildFrontendReturnUrl('VNPAY', { orderId, transactionId }));
-
-    if (this.vnpayTerminalCode) {
-      url.searchParams.set('vnp_TmnCode', this.vnpayTerminalCode);
-    }
-
-    return url.toString();
-  }
-
-  private buildMomoPaymentUrl(orderId: string, amount: number, transactionId: string) {
-    if (!this.momoPayUrl) {
-      return this.buildFrontendReturnUrl('MOMO', {
-        orderId,
-        transactionId,
-        resultCode: 'PENDING_SETUP',
-        message: 'MOMO gateway URL is not configured',
+    Object.keys(params)
+      .sort()
+      .forEach((key) => {
+        url.searchParams.set(key, params[key]);
       });
-    }
-
-    const url = new URL(this.momoPayUrl);
-    url.searchParams.set('orderId', orderId);
-    url.searchParams.set('requestId', transactionId);
-    url.searchParams.set('amount', String(Math.max(0, Math.round(amount))));
-    url.searchParams.set('orderInfo', `Thanh toan don ${orderId}`);
-    url.searchParams.set('redirectUrl', this.buildFrontendReturnUrl('MOMO', { orderId, transactionId }));
-
-    if (this.momoPartnerCode) {
-      url.searchParams.set('partnerCode', this.momoPartnerCode);
-    }
+    url.searchParams.set('vnp_SecureHashType', 'HMACSHA512');
+    url.searchParams.set('vnp_SecureHash', secureHash);
 
     return url.toString();
   }
@@ -204,6 +519,7 @@ export class PaymentService {
       vietQr: (metadata as any).vietQr || null,
       amountReceived: (metadata as any).amountReceived ?? null,
       changeDue: (metadata as any).changeDue ?? null,
+      expiresAt: (metadata as any).expiresAt ?? null,
       paidAt: payment.paidAt,
       createdAt: payment.createdAt,
       updatedAt: payment.updatedAt,
@@ -277,36 +593,125 @@ export class PaymentService {
       throw new NotFoundException(`Payment ${paymentId} not found`);
     }
 
-    if (current.status === status) {
+    let targetStatus = status;
+    if (current.status === PaymentStatus.PAID && status !== PaymentStatus.PAID) {
+      targetStatus = PaymentStatus.PAID;
+    }
+
+    const hasMetadataPatch = !!(metadataPatch && Object.keys(metadataPatch).length > 0);
+    const nextMetadata = hasMetadataPatch
+      ? {
+          ...((current.metadata && typeof current.metadata === 'object' ? current.metadata : {}) as Record<string, any>),
+          ...metadataPatch,
+        }
+      : current.metadata;
+
+    const statusChanged = current.status !== targetStatus;
+    const transactionChanged = !!transactionId && transactionId !== current.transactionId;
+    const shouldUpdate = statusChanged || transactionChanged || hasMetadataPatch;
+    if (!shouldUpdate) {
       return current;
     }
 
-    const nextMetadata =
-      metadataPatch && Object.keys(metadataPatch).length > 0
-        ? {
-            ...((current.metadata && typeof current.metadata === 'object' ? current.metadata : {}) as Record<
-              string,
-              any
-            >),
-            ...metadataPatch,
-          }
-        : current.metadata;
+    const data: Record<string, any> = {
+      ...(statusChanged ? { status: targetStatus } : {}),
+      ...(transactionChanged ? { transactionId } : {}),
+      ...(statusChanged && targetStatus === PaymentStatus.PAID ? { paidAt: new Date() } : {}),
+      ...(hasMetadataPatch ? { metadata: nextMetadata } : {}),
+    };
 
     const updated = await this.prisma.payment.update({
       where: { id: paymentId },
-      data: {
-        status,
-        ...(transactionId ? { transactionId } : {}),
-        ...(status === 'PAID' ? { paidAt: new Date() } : {}),
-        ...(nextMetadata ? { metadata: nextMetadata } : {}),
-      },
+      data,
     });
 
-    if (status === 'PAID') {
+    if (statusChanged && targetStatus === PaymentStatus.PAID) {
       await this.emitPaymentCompleted(updated);
     }
 
     return updated;
+  }
+
+  private buildOnlinePaymentMetadata(baseMetadata: Record<string, any>) {
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + this.onlinePaymentTimeoutMinutes);
+    return {
+      ...baseMetadata,
+      expiresAt: expiresAt.toISOString(),
+    };
+  }
+
+  private async verifyOnlinePaymentRecord(
+    payment: any,
+    transactionIdHint?: string,
+    source: 'manual' | 'return' = 'manual',
+    extraMetadata?: Record<string, any>,
+  ) {
+    if (payment.provider === 'CASH') {
+      throw new BadRequestException('CASH payment must be confirmed via confirm-cash endpoint');
+    }
+
+    const currentStatus = payment.status as PaymentStatus;
+    if (this.isPaymentTerminal(currentStatus)) {
+      if (extraMetadata && Object.keys(extraMetadata).length > 0) {
+        return this.updatePaymentStatus(payment.id, currentStatus, transactionIdHint || payment.transactionId || undefined, {
+          ...extraMetadata,
+          lastVerificationAt: new Date().toISOString(),
+        });
+      }
+      return payment;
+    }
+
+    const now = new Date();
+    const expiresAt = this.getPaymentExpiryDate(payment);
+    if (now.getTime() > expiresAt.getTime()) {
+      return this.updatePaymentStatus(
+        payment.id,
+        PaymentStatus.EXPIRED,
+        transactionIdHint || payment.transactionId || undefined,
+        {
+          ...extraMetadata,
+          expiresAt: expiresAt.toISOString(),
+          verificationSource: source,
+          lastVerificationAt: now.toISOString(),
+          verificationResult: {
+            source: 'local-timeout',
+            status: PaymentStatus.EXPIRED,
+          },
+        },
+      );
+    }
+
+    const provider = this.ensureOnlineProvider(this.normalizeProvider(String(payment.provider)));
+    const verification = await this.verifyWithProviderApi(payment, provider, transactionIdHint);
+    const verificationMetadata = {
+      ...extraMetadata,
+      expiresAt: expiresAt.toISOString(),
+      verificationSource: source,
+      lastVerificationAt: now.toISOString(),
+      verificationResult: {
+        source: 'provider-api',
+        status: verification.status,
+        transactionFound: verification.transactionFound,
+        raw: verification.raw,
+      },
+    };
+
+    const transactionId = verification.transactionId || transactionIdHint || payment.transactionId || undefined;
+
+    if (verification.status === PaymentStatus.PAID && verification.transactionFound) {
+      return this.updatePaymentStatus(payment.id, PaymentStatus.PAID, transactionId, verificationMetadata);
+    }
+
+    if (
+      verification.status === PaymentStatus.FAILED ||
+      verification.status === PaymentStatus.EXPIRED ||
+      verification.status === PaymentStatus.CANCELLED
+    ) {
+      return this.updatePaymentStatus(payment.id, verification.status, transactionId, verificationMetadata);
+    }
+
+    return this.updatePaymentStatus(payment.id, PaymentStatus.WAITING_TRANSFER, transactionId, verificationMetadata);
   }
 
   async create(createPaymentDto: CreatePaymentDto) {
@@ -363,7 +768,7 @@ export class PaymentService {
           status: PaymentStatus.WAITING_TRANSFER,
           transactionId,
           transferContent,
-          metadata: {
+          metadata: this.buildOnlinePaymentMetadata({
             vietQr: {
               qrImageUrl: onlineQr.qrImageUrl,
               htmlTag: onlineQr.htmlTag,
@@ -372,7 +777,7 @@ export class PaymentService {
               bankCode: onlineQr.bankCode,
               transferContent,
             },
-          },
+          }),
         },
       });
 
@@ -383,10 +788,7 @@ export class PaymentService {
     const normalizedAmount = Math.max(0, Math.round(Number(amount || 0)));
     const providerPrefix = provider.toLowerCase();
     const transactionId = `${providerPrefix}_${String(orderId).slice(0, 24)}_${Date.now()}`;
-    const paymentUrl =
-      provider === 'VNPAY'
-        ? this.buildVnpayPaymentUrl(orderId, normalizedAmount, transactionId)
-        : this.buildMomoPaymentUrl(orderId, normalizedAmount, transactionId);
+    const paymentUrl = this.buildVnpayPaymentUrl(orderId, normalizedAmount, transactionId);
 
     const payment = await this.prisma.payment.create({
       data: {
@@ -397,7 +799,7 @@ export class PaymentService {
         status: PaymentStatus.WAITING_TRANSFER,
         transactionId,
         transferContent: `${provider} ${String(orderId).toUpperCase()}`,
-        metadata: {
+        metadata: this.buildOnlinePaymentMetadata({
           paymentUrl,
           gateway: provider,
           gatewayRequest: {
@@ -406,7 +808,7 @@ export class PaymentService {
             transactionId,
           },
           returnUrl: this.buildFrontendReturnUrl(provider, { orderId, transactionId }),
-        },
+        }),
       },
     });
 
@@ -433,8 +835,18 @@ export class PaymentService {
     return this.buildResponse(payment);
   }
 
+  async verifyOnlinePayment(paymentId: string, transactionIdHint?: string) {
+    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!payment) {
+      throw new NotFoundException(`Payment ${paymentId} not found`);
+    }
+    const updated = await this.verifyOnlinePaymentRecord(payment, transactionIdHint, 'manual');
+    return this.buildResponse(updated);
+  }
+
   async handleWebhook(webhookDto: WebhookDto) {
     const provider = this.ensureOnlineProvider(this.normalizeProvider(webhookDto.provider));
+    this.verifyIncomingWebhookSignature(provider, webhookDto);
 
     const existingPayment = await this.prisma.payment.findUnique({
       where: { orderId: webhookDto.orderId },
@@ -446,12 +858,18 @@ export class PaymentService {
       throw new BadRequestException(`Order ${webhookDto.orderId} is not using ${provider}`);
     }
 
+    const mappedStatus = this.normalizePaymentStatus(webhookDto.status);
+    if (!mappedStatus) {
+      throw new BadRequestException(`Unsupported webhook payment status: ${webhookDto.status}`);
+    }
+
     const updated = await this.updatePaymentStatus(
       existingPayment.id,
-      webhookDto.status === 'PAID' ? PaymentStatus.PAID : PaymentStatus.FAILED,
-      webhookDto.transactionId,
+      mappedStatus,
+      webhookDto.transactionId || existingPayment.transactionId || undefined,
       {
         webhookAt: new Date().toISOString(),
+        webhookStatus: webhookDto.status,
         webhookRaw: webhookDto.rawData || null,
       },
     );
@@ -474,19 +892,34 @@ export class PaymentService {
       throw new BadRequestException(`Order ${returnDto.orderId} is not using ${provider}`);
     }
 
-    const successCodes = new Set(['0', '00', 'SUCCESS', 'PAID']);
-    const normalizedCode = String(returnDto.resultCode ?? '').toUpperCase();
-    const newStatus = successCodes.has(normalizedCode) ? PaymentStatus.PAID : PaymentStatus.FAILED;
+    const returnMetadata = {
+      returnResultCode: returnDto.resultCode ?? null,
+      returnMessage: returnDto.message ?? null,
+      returnAt: new Date().toISOString(),
+      returnTransactionId: returnDto.transactionId ?? null,
+    };
 
-    const updated = await this.updatePaymentStatus(
-      payment.id,
-      newStatus,
+    const hint = this.mapReturnCodeToStatusHint(returnDto.resultCode);
+    if (
+      hint === PaymentStatus.FAILED ||
+      hint === PaymentStatus.CANCELLED ||
+      hint === PaymentStatus.EXPIRED
+    ) {
+      const updatedFailure = await this.updatePaymentStatus(
+        payment.id,
+        hint,
+        returnDto.transactionId || payment.transactionId || undefined,
+        returnMetadata,
+      );
+      this.logger.log(`Handled return for order ${payment.orderId} via ${provider} -> ${updatedFailure.status}`);
+      return this.buildResponse(updatedFailure);
+    }
+
+    const updated = await this.verifyOnlinePaymentRecord(
+      payment,
       returnDto.transactionId || payment.transactionId || undefined,
-      {
-        returnResultCode: returnDto.resultCode ?? null,
-        returnMessage: returnDto.message ?? null,
-        returnAt: new Date().toISOString(),
-      },
+      'return',
+      returnMetadata,
     );
 
     this.logger.log(`Handled return for order ${payment.orderId} via ${provider} -> ${updated.status}`);
