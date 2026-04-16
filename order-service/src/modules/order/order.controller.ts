@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UsePipes, ValidationPipe, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UsePipes, ValidationPipe, HttpCode, HttpStatus, BadRequestException } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -35,6 +35,9 @@ export class OrderController {
     @Query('branchId') branchId?: string,
     @Query('tableId') tableId?: string,
   ) {
+    if (!tableId) {
+      throw new BadRequestException('tableId is required for menu access');
+    }
     return this.orderService.getMenu({ branchId, tableId });
   }
 

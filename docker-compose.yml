@@ -57,8 +57,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      user-service:
-        condition: service_healthy
       table-service:
         condition: service_healthy
       order-service:
@@ -96,12 +94,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/users/health >/dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 25s
+    # healthcheck:
+    #   test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/actuator/health >/dev/null 2>&1 || exit 1"]
+
     networks:
       - backend
     restart: unless-stopped
@@ -153,8 +148,6 @@ services:
       postgres:
         condition: service_healthy
       inventory-service:
-        condition: service_healthy
-      user-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/orders/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -287,8 +280,6 @@ services:
       inventory-service:
         condition: service_healthy
       payment-service:
-        condition: service_healthy
-      user-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3006/api/reports/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
