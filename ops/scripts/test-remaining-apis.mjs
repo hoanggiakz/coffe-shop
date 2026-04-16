@@ -216,7 +216,8 @@ async function run() {
       await api('Close chat', 'PATCH', `/api/chats/${encodeURIComponent(st.chatId)}/close`, [200], undefined, t);
     }
   }
-  const m = await api('Menu list', 'GET', '/api/orders/menu');
+  const menuPath = st.tableA ? `/api/orders/menu?tableId=${encodeURIComponent(st.tableA)}` : '/api/orders/menu';
+  const m = await api('Menu list', 'GET', menuPath);
   const firstMenu = Array.isArray(m.data) && m.data.length ? String(m.data[0].id || '') : '';
 
   await api('List menu categories', 'GET', '/api/orders/admin/menu/categories?includeInactive=true', [200], undefined, t);
