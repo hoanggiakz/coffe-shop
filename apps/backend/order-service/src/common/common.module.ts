@@ -7,11 +7,15 @@ import { CustomLogger } from './logger.service';
   providers: [
     CustomLogger,
     {
+      provide: 'CustomLogger',
+      useClass: CustomLogger,
+    },
+    {
       provide: HttpExceptionFilter,
       useFactory: (logger: CustomLogger) => new HttpExceptionFilter(logger),
       inject: [CustomLogger],
     },
   ],
-  exports: [CustomLogger, HttpExceptionFilter],
+  exports: [CustomLogger, HttpExceptionFilter, 'CustomLogger'],
 })
 export class CommonModule {}
