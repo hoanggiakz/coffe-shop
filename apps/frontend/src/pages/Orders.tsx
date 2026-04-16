@@ -47,8 +47,8 @@ interface OrderApi {
 interface PaymentApi {
   paymentId: string
   orderId: string
-  status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED'
-  provider: 'CASH' | 'VIETQR' | 'VNPAY' | 'MOMO'
+  status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED' | 'EXPIRED' | 'CANCELLED'
+  provider: 'CASH' | 'VIETQR' | 'VNPAY'
   paymentUrl?: string | null
   vietQr?: {
     qrImageUrl: string
@@ -57,7 +57,7 @@ interface PaymentApi {
   changeDue?: number | null
 }
 
-const paymentMethods: PaymentMethod[] = ['CASH', 'VIETQR', 'VNPAY', 'MOMO']
+const paymentMethods: PaymentMethod[] = ['CASH', 'VIETQR', 'VNPAY']
 const orderStatuses: Array<OrderApi['status']> = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
 const selectClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
@@ -269,17 +269,31 @@ export default function Orders() {
       const { data } = await api.get(`/v1/payments/orders/${orderId}?allowMissing=true`)
       if (!data) {
         setCreatedPayment(null)
-        return
+        return null
       }
-      const payment = data as PaymentApi
+      let payment = data as PaymentApi
+      const needsOnlineVerification =
+        payment.provider !== 'CASH' &&
+        !['PAID', 'FAILED', 'EXPIRED', 'CANCELLED'].includes(payment.status)
+
+      if (needsOnlineVerification) {
+        const { data: verifiedPayment } = await api.post(
+          `/v1/payments/${payment.paymentId}/verify`,
+          payment.transactionId ? { transactionId: payment.transactionId } : {},
+        )
+        payment = verifiedPayment as PaymentApi
+      }
+
       setCreatedPayment(payment)
       if (payment.status === 'PAID') {
         await updateOrderStatus(orderId, 'COMPLETED')
       }
+      return payment
     } catch (error: any) {
       if (error.response?.status !== 404) {
         toast.error(error.response?.data?.message || tv('Không thể kiểm tra trạng thái thanh toán', 'Unable to verify payment status'))
       }
+      return null
     }
   }
 
@@ -354,16 +368,18 @@ export default function Orders() {
         }
         setPayingOrder(null)
       } else {
-        if (payment.paymentUrl) {
-          window.open(payment.paymentUrl, '_blank')
-        } else if (payment.provider === 'VIETQR' && payment.vietQr?.qrImageUrl) {
-          window.open(payment.vietQr.qrImageUrl, '_blank')
+        if (!existingPayment) {
+          if (payment.paymentUrl) {
+            window.open(payment.paymentUrl, '_blank')
+          } else if (payment.provider === 'VIETQR' && payment.vietQr?.qrImageUrl) {
+            window.open(payment.vietQr.qrImageUrl, '_blank')
+          }
+          toast.success(tv('Đã tạo giao dịch online. Chờ webhook hoặc đối soát thanh toán', 'Online payment created. Waiting for webhook or reconciliation'))
         }
-        toast.success(tv('Đã tạo giao dịch online. Chờ webhook hoặc đối soát thanh toán', 'Online payment created. Waiting for webhook or reconciliation'))
-      }
-
-      if (payment.provider !== 'CASH') {
-        await refreshPaymentAndCompleteIfPaid(payingOrder.id)
+        const verified = await refreshPaymentAndCompleteIfPaid(payingOrder.id)
+        if (!verified || verified.status === 'WAITING_TRANSFER' || verified.status === 'PENDING') {
+          toast(tv('Chưa ghi nhận giao dịch hợp lệ. Tiếp tục trạng thái chờ chuyển khoản.', 'No valid transaction detected yet. Payment remains waiting transfer.'))
+        }
       }
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Thanh toán thất bại', 'Payment failed'))
@@ -629,7 +645,7 @@ export default function Orders() {
       {payingOrder && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
           <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 dark:bg-slate-900">
-            <p className="text-lg font-bold" title={payingOrder.id}>Thanh toán đơn {maDonHangNgan(payingOrder.id)}</p>
+            <p className="text-lg font-bold" title={payingOrder.id}>Thanh toán và đối soát đơn {maDonHangNgan(payingOrder.id)}</p>
             <p className="mt-1 text-sm text-slate-500">Tổng tiền: {payingOrder.totalAmount.toLocaleString()}đ</p>
 
             <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -690,7 +706,7 @@ export default function Orders() {
                     className="mt-2 rounded border px-3 py-1 text-xs"
                     onClick={() => refreshPaymentAndCompleteIfPaid(payingOrder.id)}
                   >
-                    Kiểm tra lại trạng thái
+                    Kiểm tra giao dịch thật
                   </button>
                 )}
               </div>
@@ -708,7 +724,11 @@ export default function Orders() {
                 Hủy
               </Button>
               <Button className="flex-1" loading={processingPayment} onClick={confirmPayment}>
-                Xác nhận thanh toán
+                {selectedMethod === 'CASH'
+                  ? 'Xác nhận thu tiền mặt'
+                  : createdPayment?.orderId === payingOrder.id
+                    ? 'Kiểm tra giao dịch thật'
+                    : 'Tạo giao dịch online'}
               </Button>
             </div>
           </div>

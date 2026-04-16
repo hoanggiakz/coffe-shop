@@ -17,7 +17,7 @@ Hệ thống phục vụ 3 nhóm người dùng:
 | `order-service` | NestJS + Prisma | Menu, đơn hàng, KDS, promotions |
 | `chat-service` | NestJS + Socket.IO | Chat realtime theo bàn + staff notifications |
 | `inventory-service` | NestJS + Prisma | Kho, nhập/xuất/kiểm kê, đồng bộ menu |
-| `payment-service` | NestJS + Prisma | Thanh toán CASH/VietQR/VNPay/MoMo |
+| `payment-service` | NestJS + Prisma | Thanh toán CASH/VietQR/VNPay |
 | `report-service` | NestJS + Prisma | Báo cáo doanh thu/kho/nhân sự/dashboard |
 | `postgres` | PostgreSQL | Dữ liệu chính |
 | `redis` | Redis | Cache/realtime |
@@ -210,10 +210,11 @@ Base URL khi qua Nginx: `https://localhost/api`
   - `POST /v1/ingredients/sync-menu`
 - Payment (`/v1/payments`):
   - `POST /v1/payments`
-  - Provider hỗ trợ: `CASH`, `VIETQR`, `VNPAY`, `MOMO`
+  - Provider hỗ trợ: `CASH`, `VIETQR`, `VNPAY`
   - `GET /v1/payments/orders/{orderId}`
   - `GET /v1/payments/online/qr`
   - `GET /v1/payments/{paymentId}`
+  - `POST /v1/payments/{paymentId}/verify` (đối soát giao dịch thật trước khi chốt `PAID`)
   - `POST /v1/payments/webhook`
   - `POST /v1/payments/return`
   - `POST /v1/payments/{paymentId}/confirm-cash`
@@ -253,8 +254,8 @@ Base URL khi qua Nginx: `https://localhost/api`
 
 | ID | Trạng thái | Ghi chú triển khai hiện tại |
 |---|---|---|
-| `I-01` VNPay | ✅ (khung tích hợp) | `payment-service` nhận provider `VNPAY`, tạo `paymentUrl`, hỗ trợ `return`/`webhook`. Với production cần bổ sung ký request theo spec VNPay và secret thật. |
-| `I-02` MoMo | ✅ (khung tích hợp) | `payment-service` nhận provider `MOMO`, tạo `paymentUrl`, hỗ trợ `return`/`webhook`. Với production cần signing/verification theo spec MoMo. |
+| `I-01` VNPay | ✅ | `payment-service` nhận provider `VNPAY`, tạo `paymentUrl` có `vnp_SecureHash` (HMACSHA512), hỗ trợ `return`/`webhook` và endpoint verify giao dịch thật trước khi set `PAID`. |
+| `I-02` MoMo | ❌ (đã loại bỏ) | Hình thức thanh toán MoMo không còn được hỗ trợ trong codebase hiện tại. |
 | `I-03` Webhook VietQR | ✅ | `POST /v1/payments/webhook` cập nhật trạng thái thanh toán và phát sự kiện hoàn tất. |
 | `I-04` Email thông báo (tùy chọn) | ✅ (mức kho) | `inventory-service` gửi email cảnh báo tồn kho thấp qua SMTP (`LOW_STOCK_ALERT_EMAILS`). |
 

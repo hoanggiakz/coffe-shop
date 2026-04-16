@@ -13,6 +13,8 @@ enum PaymentStatus {
   WAITING_CASH
   PAID
   FAILED
+  EXPIRED
+  CANCELLED
 }
 
 model Payment {
@@ -21,7 +23,7 @@ model Payment {
   tableId   String?
   amount    Decimal
   status    PaymentStatus  @default(PENDING)
-  provider  String         // "VIETQR" | "CASH"
+  provider  String         // "VIETQR" | "CASH" | "VNPAY"
   transactionId String?
   transferContent String?
   metadata  Json?

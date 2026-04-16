@@ -5,8 +5,13 @@ import { phuongThucThanhToan, trangThaiThanhToan } from '@/utils/display'
 
 const statusColors: Record<PaymentStatus, string> = {
   PENDING: 'bg-amber-100 text-amber-700',
+  WAITING_TRANSFER: 'bg-amber-100 text-amber-700',
+  WAITING_CASH: 'bg-orange-100 text-orange-700',
+  PAID: 'bg-green-100 text-green-700',
   COMPLETED: 'bg-green-100 text-green-700',
   FAILED: 'bg-red-100 text-red-700',
+  EXPIRED: 'bg-slate-200 text-slate-700',
+  CANCELLED: 'bg-slate-200 text-slate-700',
   REFUNDED: 'bg-gray-100 text-gray-700',
 }
 
@@ -14,21 +19,20 @@ const methodIcons: Record<PaymentMethod, string> = {
   CASH: '💵',
   VIETQR: '🔳',
   VNPAY: '🏦',
-  MOMO: '📱',
 }
 
 const mockPayments = Array.from({ length: 10 }, (_, i) => ({
   id: `PAY-${2001 + i}`,
   orderId: `ORD-${1001 + i}`,
   amount: 12.0 + i * 2.5,
-  method: (['CASH', 'VIETQR', 'VNPAY', 'MOMO'] as PaymentMethod[])[i % 4],
-  status: (['COMPLETED', 'COMPLETED', 'PENDING', 'COMPLETED'] as PaymentStatus[])[i % 4],
+  method: (['CASH', 'VIETQR', 'VNPAY'] as PaymentMethod[])[i % 3],
+  status: (['PAID', 'PAID', 'WAITING_TRANSFER', 'FAILED'] as PaymentStatus[])[i % 4],
   time: `${10 + i}:${String((i * 13) % 60).padStart(2, '0')}`,
 }))
 
 export default function Payments() {
   const totalRevenue = mockPayments
-    .filter((p) => p.status === 'COMPLETED')
+    .filter((p) => p.status === 'PAID' || p.status === 'COMPLETED')
     .reduce((sum, p) => sum + p.amount, 0)
 
   return (
@@ -47,7 +51,7 @@ export default function Payments() {
         <Card className="text-center">
           <p className="text-sm text-slate-500">Đang chờ</p>
           <p className="text-3xl font-bold text-amber-600">
-            {mockPayments.filter((p) => p.status === 'PENDING').length}
+            {mockPayments.filter((p) => p.status === 'PENDING' || p.status === 'WAITING_TRANSFER').length}
           </p>
         </Card>
       </div>

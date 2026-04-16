@@ -22,9 +22,7 @@ export default function PaymentReturn() {
     const explicitProvider = String(searchParams.get('provider') || '').toUpperCase()
     const inferredProvider = searchParams.get('vnp_TxnRef')
       ? 'VNPAY'
-      : searchParams.get('partnerCode')
-        ? 'MOMO'
-        : 'VIETQR'
+      : 'VIETQR'
     const provider = explicitProvider || inferredProvider
 
     const resultCode =
@@ -56,12 +54,25 @@ export default function PaymentReturn() {
 
       try {
         const { data } = await api.post('/v1/payments/return', payload)
-        setStatus(data.status === 'PAID' ? 'success' : 'failed')
-        setMessage(
-          data.status === 'PAID'
-            ? tv('Thanh toán thành công. Cảm ơn bạn!', 'Payment successful. Thank you!')
-            : tv('Thanh toán thất bại hoặc bị hủy.', 'Payment failed or cancelled.'),
-        )
+        if (data.status === 'PAID') {
+          setStatus('success')
+          setMessage(tv('Thanh toán thành công. Cảm ơn bạn!', 'Payment successful. Thank you!'))
+          return
+        }
+
+        if (data.status === 'WAITING_TRANSFER' || data.status === 'PENDING') {
+          setStatus('checking')
+          setMessage(
+            tv(
+              'Đã ghi nhận yêu cầu, hệ thống đang xác thực giao dịch thực tế từ cổng thanh toán.',
+              'Request received. System is verifying transaction with payment provider.',
+            ),
+          )
+          return
+        }
+
+        setStatus('failed')
+        setMessage(tv('Thanh toán thất bại, hết hạn hoặc đã hủy.', 'Payment failed, expired, or cancelled.'))
       } catch (error: any) {
         const normalizedCode = String(payload.resultCode || '').toUpperCase()
         const fallback = normalizedCode === '0' || normalizedCode === '00' || normalizedCode === 'SUCCESS'
