@@ -31,7 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "20.19"
           cache: npm
           cache-dependency-path: ${{ matrix.service }}/package-lock.json
 
@@ -90,9 +90,23 @@ jobs:
       - node-build-and-test
       - java-build-and-test
       - compose-validate
-    if: github.ref == 'refs/heads/main' && secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_SSH_KEY != ''
+    if: github.ref == 'refs/heads/main'
     steps:
+      - name: Check deploy secrets
+        id: deploy_guard
+        run: |
+          if [ -n "${{ secrets.DEPLOY_HOST }}" ] && \
+             [ -n "${{ secrets.DEPLOY_USER }}" ] && \
+             [ -n "${{ secrets.DEPLOY_SSH_KEY }}" ] && \
+             [ -n "${{ secrets.DEPLOY_PATH }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Deploy secrets are missing. Skip deploy."
+          fi
+
       - name: Deploy via SSH
+        if: steps.deploy_guard.outputs.ready == 'true'
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
