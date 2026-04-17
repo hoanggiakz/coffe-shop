@@ -1,13 +1,31 @@
 package com.coffeeshop.userservice.controller;
 
-import com.coffeeshop.userservice.dto.*;
+import com.coffeeshop.userservice.dto.AttendanceCheckRequest;
+import com.coffeeshop.userservice.dto.AttendanceResponse;
+import com.coffeeshop.userservice.dto.PayrollSummaryResponse;
+import com.coffeeshop.userservice.dto.ShiftOverviewResponse;
+import com.coffeeshop.userservice.dto.StaffCreateRequest;
+import com.coffeeshop.userservice.dto.StaffResponse;
+import com.coffeeshop.userservice.dto.StaffShiftRequest;
+import com.coffeeshop.userservice.dto.StaffShiftResponse;
+import com.coffeeshop.userservice.dto.StaffUpdateRequest;
+import com.coffeeshop.userservice.dto.WeekScheduleResponse;
 import com.coffeeshop.userservice.entity.User;
 import com.coffeeshop.userservice.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 

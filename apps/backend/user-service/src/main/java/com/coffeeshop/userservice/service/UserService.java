@@ -1,7 +1,34 @@
 package com.coffeeshop.userservice.service;
 
 import com.coffeeshop.userservice.config.JwtUtil;
-import com.coffeeshop.userservice.dto.*;
+import com.coffeeshop.userservice.dto.AttendanceCheckRequest;
+import com.coffeeshop.userservice.dto.AttendanceResponse;
+import com.coffeeshop.userservice.dto.AuthResponse;
+import com.coffeeshop.userservice.dto.BranchCreateRequest;
+import com.coffeeshop.userservice.dto.BranchResponse;
+import com.coffeeshop.userservice.dto.BranchUpdateRequest;
+import com.coffeeshop.userservice.dto.CustomerEmailLoginRequest;
+import com.coffeeshop.userservice.dto.CustomerEmailRegisterRequest;
+import com.coffeeshop.userservice.dto.CustomerOffersResponse;
+import com.coffeeshop.userservice.dto.CustomerOtpLoginRequest;
+import com.coffeeshop.userservice.dto.CustomerOtpRegisterRequest;
+import com.coffeeshop.userservice.dto.LoginRequest;
+import com.coffeeshop.userservice.dto.OtpRequest;
+import com.coffeeshop.userservice.dto.OtpResponse;
+import com.coffeeshop.userservice.dto.PayrollItemResponse;
+import com.coffeeshop.userservice.dto.PayrollSummaryResponse;
+import com.coffeeshop.userservice.dto.PointsAccrualRequest;
+import com.coffeeshop.userservice.dto.PointsAccrualResponse;
+import com.coffeeshop.userservice.dto.RegisterRequest;
+import com.coffeeshop.userservice.dto.ShiftCoworkerResponse;
+import com.coffeeshop.userservice.dto.ShiftOverviewResponse;
+import com.coffeeshop.userservice.dto.StaffCreateRequest;
+import com.coffeeshop.userservice.dto.StaffResponse;
+import com.coffeeshop.userservice.dto.StaffShiftRequest;
+import com.coffeeshop.userservice.dto.StaffShiftResponse;
+import com.coffeeshop.userservice.dto.StaffUpdateRequest;
+import com.coffeeshop.userservice.dto.UserProfile;
+import com.coffeeshop.userservice.dto.WeekScheduleResponse;
 import com.coffeeshop.userservice.entity.AttendanceRecord;
 import com.coffeeshop.userservice.entity.Branch;
 import com.coffeeshop.userservice.entity.ShiftType;
@@ -201,8 +228,12 @@ public class UserService {
         } else {
             offers.add("Nang cap SILVER khi tong chi tieu dat 3.000.000d");
         }
-        if (user.getLoyaltyPoints() >= 50) offers.add("Co the doi 50 diem lay voucher 20.000d");
-        if (user.getLoyaltyPoints() >= 120) offers.add("Co the doi 120 diem lay combo free drink");
+        if (user.getLoyaltyPoints() >= 50) {
+            offers.add("Co the doi 50 diem lay voucher 20.000d");
+        }
+        if (user.getLoyaltyPoints() >= 120) {
+            offers.add("Co the doi 120 diem lay combo free drink");
+        }
         return new CustomerOffersResponse(user.getMemberTier().name(), user.getLoyaltyPoints(), offers);
     }
 
@@ -367,7 +398,9 @@ public class UserService {
                 .filter(user -> showInactive || !Boolean.FALSE.equals(user.getIsActive()))
                 .filter(user -> role == null || user.getRole() == role)
                 .filter(user -> {
-                    if (normalizedKeyword.isEmpty()) return true;
+                    if (normalizedKeyword.isEmpty()) {
+                        return true;
+                    }
                     return containsIgnoreCase(user.getName(), normalizedKeyword)
                             || containsIgnoreCase(user.getEmail(), normalizedKeyword)
                             || containsIgnoreCase(user.getPhone(), normalizedKeyword)
@@ -960,8 +993,12 @@ public class UserService {
     }
 
     private User.MemberTier resolveTier(long totalSpent, int loyaltyPoints) {
-        if (totalSpent >= 10_000_000L || loyaltyPoints >= 1000) return User.MemberTier.GOLD;
-        if (totalSpent >= 3_000_000L || loyaltyPoints >= 300) return User.MemberTier.SILVER;
+        if (totalSpent >= 10_000_000L || loyaltyPoints >= 1000) {
+            return User.MemberTier.GOLD;
+        }
+        if (totalSpent >= 3_000_000L || loyaltyPoints >= 300) {
+            return User.MemberTier.SILVER;
+        }
         return User.MemberTier.STANDARD;
     }
 
@@ -1020,30 +1057,40 @@ public class UserService {
     }
 
     private String normalizeEmail(String email) {
-        if (email == null) return null;
+        if (email == null) {
+            return null;
+        }
         return email.trim().toLowerCase(Locale.ROOT);
     }
 
     private String normalizePhone(String phone) {
-        if (phone == null) return null;
+        if (phone == null) {
+            return null;
+        }
         String normalized = phone.replaceAll("\\s+", "").trim();
         return normalized.isEmpty() ? null : normalized;
     }
 
     private String normalizeBranchId(String branchId) {
-        if (branchId == null) return null;
+        if (branchId == null) {
+            return null;
+        }
         String normalized = branchId.trim();
         return normalized.isEmpty() ? null : normalized;
     }
 
     private String normalizeNullableText(String input) {
-        if (input == null) return null;
+        if (input == null) {
+            return null;
+        }
         String normalized = input.trim();
         return normalized.isEmpty() ? null : normalized;
     }
 
     private String normalizeCode(String code) {
-        if (code == null) return null;
+        if (code == null) {
+            return null;
+        }
         String normalized = code.replaceAll("\\s+", "").trim().toUpperCase(Locale.ROOT);
         return normalized.isEmpty() ? null : normalized;
     }
@@ -1111,7 +1158,9 @@ public class UserService {
     }
 
     private LocalDate parseDateOrDefault(String value, LocalDate fallback) {
-        if (value == null || value.isBlank()) return fallback;
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
         try {
             return LocalDate.parse(value.trim());
         } catch (Exception e) {
@@ -1120,7 +1169,9 @@ public class UserService {
     }
 
     private boolean containsIgnoreCase(String source, String keyword) {
-        if (source == null || keyword == null || keyword.isBlank()) return false;
+        if (source == null || keyword == null || keyword.isBlank()) {
+            return false;
+        }
         return source.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT));
     }
 
