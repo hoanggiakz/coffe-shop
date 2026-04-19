@@ -33,6 +33,25 @@ export class PaymentController {
     return this.paymentService.create(createPaymentDto);
   }
 
+  @Get()
+  @ApiOperation({ summary: 'List recent payments (staff/admin)' })
+  @ApiResponse({ status: 200, description: 'Recent payments fetched.' })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  findRecent(
+    @Query('limit') limit?: string,
+    @Query('provider') provider?: string,
+    @Query('status') status?: string,
+    @Query('reconcileOnline') reconcileOnline?: string,
+  ) {
+    return this.paymentService.listRecentPayments({
+      limit,
+      provider,
+      status,
+      reconcileOnline: reconcileOnline === 'true',
+    });
+  }
+
   @Get('orders/:orderId')
   @ApiOperation({ summary: 'Get payment by orderId (for polling)' })
   @ApiResponse({ status: 200, description: 'Payment status fetched.' })

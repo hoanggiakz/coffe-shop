@@ -144,6 +144,7 @@ export class PaymentService {
       PENDING: PaymentStatus.WAITING_TRANSFER,
       WAITING: PaymentStatus.WAITING_TRANSFER,
       WAITING_TRANSFER: PaymentStatus.WAITING_TRANSFER,
+      WAITING_CASH: PaymentStatus.WAITING_CASH,
       PROCESSING: PaymentStatus.WAITING_TRANSFER,
       IN_PROGRESS: PaymentStatus.WAITING_TRANSFER,
       PAID: PaymentStatus.PAID,
@@ -833,6 +834,68 @@ export class PaymentService {
       throw new NotFoundException(`Payment ${paymentId} not found`);
     }
     return this.buildResponse(payment);
+  }
+
+  async listRecentPayments(options?: {
+    limit?: string | number;
+    provider?: string;
+    status?: string;
+    reconcileOnline?: boolean;
+  }) {
+    const requestedLimit = Number(options?.limit ?? 50);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 200)
+      : 50;
+
+    const where: Record<string, any> = {};
+
+    if (options?.provider) {
+      where.provider = this.normalizeProvider(options.provider);
+    }
+
+    if (options?.status) {
+      const normalizedStatus = this.normalizePaymentStatus(options.status);
+      if (!normalizedStatus) {
+        throw new BadRequestException(`Unsupported payment status: ${options.status}`);
+      }
+      where.status = normalizedStatus;
+    }
+
+    const payments = await this.prisma.payment.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    if (!options?.reconcileOnline) {
+      return payments.map((payment) => this.buildResponse(payment));
+    }
+
+    const refreshedPayments: any[] = [];
+    for (const payment of payments) {
+      const currentStatus = payment.status as PaymentStatus;
+      if (payment.provider === 'CASH' || this.isPaymentTerminal(currentStatus)) {
+        refreshedPayments.push(payment);
+        continue;
+      }
+
+      try {
+        const updated = await this.verifyOnlinePaymentRecord(
+          payment,
+          payment.transactionId || undefined,
+          'manual',
+          { realtimeRefreshAt: new Date().toISOString() },
+        );
+        refreshedPayments.push(updated);
+      } catch (error) {
+        this.logger.warn(
+          `Realtime refresh failed for payment ${payment.id}: ${(error as Error).message}`,
+        );
+        refreshedPayments.push(payment);
+      }
+    }
+
+    return refreshedPayments.map((payment) => this.buildResponse(payment));
   }
 
   async verifyOnlinePayment(paymentId: string, transactionIdHint?: string) {
