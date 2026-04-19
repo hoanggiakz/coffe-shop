@@ -35,10 +35,18 @@ interface MenuItem {
   customizations?: CustomizationGroup[]
 }
 
+type CartSelections = Record<string, string | string[]>
+
 interface CartItem {
+  menuItemId: string
   quantity: number
   note: string
-  selections: Record<string, string | string[]>
+  selections: CartSelections
+}
+
+interface CartDraft {
+  note: string
+  selections: CartSelections
 }
 
 interface ChatMessage {
@@ -201,6 +209,78 @@ function toNumber(value: string | null): number | null {
   return Number.isNaN(parsed) ? null : parsed
 }
 
+function normalizeSelectionValue(value: unknown): string | string[] {
+  if (Array.isArray(value)) {
+    const normalized = Array.from(
+      new Set(
+        value
+          .map((entry) => String(entry || '').trim())
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b))
+    return normalized
+  }
+
+  return String(value || '').trim()
+}
+
+function normalizeSelections(selections: CartSelections): CartSelections {
+  const keys = Object.keys(selections || {}).sort((a, b) => a.localeCompare(b))
+  return keys.reduce<CartSelections>((acc, key) => {
+    acc[key] = normalizeSelectionValue(selections[key])
+    return acc
+  }, {})
+}
+
+function buildCartLineKey(menuItemId: string, selections: CartSelections, note?: string): string {
+  return JSON.stringify({
+    menuItemId: String(menuItemId || '').trim(),
+    selections: normalizeSelections(selections || {}),
+    note: String(note || '').trim(),
+  })
+}
+
+function parseCartLineEntry(legacyKey: string, entry: any): CartItem | null {
+  if (!entry || typeof entry !== 'object') return null
+  const menuItemId = String(entry.menuItemId || legacyKey || '').trim()
+  if (!menuItemId) return null
+
+  const quantity = Math.max(0, Number(entry.quantity || 0))
+  if (quantity <= 0) return null
+
+  const selections =
+    entry.selections && typeof entry.selections === 'object' && !Array.isArray(entry.selections)
+      ? normalizeSelections(entry.selections as CartSelections)
+      : {}
+
+  return {
+    menuItemId,
+    quantity,
+    note: String(entry.note || ''),
+    selections,
+  }
+}
+
+function restoreCartFromStorage(raw: unknown): Record<string, CartItem> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const source = raw as Record<string, any>
+
+  const next: Record<string, CartItem> = {}
+  Object.entries(source).forEach(([legacyKey, entry]) => {
+    const parsed = parseCartLineEntry(legacyKey, entry)
+    if (!parsed) return
+    const lineKey = buildCartLineKey(parsed.menuItemId, parsed.selections, parsed.note)
+    const existing = next[lineKey]
+    if (existing) {
+      next[lineKey] = { ...existing, quantity: existing.quantity + parsed.quantity }
+      return
+    }
+    next[lineKey] = parsed
+  })
+
+  return next
+}
+
 const fieldClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60'
 
@@ -248,6 +328,7 @@ export default function CustomerMenu() {
   const [loadingMenu, setLoadingMenu] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [cart, setCart] = useState<Record<string, CartItem>>({})
+  const [cartDrafts, setCartDrafts] = useState<Record<string, CartDraft>>({})
   const [cartLoaded, setCartLoaded] = useState(false)
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('POSTPAY')
   const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('VIETQR')
@@ -398,7 +479,7 @@ export default function CustomerMenu() {
     try {
       const raw = localStorage.getItem(cartStorageKey)
       if (raw) {
-        setCart(JSON.parse(raw))
+        setCart(restoreCartFromStorage(JSON.parse(raw)))
       } else {
         setCart({})
       }
@@ -735,22 +816,38 @@ export default function CustomerMenu() {
     })
   }, [menuItems, searchText, selectedCategory])
 
-  const ensureCartItem = (menuItemId: string): CartItem => {
-    const existing = cart[menuItemId]
-    if (existing) return existing
+  const buildDefaultSelections = (menuItemId: string): CartSelections => {
     const menuItem = menuMap.get(menuItemId)
-    const defaults: Record<string, string | string[]> = {}
+    const defaults: CartSelections = {}
     ;(menuItem?.customizations || []).forEach((group) => {
       defaults[group.id] = group.type === 'multi' ? [] : String(group.options?.[0]?.value || '')
     })
-    return { quantity: 0, note: '', selections: defaults }
+    return defaults
   }
 
-  const getCustomizationDelta = (menuItem: MenuItem, cartItem: CartItem): number => {
+  const getDraftForMenuItem = (
+    menuItemId: string,
+    sourceDrafts: Record<string, CartDraft> = cartDrafts,
+  ): CartDraft => {
+    const existing = sourceDrafts[menuItemId]
+    if (existing) {
+      return {
+        note: String(existing.note || ''),
+        selections: normalizeSelections(existing.selections || {}),
+      }
+    }
+
+    return {
+      note: '',
+      selections: normalizeSelections(buildDefaultSelections(menuItemId)),
+    }
+  }
+
+  const getCustomizationDelta = (menuItem: MenuItem, selections: CartSelections): number => {
     let totalDelta = 0
     ;(menuItem.customizations || []).forEach((group) => {
       if (!group.options?.length) return
-      const selected = cartItem.selections[group.id]
+      const selected = selections[group.id]
       if (group.type === 'single' && typeof selected === 'string') {
         const match = group.options.find((option) => option.value === selected)
         totalDelta += Number(match?.priceDelta || 0)
@@ -765,50 +862,100 @@ export default function CustomerMenu() {
     return totalDelta
   }
 
-  const cartTotal = useMemo(() => {
-    return Object.entries(cart).reduce((sum, [menuItemId, cartItem]) => {
-      const menuItem = menuMap.get(menuItemId)
-      if (!menuItem || cartItem.quantity <= 0) return sum
-      return sum + (menuItem.price + getCustomizationDelta(menuItem, cartItem)) * cartItem.quantity
-    }, 0)
-  }, [cart, menuMap])
-  const previewDiscount = promoPreview?.discountAmount || 0
-  const payableCartTotal = Math.max(cartTotal - previewDiscount, 0)
-  const cartItemCount = useMemo(
-    () => Object.values(cart).reduce((sum, item) => sum + Math.max(item.quantity || 0, 0), 0),
+  const formatSelectionDetails = (menuItem: MenuItem | undefined, selections: CartSelections): string[] => {
+    if (!menuItem) return []
+    const details: string[] = []
+    ;(menuItem.customizations || []).forEach((group) => {
+      const selected = selections[group.id]
+      if (group.type === 'single' && typeof selected === 'string' && selected) {
+        const match = group.options?.find((option) => option.value === selected)
+        details.push(`${group.label}: ${match?.label || selected}`)
+      }
+      if (group.type === 'multi' && Array.isArray(selected) && selected.length > 0) {
+        const labels = selected.map((value) => {
+          const match = group.options?.find((option) => option.value === value)
+          return match?.label || value
+        })
+        details.push(`${group.label}: ${labels.join(', ')}`)
+      }
+      if (group.type === 'text' && typeof selected === 'string' && selected.trim()) {
+        details.push(`${group.label}: ${selected.trim()}`)
+      }
+    })
+    return details
+  }
+
+  const cartLines = useMemo(
+    () => Object.values(cart).filter((line) => line.quantity > 0),
     [cart],
   )
 
+  const cartTotal = useMemo(() => {
+    return cartLines.reduce((sum, line) => {
+      const menuItem = menuMap.get(line.menuItemId)
+      if (!menuItem || line.quantity <= 0) return sum
+      return sum + (menuItem.price + getCustomizationDelta(menuItem, line.selections)) * line.quantity
+    }, 0)
+  }, [cartLines, menuMap])
+  const previewDiscount = promoPreview?.discountAmount || 0
+  const payableCartTotal = Math.max(cartTotal - previewDiscount, 0)
+  const cartItemCount = useMemo(
+    () => cartLines.reduce((sum, item) => sum + Math.max(item.quantity || 0, 0), 0),
+    [cartLines],
+  )
+
+  const cartCountByMenuItem = useMemo(() => {
+    return cartLines.reduce<Map<string, number>>((acc, line) => {
+      acc.set(line.menuItemId, (acc.get(line.menuItemId) || 0) + line.quantity)
+      return acc
+    }, new Map<string, number>())
+  }, [cartLines])
+
   const increase = (menuItemId: string) => {
+    const draft = getDraftForMenuItem(menuItemId)
+    const normalizedSelections = normalizeSelections(draft.selections)
+    const lineKey = buildCartLineKey(menuItemId, normalizedSelections, draft.note)
+
     setCart((prev) => {
-      const current = prev[menuItemId] || ensureCartItem(menuItemId)
-      return { ...prev, [menuItemId]: { ...current, quantity: current.quantity + 1 } }
+      const current = prev[lineKey]
+      return {
+        ...prev,
+        [lineKey]: {
+          menuItemId,
+          quantity: Number(current?.quantity || 0) + 1,
+          note: String(draft.note || ''),
+          selections: normalizedSelections,
+        },
+      }
     })
   }
 
   const decrease = (menuItemId: string) => {
+    const draft = getDraftForMenuItem(menuItemId)
+    const preferredKey = buildCartLineKey(menuItemId, draft.selections, draft.note)
+
     setCart((prev) => {
-      const current = prev[menuItemId]
+      const current = prev[preferredKey]
       if (!current) return prev
       if (current.quantity <= 1) {
         const next = { ...prev }
-        delete next[menuItemId]
+        delete next[preferredKey]
         return next
       }
-      return { ...prev, [menuItemId]: { ...current, quantity: current.quantity - 1 } }
+      return { ...prev, [preferredKey]: { ...current, quantity: current.quantity - 1 } }
     })
   }
 
   const updateSelection = (menuItemId: string, groupId: string, value: string | string[]) => {
-    setCart((prev) => {
-      const current = prev[menuItemId] || ensureCartItem(menuItemId)
+    setCartDrafts((prev) => {
+      const current = getDraftForMenuItem(menuItemId, prev)
       return {
         ...prev,
         [menuItemId]: {
           ...current,
           selections: {
             ...current.selections,
-            [groupId]: value,
+            [groupId]: normalizeSelectionValue(value),
           },
         },
       }
@@ -816,17 +963,18 @@ export default function CustomerMenu() {
   }
 
   const updateNote = (menuItemId: string, note: string) => {
-    setCart((prev) => {
-      const current = prev[menuItemId] || ensureCartItem(menuItemId)
+    setCartDrafts((prev) => {
+      const current = getDraftForMenuItem(menuItemId, prev)
       return { ...prev, [menuItemId]: { ...current, note } }
     })
   }
 
-  const parseOrderItemSelections = (rawOptions?: string | null): Record<string, string | string[]> => {
+  const parseOrderItemSelections = (rawOptions?: string | null): CartSelections => {
     if (!rawOptions) return {}
     try {
-      const parsed = JSON.parse(rawOptions) as { selections?: Record<string, string | string[]> }
-      return parsed?.selections && typeof parsed.selections === 'object' ? parsed.selections : {}
+      const parsed = JSON.parse(rawOptions) as { selections?: CartSelections }
+      if (!parsed?.selections || typeof parsed.selections !== 'object') return {}
+      return normalizeSelections(parsed.selections)
     } catch {
       return {}
     }
@@ -844,10 +992,23 @@ export default function CustomerMenu() {
     }
 
     const nextCart = currentOrder.orderItems.reduce<Record<string, CartItem>>((acc, item) => {
-      acc[item.menuItemId] = {
-        quantity: Number(item.quantity || 0),
-        note: String(item.note || ''),
-        selections: parseOrderItemSelections(item.options),
+      const selections = parseOrderItemSelections(item.options)
+      const note = String(item.note || '')
+      const lineKey = buildCartLineKey(item.menuItemId, selections, note)
+      const existing = acc[lineKey]
+
+      if (existing) {
+        acc[lineKey] = {
+          ...existing,
+          quantity: existing.quantity + Number(item.quantity || 0),
+        }
+      } else {
+        acc[lineKey] = {
+          menuItemId: item.menuItemId,
+          quantity: Number(item.quantity || 0),
+          note,
+          selections,
+        }
       }
       return acc
     }, {})
@@ -915,9 +1076,13 @@ export default function CustomerMenu() {
 
     setApplyingPromo(true)
     try {
-      const selectedMenuItemIds = Object.entries(cart)
-        .filter(([, cartItem]) => cartItem.quantity > 0)
-        .map(([menuItemId]) => menuItemId)
+      const selectedMenuItemIds = Array.from(
+        new Set(
+          cartLines
+            .filter((line) => line.quantity > 0)
+            .map((line) => line.menuItemId),
+        ),
+      )
 
       const { data } = await api.get('/orders/promotions/validate', {
         params: {
@@ -989,17 +1154,17 @@ export default function CustomerMenu() {
       toast.error('Thiếu thông tin bàn từ QR')
       return
     }
-    const items = Object.entries(cart)
-      .filter(([, cartItem]) => cartItem.quantity > 0)
-      .map(([menuItemId, cartItem]) => {
-        const menuItem = menuMap.get(menuItemId)
+    const items = cartLines
+      .filter((cartItem) => cartItem.quantity > 0)
+      .map((cartItem) => {
+        const menuItem = menuMap.get(cartItem.menuItemId)
         return {
-          menuItemId,
+          menuItemId: cartItem.menuItemId,
           quantity: cartItem.quantity,
           note: cartItem.note || undefined,
           options: JSON.stringify({
             selections: cartItem.selections,
-            extraAmount: menuItem ? getCustomizationDelta(menuItem, cartItem) : 0,
+            extraAmount: menuItem ? getCustomizationDelta(menuItem, cartItem.selections) : 0,
           }),
         }
       })
@@ -1224,8 +1389,8 @@ export default function CustomerMenu() {
           {!loadingMenu && (
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
               {filteredItems.map((item) => {
-                const cartItem = cart[item.id] || ensureCartItem(item.id)
-                const selectedCount = cart[item.id]?.quantity || 0
+                const draft = getDraftForMenuItem(item.id)
+                const selectedCount = cartCountByMenuItem.get(item.id) || 0
                 return (
                   <div key={item.id} className="rounded-2xl border border-sky-100 bg-white/92 p-3 shadow-sm">
                     <img
@@ -1276,7 +1441,7 @@ export default function CustomerMenu() {
                               <p className="mb-1 text-[11px] font-semibold uppercase text-slate-500">{group.label}</p>
                               {group.type === 'single' && (
                                 <select
-                                  value={String(cartItem.selections[group.id] || '')}
+                                  value={String(draft.selections[group.id] || '')}
                                   onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
                                   className={fieldClass}
                                 >
@@ -1290,8 +1455,8 @@ export default function CustomerMenu() {
                               {group.type === 'multi' && (
                                 <div className="space-y-1">
                                   {(group.options || []).map((option) => {
-                                    const selectedValues = Array.isArray(cartItem.selections[group.id])
-                                      ? (cartItem.selections[group.id] as string[])
+                                    const selectedValues = Array.isArray(draft.selections[group.id])
+                                      ? (draft.selections[group.id] as string[])
                                       : []
                                     const checked = selectedValues.includes(option.value)
                                     return (
@@ -1314,7 +1479,7 @@ export default function CustomerMenu() {
                               )}
                               {group.type === 'text' && (
                                 <input
-                                  value={String(cartItem.selections[group.id] || '')}
+                                  value={String(draft.selections[group.id] || '')}
                                   onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
                                   className={fieldClass}
                                   placeholder={group.placeholder || 'Nhập yêu cầu'}
@@ -1326,7 +1491,7 @@ export default function CustomerMenu() {
                       </details>
                     )}
                     <textarea
-                      value={cartItem.note}
+                      value={draft.note}
                       onChange={(e) => updateNote(item.id, e.target.value)}
                       className={`${fieldClass} mt-2`}
                       rows={2}
@@ -1450,23 +1615,29 @@ export default function CustomerMenu() {
           <form onSubmit={submitOrder} className={panelClass}>
             <p className="font-semibold text-slate-900">Giỏ hàng</p>
             <div className="mt-3 space-y-2 text-sm">
-              {Object.entries(cart).filter(([, entry]) => entry.quantity > 0).length === 0 && (
+              {cartLines.length === 0 && (
                 <p className="text-gray-500">Chưa có món</p>
               )}
-              {Object.entries(cart).map(([id, entry]) => {
-                if (entry.quantity <= 0) return null
-                const item = menuMap.get(id)
+              {cartLines.map((entry) => {
+                const item = menuMap.get(entry.menuItemId)
                 if (!item) return null
-                const delta = getCustomizationDelta(item, entry)
+                const delta = getCustomizationDelta(item, entry.selections)
+                const detailLines = formatSelectionDetails(item, entry.selections)
                 return (
-                  <div key={id} className="rounded border border-gray-100 p-2">
+                  <div
+                    key={buildCartLineKey(entry.menuItemId, entry.selections, entry.note)}
+                    className="rounded border border-gray-100 p-2"
+                  >
                     <div className="flex justify-between">
                       <span>
                         {entry.quantity}x {item.name}
                       </span>
                       <span>{((item.price + delta) * entry.quantity).toLocaleString()}đ</span>
                     </div>
-                    <p className="mt-1 text-xs text-gray-500">{entry.note || 'Không ghi chú'}</p>
+                    {detailLines.length > 0 && (
+                      <p className="mt-1 text-xs text-gray-500">Chi tiết: {detailLines.join(' | ')}</p>
+                    )}
+                    {!!entry.note && <p className="mt-1 text-xs text-gray-500">Ghi chú: {entry.note}</p>}
                   </div>
                 )
               })}
@@ -1651,14 +1822,26 @@ export default function CustomerMenu() {
                   </button>
                 )}
                 <div className="mt-2 space-y-1">
-                  {currentOrder.orderItems.map((item) => (
-                    <div key={item.id} className="flex justify-between rounded bg-gray-50 px-2 py-1 text-xs">
-                      <span>
-                        {item.quantity}x {item.menuItemName || menuMap.get(item.menuItemId)?.name || 'Món không xác định'}
-                      </span>
-                      <span className="font-semibold">{item.status === 'WAITING' ? 'Chờ làm' : item.status === 'PREPARING' ? 'Đang chuẩn bị' : item.status === 'DONE' || item.status === 'READY' ? 'Hoàn thành' : item.status}</span>
-                    </div>
-                  ))}
+                  {currentOrder.orderItems.map((item) => {
+                    const details = formatSelectionDetails(
+                      menuMap.get(item.menuItemId),
+                      parseOrderItemSelections(item.options),
+                    )
+                    return (
+                      <div key={item.id} className="rounded bg-gray-50 px-2 py-1 text-xs">
+                        <div className="flex justify-between gap-2">
+                          <span>
+                            {item.quantity}x {item.menuItemName || menuMap.get(item.menuItemId)?.name || 'Món không xác định'}
+                          </span>
+                          <span className="font-semibold">{item.status === 'WAITING' ? 'Chờ làm' : item.status === 'PREPARING' ? 'Đang chuẩn bị' : item.status === 'DONE' || item.status === 'READY' ? 'Hoàn thành' : item.status}</span>
+                        </div>
+                        {details.length > 0 && (
+                          <p className="mt-1 text-gray-600">Chi tiết: {details.join(' | ')}</p>
+                        )}
+                        {!!item.note && <p className="mt-1 text-gray-600">Ghi chú: {item.note}</p>}
+                      </div>
+                    )
+                  })}
                 </div>
 
                 <div className="mt-3 rounded border border-gray-100 p-2 text-xs">
@@ -1830,13 +2013,10 @@ export default function CustomerMenu() {
                         <div className="mt-2 space-y-1 rounded bg-gray-50 p-2 text-xs">
                           {historyOrder.orderItems.map((item) => {
                             const selections = parseOrderItemSelections(item.options)
-                            const optionValues = Object.values(selections)
-                              .flatMap((value) =>
-                                Array.isArray(value)
-                                  ? value.map((entry) => String(entry || '').trim())
-                                  : [String(value || '').trim()],
-                              )
-                              .filter(Boolean)
+                            const optionValues = formatSelectionDetails(
+                              menuMap.get(item.menuItemId),
+                              selections,
+                            )
 
                             return (
                               <div key={item.id} className="rounded bg-white px-2 py-2">
