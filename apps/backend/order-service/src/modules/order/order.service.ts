@@ -18,6 +18,8 @@ import { Prisma, PromotionScope } from '@prisma/client';
 import { KafkaService } from '../../kafka/kafka.service';
 
 const ACTIVE_ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY'] as const;
+const TOPPING_INGREDIENT_PREFIX = 'topping::';
+const INVENTORY_ID_CACHE_TTL_MS = 30 * 1000;
 
 type MenuAdminListQuery = {
   keyword?: string;
@@ -44,6 +46,7 @@ type EnrichedOrder = {
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
+  private readonly inventoryIngredientIdCache = new Map<string, { expiresAt: number; ids: Set<string> }>();
 
   constructor(
     private prisma: PrismaService,
@@ -2009,6 +2012,7 @@ export class OrderService {
         item.quantity,
         orderId,
         order.branchId || null,
+        item.options || undefined,
       );
     }
 
@@ -2052,8 +2056,16 @@ export class OrderService {
     orderQuantity: number,
     orderId: string,
     branchId?: string | null,
+    orderItemOptions?: string,
   ) {
-    const ingredientsToExport = await this.buildInventoryExportItemsFromRecipe(menuItemId, orderQuantity);
+    const recipeIngredients = await this.buildInventoryExportItemsFromRecipe(menuItemId, orderQuantity);
+    const toppingIngredients = await this.buildInventoryExportItemsFromSelectedToppings(
+      menuItemId,
+      orderQuantity,
+      orderItemOptions,
+      branchId,
+    );
+    const ingredientsToExport = this.mergeInventoryExportItems([...recipeIngredients, ...toppingIngredients]);
 
     if (!ingredientsToExport.length) {
       return;
@@ -2111,6 +2123,156 @@ export class OrderService {
     return ingredientsToExport;
   }
 
+  private mergeInventoryExportItems(items: Array<{ ingredientId: string; quantity: number; note?: string }>) {
+    const merged = new Map<string, { ingredientId: string; quantity: number; note?: string }>();
+
+    for (const item of items) {
+      const ingredientId = String(item.ingredientId || '').trim();
+      const quantity = Number(item.quantity || 0);
+      if (!ingredientId || !Number.isFinite(quantity) || quantity <= 0) {
+        continue;
+      }
+
+      const existing = merged.get(ingredientId);
+      if (!existing) {
+        merged.set(ingredientId, {
+          ingredientId,
+          quantity,
+          note: item.note ? String(item.note).trim() : undefined,
+        });
+        continue;
+      }
+
+      existing.quantity += quantity;
+      merged.set(ingredientId, existing);
+    }
+
+    return Array.from(merged.values());
+  }
+
+  private parseSelectedOptionValues(options?: string) {
+    if (!options) return [] as string[];
+
+    try {
+      const parsed = JSON.parse(options);
+      const selections = parsed?.selections;
+      if (!selections || typeof selections !== 'object' || Array.isArray(selections)) {
+        return [] as string[];
+      }
+
+      const values: string[] = [];
+      for (const value of Object.values(selections as Record<string, unknown>)) {
+        if (Array.isArray(value)) {
+          value.forEach((entry) => {
+            const normalized = String(entry || '').trim();
+            if (normalized) values.push(normalized);
+          });
+          continue;
+        }
+
+        const normalized = String(value || '').trim();
+        if (normalized) values.push(normalized);
+      }
+
+      return values;
+    } catch {
+      return [] as string[];
+    }
+  }
+
+  private toToppingIngredientId(optionValue: string) {
+    const normalized = String(optionValue || '').trim().toLowerCase();
+    if (!normalized) return '';
+    return `${TOPPING_INGREDIENT_PREFIX}${encodeURIComponent(normalized)}`;
+  }
+
+  private async getExistingInventoryIngredientIds(branchId?: string | null) {
+    const normalizedBranchId = String(branchId || '').trim();
+    const cacheKey = normalizedBranchId || '__all__';
+    const now = Date.now();
+    const cached = this.inventoryIngredientIdCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.ids;
+    }
+
+    const params = new URLSearchParams();
+    params.set('includeInactive', 'false');
+    if (normalizedBranchId) {
+      params.set('branchId', normalizedBranchId);
+    }
+
+    try {
+      const response = await this.fetchWithRetry(
+        `${this.inventoryServiceUrl}/api/v1/ingredients?${params.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.internalServiceToken}`,
+          },
+        },
+        { attempts: 2, retryDelayMs: 200 },
+      );
+
+      if (!response.ok) {
+        const body = await response.text();
+        this.logger.warn(`Khong lay duoc ingredient ids de tru topping: ${response.status} ${body}`);
+        return new Set<string>();
+      }
+
+      const payload = (await response.json()) as Array<{ id?: string }>;
+      const ids = new Set(
+        (Array.isArray(payload) ? payload : [])
+          .map((item) => String(item?.id || '').trim())
+          .filter(Boolean),
+      );
+
+      this.inventoryIngredientIdCache.set(cacheKey, {
+        ids,
+        expiresAt: now + INVENTORY_ID_CACHE_TTL_MS,
+      });
+      return ids;
+    } catch (error) {
+      this.logger.warn(`Inventory service khong san sang de resolve topping ingredient ids: ${(error as Error).message}`);
+      return new Set<string>();
+    }
+  }
+
+  private async buildInventoryExportItemsFromSelectedToppings(
+    menuItemId: string,
+    orderQuantity: number,
+    options?: string,
+    branchId?: string | null,
+  ) {
+    if (!options) {
+      return [] as Array<{ ingredientId: string; quantity: number; note?: string }>;
+    }
+
+    const selectedValues = this.parseSelectedOptionValues(options);
+    if (!selectedValues.length) {
+      return [] as Array<{ ingredientId: string; quantity: number; note?: string }>;
+    }
+
+    const existingIngredientIds = await this.getExistingInventoryIngredientIds(branchId);
+    if (!existingIngredientIds.size) {
+      return [] as Array<{ ingredientId: string; quantity: number; note?: string }>;
+    }
+
+    const toppingItems: Array<{ ingredientId: string; quantity: number; note?: string }> = [];
+    for (const selectedValue of selectedValues) {
+      const ingredientId = this.toToppingIngredientId(selectedValue);
+      if (!ingredientId || !existingIngredientIds.has(ingredientId)) {
+        continue;
+      }
+
+      toppingItems.push({
+        ingredientId,
+        quantity: orderQuantity,
+        note: `menuItemId=${menuItemId}; topping=${selectedValue}`,
+      });
+    }
+
+    return this.mergeInventoryExportItems(toppingItems);
+  }
+
   private async deductInventoryBulk(
     items: Array<{ ingredientId: string; quantity: number; note?: string }>,
     context?: { orderId?: string; menuItemId?: string; branchId?: string },
@@ -2128,6 +2290,7 @@ export class OrderService {
           source: 'ORDER',
           reason: context?.orderId ? `Xuat tu dong cho don ${context.orderId}` : 'Xuat tu dong khi ban hang',
           referenceCode: context?.orderId || undefined,
+          createdBy: 'order-service:auto-deduct',
         }),
       });
 

@@ -57,6 +57,7 @@ type MenuItem = {
   name: string
   price: number
   description?: string | null
+  image?: string | null
   category?: string | null
   categoryId?: string | null
   available: boolean
@@ -576,6 +577,19 @@ export default function Menu() {
             Đang bán
           </label>
         </div>
+        <div className="mt-3 flex items-center gap-3 rounded-lg border p-3">
+          <div className="h-16 w-16 overflow-hidden rounded-lg border bg-gray-50">
+            <img
+              src={itemForm.image || `https://placehold.co/120x120?text=${encodeURIComponent(itemForm.name || 'Mon')}`}
+              alt={itemForm.name || 'Ảnh món'}
+              className="h-full w-full object-cover"
+              onError={(event) => {
+                event.currentTarget.src = `https://placehold.co/120x120?text=${encodeURIComponent(itemForm.name || 'Mon')}`
+              }}
+            />
+          </div>
+          <p className="text-sm text-gray-600">Xem trước ảnh món từ URL</p>
+        </div>
 
         <div className="mt-3 rounded-lg border p-3">
           <p className="mb-2 text-sm font-medium">Gán nhóm tùy chọn</p>
@@ -691,6 +705,7 @@ export default function Menu() {
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b">
+                <th className="py-2 text-left">Ảnh</th>
                 <th className="py-2 text-left">Tên</th>
                 <th className="py-2 text-left">Giá</th>
                 <th className="py-2 text-left">Danh mục</th>
@@ -703,6 +718,18 @@ export default function Menu() {
             <tbody>
               {items.map((item) => (
                 <tr key={item.id} className="border-b">
+                  <td className="py-2">
+                    <div className="h-12 w-12 overflow-hidden rounded-md border bg-gray-50">
+                      <img
+                        src={item.image || `https://placehold.co/96x96?text=${encodeURIComponent(item.name || 'Mon')}`}
+                        alt={item.name}
+                        className="h-full w-full object-cover"
+                        onError={(event) => {
+                          event.currentTarget.src = `https://placehold.co/96x96?text=${encodeURIComponent(item.name || 'Mon')}`
+                        }}
+                      />
+                    </div>
+                  </td>
                   <td className="py-2">{item.name}</td>
                   <td>{Number(item.price).toLocaleString('vi-VN')}đ</td>
                   <td>{item.category || '-'}</td>
@@ -724,7 +751,7 @@ export default function Menu() {
                           name: item.name,
                           price: String(item.price),
                           description: item.description || '',
-                          image: '',
+                          image: item.image || '',
                           categoryId: item.categoryId || '',
                           available: item.available,
                         })

@@ -18,7 +18,7 @@ import Input from '@/components/ui/Input'
 import api from '@/utils/api'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
-import { vaiTroNhanVien } from '@/utils/display'
+import { phuongThucThanhToan, trangThaiThanhToan, vaiTroNhanVien } from '@/utils/display'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
 
 type TimeGroup = 'day' | 'week' | 'month' | 'year'
@@ -77,6 +77,18 @@ interface DashboardResponse {
   orders: {
     todayByStatus: Array<{ status: string; count: number }>
     hourly: Array<{ timestamp: string; orders: number; revenue: number }>
+  }
+  payments: {
+    summary: {
+      totalTransactions: number
+      paidTransactions: number
+      pendingTransactions: number
+      failedTransactions: number
+      totalRevenue: number
+      averagePaidValue: number
+    }
+    byProvider: Array<{ provider: string; count: number; paidCount: number; revenue: number }>
+    byStatus: Array<{ status: string; count: number; amount: number }>
   }
   inventory: {
     summary: {
@@ -199,6 +211,26 @@ export default function Reports() {
     [dashboard?.orders.hourly],
   )
 
+  const paymentProviderChartData = useMemo(
+    () =>
+      (dashboard?.payments.byProvider || []).map((item) => ({
+        provider: phuongThucThanhToan(item.provider),
+        revenue: item.revenue,
+        paidCount: item.paidCount,
+      })),
+    [dashboard?.payments.byProvider],
+  )
+
+  const paymentStatusChartData = useMemo(
+    () =>
+      (dashboard?.payments.byStatus || []).map((item) => ({
+        status: trangThaiThanhToan(item.status),
+        count: item.count,
+        amount: item.amount,
+      })),
+    [dashboard?.payments.byStatus],
+  )
+
   const handleExport = async () => {
     try {
       const response = await api.get('/reports/export', {
@@ -255,20 +287,20 @@ export default function Reports() {
 
       {!!dashboard && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="text-center">
-          <p className="text-sm text-slate-500">Tổng doanh thu</p>
-          <p className="text-2xl font-bold text-slate-900 dark:text-slate-100">{formatMoney(dashboard?.revenue.totalRevenue || 0)}</p>
+          <p className="text-sm text-slate-500">Doanh thu thanh toán</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-slate-100">{formatMoney(dashboard?.payments.summary.totalRevenue || dashboard?.revenue.totalRevenue || 0)}</p>
         </Card>
         <Card className="text-center">
-          <p className="text-sm text-slate-500">Tổng đơn hoàn thành</p>
-          <p className="text-2xl font-bold text-slate-900 dark:text-slate-100">{dashboard?.revenue.totalOrders || 0}</p>
+          <p className="text-sm text-slate-500">Giao dịch đã thanh toán</p>
+          <p className="text-2xl font-bold text-emerald-600">{dashboard?.payments.summary.paidTransactions || 0}</p>
         </Card>
         <Card className="text-center">
-          <p className="text-sm text-slate-500">Nguyên liệu sắp hết</p>
-          <p className="text-2xl font-bold text-red-600">{dashboard?.inventory.summary.lowStockCount || 0}</p>
+          <p className="text-sm text-slate-500">Giao dịch đang chờ</p>
+          <p className="text-2xl font-bold text-amber-600">{dashboard?.payments.summary.pendingTransactions || 0}</p>
         </Card>
         <Card className="text-center">
-          <p className="text-sm text-slate-500">Giá trị tồn kho</p>
-          <p className="text-2xl font-bold text-slate-900 dark:text-slate-100">{formatMoney(dashboard?.inventory.summary.totalStockValue || 0)}</p>
+          <p className="text-sm text-slate-500">Giao dịch lỗi / hủy</p>
+          <p className="text-2xl font-bold text-red-600">{dashboard?.payments.summary.failedTransactions || 0}</p>
         </Card>
       </div>}
 
@@ -298,6 +330,38 @@ export default function Reports() {
                 <Tooltip />
                 <Legend />
                 <Bar dataKey="orders" name="Số đơn" fill="#14b8a6" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card title="Thanh toán theo phương thức" subtitle="Doanh thu ghi nhận theo từng cổng thanh toán">
+          <div className="h-64 sm:h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={paymentProviderChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="provider" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="revenue" name="Doanh thu" fill="#2563eb" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        <Card title="Trạng thái thanh toán" subtitle="Phân bổ số lượng giao dịch theo trạng thái">
+          <div className="h-64 sm:h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={paymentStatusChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="status" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="count" name="Số giao dịch" fill="#0ea5e9" />
               </BarChart>
             </ResponsiveContainer>
           </div>

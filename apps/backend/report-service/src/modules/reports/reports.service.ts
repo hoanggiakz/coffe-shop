@@ -373,13 +373,14 @@ export class ReportsService implements OnModuleDestroy {
     const dateTo = query.dateTo || now.toISOString().slice(0, 10);
     const branchId = this.normalizeBranchId(query.branchId);
 
-    const [revenue, topItems, inventory, orderStatus, hourlyOrders, staffPerformance] = await Promise.all([
+    const [revenue, topItems, inventory, orderStatus, hourlyOrders, staffPerformance, paymentOverview] = await Promise.all([
       this.getRevenueSeries({ dateFrom, dateTo, branchId }, query.groupBy || 'day'),
       this.getTopItems({ dateFrom, dateTo, limit: 10, branchId }),
       this.getInventoryReport({ dateFrom, dateTo, includeMovements: false, branchId }),
       this.getTodayOrderStatus(branchId || undefined),
       this.getHourlyOrders(branchId || undefined),
       this.getStaffPerformance({ dateFrom, dateTo, limit: 5, branchId }),
+      this.getPaymentOverview({ dateFrom, dateTo, branchId }),
     ]);
 
     const revenueSummary = revenue.reduce(
@@ -403,6 +404,7 @@ export class ReportsService implements OnModuleDestroy {
         todayByStatus: orderStatus,
         hourly: hourlyOrders,
       },
+      payments: paymentOverview,
       inventory: {
         summary: inventory.summary,
         lowStockItems: inventory.stocks.filter((item) => item.isLowStock).slice(0, 10),
@@ -602,41 +604,171 @@ export class ReportsService implements OnModuleDestroy {
 
   private async getRevenueSeries(range: DateRange, groupBy: TimeGroup) {
     const branchId = this.normalizeBranchId(range.branchId);
+    const scopedOrderIds = await this.getScopedOrderIdsForBranch(branchId);
+    if (branchId && scopedOrderIds && !scopedOrderIds.length) {
+      return [];
+    }
+
     const dateWhere = this.buildDateWhere(
-      'o."createdAt"',
+      'COALESCE(p."paidAt", p."createdAt")',
       range.from || range.dateFrom,
       range.to || range.dateTo,
       1,
     );
 
-    const whereParts = ['o.status = \'COMPLETED\''];
+    const whereParts = ['p.status = \'PAID\''];
     if (dateWhere.clause) {
       whereParts.push(dateWhere.clause);
     }
 
     const params: any[] = [groupBy, ...dateWhere.params];
-    if (branchId) {
-      params.push(branchId);
-      whereParts.push(`o."branchId" = $${params.length}`);
+    if (scopedOrderIds) {
+      params.push(scopedOrderIds);
+      whereParts.push(`p."orderId" = ANY($${params.length}::text[])`);
     }
 
     const sql = `
       SELECT
-        date_trunc($1, o."createdAt") AS period_start,
-        COALESCE(SUM(o."totalAmount"), 0)::bigint AS revenue,
+        date_trunc($1, COALESCE(p."paidAt", p."createdAt")) AS period_start,
+        COALESCE(SUM(p.amount), 0)::numeric AS revenue,
         COUNT(*)::int AS "orderCount"
-      FROM orders o
+      FROM payments p
       WHERE ${whereParts.join(' AND ')}
       GROUP BY period_start
       ORDER BY period_start ASC
     `;
 
-    const rows = await this.orderPool.query(sql, params);
+    const rows = await this.paymentPool.query(sql, params);
     return rows.rows.map((row) => ({
       period: new Date(row.period_start).toISOString(),
       revenue: Number(row.revenue || 0),
       orderCount: Number(row.orderCount || 0),
     }));
+  }
+
+  private async getPaymentOverview(range: DateRange) {
+    const branchId = this.normalizeBranchId(range.branchId);
+    const scopedOrderIds = await this.getScopedOrderIdsForBranch(branchId);
+    if (branchId && scopedOrderIds && !scopedOrderIds.length) {
+      return {
+        summary: {
+          totalTransactions: 0,
+          paidTransactions: 0,
+          pendingTransactions: 0,
+          failedTransactions: 0,
+          totalRevenue: 0,
+          averagePaidValue: 0,
+        },
+        byProvider: [],
+        byStatus: [],
+      };
+    }
+
+    const dateWhere = this.buildDateWhere(
+      'COALESCE(p."paidAt", p."createdAt")',
+      range.from || range.dateFrom,
+      range.to || range.dateTo,
+    );
+
+    const whereParts: string[] = [];
+    const whereParams: any[] = [...dateWhere.params];
+
+    if (dateWhere.clause) {
+      whereParts.push(dateWhere.clause);
+    }
+    if (scopedOrderIds) {
+      whereParams.push(scopedOrderIds);
+      whereParts.push(`p."orderId" = ANY($${whereParams.length}::text[])`);
+    }
+
+    const whereClause = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    const [summaryResult, providerResult, statusResult] = await Promise.all([
+      this.paymentPool.query(
+        `
+          SELECT
+            COUNT(*)::int AS "totalTransactions",
+            COUNT(*) FILTER (WHERE p.status = 'PAID')::int AS "paidTransactions",
+            COUNT(*) FILTER (WHERE p.status IN ('PENDING', 'WAITING_TRANSFER', 'WAITING_CASH'))::int AS "pendingTransactions",
+            COUNT(*) FILTER (WHERE p.status IN ('FAILED', 'EXPIRED', 'CANCELLED'))::int AS "failedTransactions",
+            COALESCE(SUM(CASE WHEN p.status = 'PAID' THEN p.amount ELSE 0 END), 0)::numeric AS "totalRevenue"
+          FROM payments p
+          ${whereClause}
+        `,
+        whereParams,
+      ),
+      this.paymentPool.query(
+        `
+          SELECT
+            p.provider,
+            COUNT(*)::int AS count,
+            COUNT(*) FILTER (WHERE p.status = 'PAID')::int AS "paidCount",
+            COALESCE(SUM(CASE WHEN p.status = 'PAID' THEN p.amount ELSE 0 END), 0)::numeric AS revenue
+          FROM payments p
+          ${whereClause}
+          GROUP BY p.provider
+          ORDER BY revenue DESC, count DESC
+        `,
+        whereParams,
+      ),
+      this.paymentPool.query(
+        `
+          SELECT
+            p.status,
+            COUNT(*)::int AS count,
+            COALESCE(SUM(p.amount), 0)::numeric AS amount
+          FROM payments p
+          ${whereClause}
+          GROUP BY p.status
+          ORDER BY count DESC, p.status ASC
+        `,
+        whereParams,
+      ),
+    ]);
+
+    const summaryRow = summaryResult.rows[0] || {};
+    const paidTransactions = Number(summaryRow.paidTransactions || 0);
+    const totalRevenue = Number(summaryRow.totalRevenue || 0);
+
+    return {
+      summary: {
+        totalTransactions: Number(summaryRow.totalTransactions || 0),
+        paidTransactions,
+        pendingTransactions: Number(summaryRow.pendingTransactions || 0),
+        failedTransactions: Number(summaryRow.failedTransactions || 0),
+        totalRevenue,
+        averagePaidValue: paidTransactions > 0 ? Math.round(totalRevenue / paidTransactions) : 0,
+      },
+      byProvider: providerResult.rows.map((row) => ({
+        provider: String(row.provider || 'UNKNOWN'),
+        count: Number(row.count || 0),
+        paidCount: Number(row.paidCount || 0),
+        revenue: Number(row.revenue || 0),
+      })),
+      byStatus: statusResult.rows.map((row) => ({
+        status: String(row.status || 'UNKNOWN'),
+        count: Number(row.count || 0),
+        amount: Number(row.amount || 0),
+      })),
+    };
+  }
+
+  private async getScopedOrderIdsForBranch(branchId?: string | null): Promise<string[] | null> {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) {
+      return null;
+    }
+
+    const rows = await this.orderPool.query(
+      `
+        SELECT o.id::text AS id
+        FROM orders o
+        WHERE o."branchId" = $1
+      `,
+      [normalizedBranchId],
+    );
+
+    return rows.rows.map((row) => String(row.id));
   }
 
   private async getTodayOrderStatus(branchId?: string) {

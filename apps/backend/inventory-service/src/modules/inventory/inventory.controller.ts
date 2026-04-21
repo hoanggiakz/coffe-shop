@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  Req,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -28,6 +29,15 @@ import { BulkExportStockDto } from './dto/bulk-export-stock.dto';
 @Controller('ingredients')
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
+
+  private resolveActor(req: any) {
+    const user = (req && req.user) || {};
+    const email = String(user.email || '').trim();
+    const sub = String(user.sub || '').trim();
+    if (email) return email;
+    if (sub) return sub;
+    return 'unknown';
+  }
 
   @Post()
   @ApiOperation({ summary: 'Create new ingredient' })
@@ -62,32 +72,44 @@ export class InventoryController {
   @ApiOperation({ summary: 'Import stock (add to inventory)' })
   @ApiResponse({ status: 200, description: 'Stock imported' })
   @HttpCode(HttpStatus.OK)
-  importStock(@Body() stockMovementDto: StockMovementDto) {
-    return this.inventoryService.importStock(stockMovementDto);
+  importStock(@Req() req: any, @Body() stockMovementDto: StockMovementDto) {
+    return this.inventoryService.importStock({
+      ...stockMovementDto,
+      createdBy: stockMovementDto.createdBy || this.resolveActor(req),
+    });
   }
 
   @Post('stock/receipts')
   @ApiOperation({ summary: 'Create stock import receipt' })
   @ApiResponse({ status: 201, description: 'Receipt created' })
   @HttpCode(HttpStatus.CREATED)
-  createReceipt(@Body() dto: CreateStockReceiptDto) {
-    return this.inventoryService.createStockReceipt(dto);
+  createReceipt(@Req() req: any, @Body() dto: CreateStockReceiptDto) {
+    return this.inventoryService.createStockReceipt({
+      ...dto,
+      createdBy: dto.createdBy || this.resolveActor(req),
+    });
   }
 
   @Post('stock/adjust')
   @ApiOperation({ summary: 'Adjust stock manually after stocktaking' })
   @ApiResponse({ status: 200, description: 'Stock adjusted' })
   @HttpCode(HttpStatus.OK)
-  adjustStock(@Body() dto: AdjustStockDto) {
-    return this.inventoryService.adjustStock(dto);
+  adjustStock(@Req() req: any, @Body() dto: AdjustStockDto) {
+    return this.inventoryService.adjustStock({
+      ...dto,
+      createdBy: dto.createdBy || this.resolveActor(req),
+    });
   }
 
   @Post('stock/export-bulk')
   @ApiOperation({ summary: 'Export stock in bulk (atomic)' })
   @ApiResponse({ status: 200, description: 'Stock exported in bulk' })
   @HttpCode(HttpStatus.OK)
-  exportBulk(@Body() dto: BulkExportStockDto) {
-    return this.inventoryService.exportStockBulk(dto);
+  exportBulk(@Req() req: any, @Body() dto: BulkExportStockDto) {
+    return this.inventoryService.exportStockBulk({
+      ...dto,
+      createdBy: dto.createdBy || this.resolveActor(req),
+    });
   }
 
   @Get('stock/movements')
