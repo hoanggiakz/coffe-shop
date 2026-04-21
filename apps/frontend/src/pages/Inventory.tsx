@@ -45,6 +45,15 @@ type StockMovement = {
 type MenuItem = {
   id: string
   name: string
+  customizations?: Array<{
+    id: string
+    label?: string
+    options?: Array<{
+      value?: string
+      label?: string
+      priceDelta?: number
+    }>
+  }>
 }
 
 type StaffNotificationType = 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY' | 'LOW_STOCK'
@@ -54,6 +63,11 @@ type StaffNotificationPayload = {
   type: StaffNotificationType
   title: string
   message: string
+}
+
+type BranchItem = {
+  id: string
+  name: string
 }
 
 const defaultIngredientForm = {
@@ -86,6 +100,13 @@ const defaultReceiptRow = {
 }
 const selectClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
+const TOPPING_INGREDIENT_PREFIX = 'topping::'
+
+function toToppingIngredientId(optionValue: string) {
+  const normalized = String(optionValue || '').trim().toLowerCase()
+  if (!normalized) return ''
+  return `${TOPPING_INGREDIENT_PREFIX}${encodeURIComponent(normalized)}`
+}
 
 function toDateInputValue(date: Date) {
   return date.toISOString().slice(0, 10)
@@ -102,6 +123,7 @@ export default function Inventory() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [movements, setMovements] = useState<StockMovement[]>([])
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const [branches, setBranches] = useState<BranchItem[]>([])
 
   const [includeInactive, setIncludeInactive] = useState(false)
   const [lowOnly, setLowOnly] = useState(false)
@@ -184,13 +206,46 @@ export default function Inventory() {
     const { data } = await api.get('/orders/menu', {
       params: { branchId: branchId.trim() || undefined },
     })
-    setMenuItems((data || []).map((item: any) => ({ id: item.id, name: item.name })))
+    setMenuItems(
+      (data || []).map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        customizations: Array.isArray(item?.customizations)
+          ? item.customizations.map((group: any) => ({
+              id: String(group?.id || ''),
+              label: String(group?.label || ''),
+              options: Array.isArray(group?.options)
+                ? group.options.map((option: any) => ({
+                    value: String(option?.value || ''),
+                    label: String(option?.label || ''),
+                    priceDelta: Number(option?.priceDelta || 0),
+                  }))
+                : [],
+            }))
+          : [],
+      })),
+    )
+  }
+
+  const loadBranches = async () => {
+    try {
+      const { data } = await api.get('/users/admin/branches', {
+        params: { includeInactive: 'true' },
+      })
+      setBranches(Array.isArray(data) ? data : [])
+    } catch (error: any) {
+      setBranches([])
+      const status = Number(error?.response?.status || 0)
+      if (status && status !== 401 && status !== 403) {
+        toast.error(error.response?.data?.message || tv('Không tải được danh sách chi nhánh', 'Unable to load branches'))
+      }
+    }
   }
 
   const loadAll = async () => {
     try {
       setLoading(true)
-      await Promise.all([loadIngredients(), loadMovements(), loadMenuItems()])
+      await Promise.all([loadIngredients(), loadMovements(), loadMenuItems(), loadBranches()])
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Không tải được dữ liệu kho', 'Unable to load inventory data'))
     } finally {
@@ -274,6 +329,23 @@ export default function Inventory() {
     () => ingredients.filter((item) => Number(item.stock) <= Number(item.minStock)),
     [ingredients],
   )
+  const branchNameById = useMemo(
+    () =>
+      branches.reduce<Record<string, string>>((acc, branch) => {
+        const id = String(branch?.id || '').trim()
+        if (!id) return acc
+        const name = String(branch?.name || '').trim()
+        acc[id] = name || id
+        return acc
+      }, {}),
+    [branches],
+  )
+
+  const getBranchDisplayName = (rawBranchId?: string | null) => {
+    const normalizedBranchId = String(rawBranchId || '').trim()
+    if (!normalizedBranchId) return ''
+    return branchNameById[normalizedBranchId] || normalizedBranchId
+  }
 
   const submitIngredient = async (e: FormEvent) => {
     e.preventDefault()
@@ -423,9 +495,46 @@ export default function Inventory() {
   const syncFromMenu = async () => {
     setSyncing(true)
     try {
+      const syncItems = new Map<string, { id: string; name: string; unit: string }>()
+
+      menuItems.forEach((item) => {
+        if (!item?.id || !item?.name) return
+        syncItems.set(String(item.id), {
+          id: String(item.id),
+          name: String(item.name),
+          unit: 'portion',
+        })
+
+        ;(item.customizations || []).forEach((group) => {
+          ;(group.options || []).forEach((option) => {
+            const optionValue = String(option?.value || '').trim()
+            if (!optionValue) return
+
+            const optionLabel = String(option?.label || optionValue).trim()
+            const groupLabel = String(group?.label || '').trim()
+            const normalizedScope = `${groupLabel} ${optionLabel} ${optionValue}`.toLowerCase()
+            const isLikelyTopping =
+              normalizedScope.includes('topping') ||
+              normalizedScope.includes('toping') ||
+              Number(option?.priceDelta || 0) > 0
+
+            if (!isLikelyTopping) return
+
+            const toppingIngredientId = toToppingIngredientId(optionValue)
+            if (!toppingIngredientId) return
+
+            syncItems.set(toppingIngredientId, {
+              id: toppingIngredientId,
+              name: optionLabel,
+              unit: 'portion',
+            })
+          })
+        })
+      })
+
       await api.post('/v1/ingredients/sync-menu', {
         branchId: branchId.trim() || undefined,
-        items: menuItems.map((item) => ({ id: item.id, name: item.name, unit: 'portion' })),
+        items: Array.from(syncItems.values()),
       })
       toast.success('Đã đồng bộ thực đơn sang kho')
       await loadIngredients()
@@ -455,8 +564,8 @@ export default function Inventory() {
             {socketConnected ? 'Realtime tồn kho: Đã kết nối' : 'Realtime tồn kho: Ngoại tuyến'}
           </span>
           <Input
-            placeholder="Mã chi nhánh"
-            value={branchId || 'Tất cả chi nhánh'}
+            placeholder="Chi nhánh"
+            value={branchId ? getBranchDisplayName(branchId) : 'Tất cả chi nhánh'}
             disabled
             className="w-full sm:w-40"
           />
@@ -541,7 +650,9 @@ export default function Inventory() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="font-semibold text-slate-900 dark:text-slate-100">{ingredient.name}</p>
-                    <p className="text-xs text-slate-500">{ingredient.branchId || 'Không gắn chi nhánh'}</p>
+                    <p className="text-xs text-slate-500">
+                      {ingredient.branchId ? getBranchDisplayName(ingredient.branchId) : 'Không gắn chi nhánh'}
+                    </p>
                   </div>
                   <span
                     className={`rounded-full px-2 py-1 text-xs font-medium ${
@@ -594,7 +705,7 @@ export default function Inventory() {
                 return (
                   <tr key={ingredient.id} className="border-b">
                     <td className="py-2">{ingredient.name}</td>
-                    <td className="py-2">{ingredient.branchId || '-'}</td>
+                    <td className="py-2">{ingredient.branchId ? getBranchDisplayName(ingredient.branchId) : '-'}</td>
                     <td className="py-2">{ingredient.stock}</td>
                     <td className="py-2">{ingredient.unit}</td>
                     <td className="py-2">{ingredient.minStock}</td>
@@ -861,7 +972,15 @@ export default function Inventory() {
                 <p>Nguồn: <span className="font-medium">{movement.source}</span></p>
                 <p>Số lượng: <span className="font-medium">{movement.quantity}</span></p>
                 <p>Tồn: <span className="font-medium">{movement.beforeStock} → {movement.afterStock}</span></p>
-                <p>Chi nhánh: <span className="font-medium">{movement.branchId || movement.ingredient?.branchId || '-'}</span></p>
+                <p>
+                  Chi nhánh:{' '}
+                  <span className="font-medium">
+                    {movement.branchId || movement.ingredient?.branchId
+                      ? getBranchDisplayName(movement.branchId || movement.ingredient?.branchId)
+                      : '-'}
+                  </span>
+                </p>
+                <p>Thực hiện: <span className="font-medium">{movement.createdBy || '-'}</span></p>
               </div>
               <p className="mt-2 text-slate-600 dark:text-slate-300">
                 Giá trị: <span className="font-medium">{movement.totalPrice > 0 ? formatMoney(movement.totalPrice) : '-'}</span>
@@ -883,6 +1002,7 @@ export default function Inventory() {
                 <th className="py-2 text-left">Số lượng</th>
                 <th className="py-2 text-left">Tồn trước / sau</th>
                 <th className="py-2 text-left">Giá trị</th>
+                <th className="py-2 text-left">Thực hiện</th>
                 <th className="py-2 text-left">Lý do</th>
                 <th className="py-2 text-left">Ref</th>
               </tr>
@@ -892,7 +1012,11 @@ export default function Inventory() {
                 <tr key={movement.id} className="border-b">
                   <td className="py-2">{new Date(movement.createdAt).toLocaleString()}</td>
                   <td className="py-2">{movement.ingredient?.name || movement.ingredientId}</td>
-                  <td className="py-2">{movement.branchId || movement.ingredient?.branchId || '-'}</td>
+                  <td className="py-2">
+                    {movement.branchId || movement.ingredient?.branchId
+                      ? getBranchDisplayName(movement.branchId || movement.ingredient?.branchId)
+                      : '-'}
+                  </td>
                   <td className="py-2">
                     {movement.type} / {movement.source}
                   </td>
@@ -904,6 +1028,7 @@ export default function Inventory() {
                     {movement.unitPrice > 0 ? `${formatMoney(movement.unitPrice)} x ${movement.quantity}` : '-'}
                     {movement.totalPrice > 0 ? ` = ${formatMoney(movement.totalPrice)}` : ''}
                   </td>
+                  <td className="py-2">{movement.createdBy || '-'}</td>
                   <td className="py-2">{movement.reason || movement.note || '-'}</td>
                   <td className="py-2">{movement.referenceCode || '-'}</td>
                 </tr>
