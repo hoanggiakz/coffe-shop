@@ -32,6 +32,7 @@ const st = {
   orderId: '',
   orderItemId: '',
   ingredientId: '',
+  menuRecipeIngredientId: '',
   syncIngredientId: `sync-${runId}`,
   cashOrderId: `ORD-CASH-${runId}`,
   cashPaymentId: '',
@@ -241,6 +242,16 @@ async function run() {
     if (st.optionValueId) await api('Update option value', 'PATCH', `/api/orders/admin/menu/options/values/${encodeURIComponent(st.optionValueId)}`, [200], { label: 'Medium Upd' }, t);
   }
 
+  const menuRecipeIngredient = await api('Create recipe ingredient', 'POST', '/api/v1/ingredients', [201], {
+    name: `Recipe Ingredient ${runId}`,
+    unit: 'gram',
+    stock: 500,
+    minStock: 50,
+    importPrice: 120,
+    branchId: st.branchId || undefined,
+  }, t);
+  st.menuRecipeIngredientId = menuRecipeIngredient.data?.id || '';
+
   await api('List menu items admin', 'GET', '/api/orders/admin/menu/items?includeInactive=true', [200], undefined, t);
   const mi = await api('Create menu item', 'POST', '/api/orders/admin/menu/items', [201], {
     name: `Smoke Latte ${runId}`,
@@ -250,7 +261,9 @@ async function run() {
     branchId: st.branchId || undefined,
     available: true,
     optionGroups: st.optionGroupId ? [{ groupId: st.optionGroupId, required: true, sortOrder: 0 }] : [],
-    recipe: [],
+    recipe: st.menuRecipeIngredientId
+      ? [{ ingredientId: st.menuRecipeIngredientId, ingredientName: `Recipe Ingredient ${runId}`, quantity: 18, unit: 'gram' }]
+      : [],
   }, t);
   st.menuItemId = mi.data?.id || '';
   if (st.menuItemId) await api('Update menu item', 'PATCH', `/api/orders/admin/menu/items/${encodeURIComponent(st.menuItemId)}`, [200], { price: 56000 }, t);
@@ -369,6 +382,7 @@ async function run() {
   await api('Report export excel', 'GET', `/api/reports/export?reportType=revenue&format=excel&dateFrom=${today}&dateTo=${today}`, [200], undefined, t, true);
 
   if (st.menuItemId) await api('Delete menu item', 'DELETE', `/api/orders/admin/menu/items/${encodeURIComponent(st.menuItemId)}`, [200], undefined, t);
+  if (st.menuRecipeIngredientId) await api('Delete recipe ingredient', 'DELETE', `/api/v1/ingredients/${encodeURIComponent(st.menuRecipeIngredientId)}`, [200], undefined, t);
   if (st.optionValueId) await api('Delete option value', 'DELETE', `/api/orders/admin/menu/options/values/${encodeURIComponent(st.optionValueId)}`, [200], undefined, t);
   if (st.optionGroupId) await api('Delete option group', 'DELETE', `/api/orders/admin/menu/options/groups/${encodeURIComponent(st.optionGroupId)}`, [200], undefined, t);
   if (st.categoryId) await api('Delete category', 'DELETE', `/api/orders/admin/menu/categories/${encodeURIComponent(st.categoryId)}`, [200], undefined, t);

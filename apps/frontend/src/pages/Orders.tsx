@@ -338,6 +338,7 @@ export default function Orders() {
           amount: payingOrder.totalAmount,
           provider: selectedMethod,
           tableId: payingOrder.tableId,
+          branchId: selectedBranchId || undefined,
         })
         payment = data as PaymentApi
       }

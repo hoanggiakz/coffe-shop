@@ -507,10 +507,12 @@ export class PaymentService {
       payment.metadata && typeof payment.metadata === 'object' && !Array.isArray(payment.metadata)
         ? payment.metadata
         : {};
+    const branchId = String((metadata as any).branchId || '').trim() || null;
     return {
       paymentId: payment.id,
       orderId: payment.orderId,
       tableId: payment.tableId,
+      branchId,
       amount: Number(payment.amount),
       status: payment.status,
       provider: payment.provider,
@@ -717,6 +719,7 @@ export class PaymentService {
 
   async create(createPaymentDto: CreatePaymentDto) {
     const { orderId, amount, tableId, customerName } = createPaymentDto;
+    const branchId = String(createPaymentDto.branchId || '').trim() || null;
     const provider = this.normalizeProvider(createPaymentDto.provider);
 
     const existing = await this.prisma.payment.findUnique({
@@ -743,6 +746,7 @@ export class PaymentService {
           metadata: {
             customerName: customerName || null,
             requestedAt: new Date().toISOString(),
+            branchId,
           },
         },
       });
@@ -770,6 +774,7 @@ export class PaymentService {
           transactionId,
           transferContent,
           metadata: this.buildOnlinePaymentMetadata({
+            branchId,
             vietQr: {
               qrImageUrl: onlineQr.qrImageUrl,
               htmlTag: onlineQr.htmlTag,
@@ -801,6 +806,7 @@ export class PaymentService {
         transactionId,
         transferContent: `${provider} ${String(orderId).toUpperCase()}`,
         metadata: this.buildOnlinePaymentMetadata({
+          branchId,
           paymentUrl,
           gateway: provider,
           gatewayRequest: {
