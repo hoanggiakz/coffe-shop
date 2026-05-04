@@ -81,6 +81,22 @@ const defaultItemForm = {
   available: true,
 }
 
+const fallbackMenuImage = (name?: string | null, size = '120x120') =>
+  `https://placehold.co/${size}?text=${encodeURIComponent(String(name || 'Mon'))}`
+
+const resolveMenuImage = (image?: string | null, name?: string | null, size = '120x120') => {
+  const raw = String(image || '').trim()
+  if (!raw) return fallbackMenuImage(name, size)
+  return raw
+}
+
+const normalizeBranchIdForApi = (value?: string | null) => {
+  const raw = String(value || '').trim()
+  if (!raw) return undefined
+  const uuidV4Like = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  return uuidV4Like.test(raw) ? raw : undefined
+}
+
 export default function Menu() {
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const [includeInactive, setIncludeInactive] = useState(false)
@@ -113,27 +129,32 @@ export default function Menu() {
   })
 
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
+  const [editingItemBranchId, setEditingItemBranchId] = useState<string | null>(null)
   const [itemForm, setItemForm] = useState(defaultItemForm)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [recipeRows, setRecipeRows] = useState<RecipeRow[]>([emptyRecipeRow()])
 
   const loadCategories = async () => {
+    const normalizedBranchId = normalizeBranchIdForApi(branchId)
     const { data } = await api.get('/orders/admin/menu/categories', {
-      params: { includeInactive, branchId: branchId.trim() || undefined },
+      params: { includeInactive, branchId: normalizedBranchId },
     })
     setCategories(data || [])
   }
 
   const loadGroups = async () => {
+    const normalizedBranchId = normalizeBranchIdForApi(branchId)
     const { data } = await api.get('/orders/admin/menu/options/groups', {
-      params: { includeInactive, branchId: branchId.trim() || undefined },
+      params: { includeInactive, branchId: normalizedBranchId },
     })
     setGroups(data || [])
   }
 
   const loadItems = async () => {
     const params: Record<string, string | boolean> = { includeInactive }
-    if (branchId.trim()) params.branchId = branchId.trim()
+    const normalizedBranchId = normalizeBranchIdForApi(branchId)
+    if (normalizedBranchId) params.branchId = normalizedBranchId
     if (keyword.trim()) params.keyword = keyword.trim()
     if (categoryFilter !== 'ALL') params.categoryId = categoryFilter
     const { data } = await api.get('/orders/admin/menu/items', { params })
@@ -141,9 +162,10 @@ export default function Menu() {
   }
 
   const loadIngredients = async () => {
+    const normalizedBranchId = normalizeBranchIdForApi(branchId)
     const { data } = await api.get('/v1/ingredients', {
       params: {
-        branchId: branchId.trim() || undefined,
+        branchId: normalizedBranchId,
       },
     })
 
@@ -182,6 +204,7 @@ export default function Menu() {
 
   const resetItemForm = () => {
     setEditingItemId(null)
+    setEditingItemBranchId(null)
     setItemForm(defaultItemForm)
     setSelectedGroupIds([])
     setRecipeRows([emptyRecipeRow()])
@@ -282,7 +305,56 @@ export default function Menu() {
     setRecipeRows((prev) => (prev.length > 1 ? prev.filter((_, rowIndex) => rowIndex !== index) : [emptyRecipeRow()]))
   }
 
+  const onItemImageFileChange = (file?: File | null) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Chỉ chấp nhận file ảnh')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Ảnh tối đa 5MB')
+      return
+    }
+
+    setIsUploadingImage(true)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '')
+      if (!dataUrl.startsWith('data:image/')) {
+        toast.error('Không đọc được file ảnh')
+        setIsUploadingImage(false)
+        return
+      }
+      setItemForm((prev) => ({ ...prev, image: dataUrl }))
+      setIsUploadingImage(false)
+      toast.success('Đã tải ảnh lên form')
+    }
+    reader.onerror = () => {
+      setIsUploadingImage(false)
+      toast.error('Không thể đọc file ảnh')
+    }
+    reader.readAsDataURL(file)
+  }
+
   const submitItem = async () => {
+    const normalizedName = String(itemForm.name || '').trim()
+    if (!normalizedName) {
+      toast.error('Tên món không được để trống')
+      return
+    }
+
+    const normalizedPrice = Number(itemForm.price || 0)
+    if (!Number.isFinite(normalizedPrice) || normalizedPrice <= 0) {
+      toast.error('Giá bán phải lớn hơn 0')
+      return
+    }
+
+    const imageUrl = String(itemForm.image || '').trim()
+    if (imageUrl && !/^(https?:\/\/|data:image\/)/i.test(imageUrl)) {
+      toast.error('Ảnh phải là URL http(s) hoặc ảnh upload hợp lệ')
+      return
+    }
+
     const validRecipeRows = recipeRows
       .map((row) => ({
         ingredientId: row.ingredientId.trim(),
@@ -308,11 +380,14 @@ export default function Menu() {
 
     const payload = {
       ...itemForm,
-      branchId: branchId.trim() || undefined,
-      price: Number(itemForm.price || 0),
+      name: normalizedName,
+      branchId: editingItemId
+        ? normalizeBranchIdForApi(editingItemBranchId)
+        : normalizeBranchIdForApi(branchId),
+      price: normalizedPrice,
       categoryId: itemForm.categoryId || null,
-      description: itemForm.description || null,
-      image: itemForm.image || null,
+      description: String(itemForm.description || '').trim() || null,
+      image: imageUrl || null,
       optionGroups: selectedGroupIds.map((groupId, index) => ({ groupId, required: false, sortOrder: index })),
       recipe: validRecipeRows,
     }
@@ -556,39 +631,104 @@ export default function Menu() {
       </Card>
 
       <Card title="M-05 Quản lý món">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <Input placeholder="Tên món" value={itemForm.name} onChange={(e) => setItemForm((p) => ({ ...p, name: e.target.value }))} />
-          <Input type="number" placeholder="Giá bán (VND)" value={itemForm.price} onChange={(e) => setItemForm((p) => ({ ...p, price: e.target.value }))} />
-          <label className="text-sm">
-            Danh mục
-            <select className="mt-1 block w-full rounded-lg border px-3 py-2" value={itemForm.categoryId} onChange={(e) => setItemForm((p) => ({ ...p, categoryId: e.target.value }))}>
-              <option value="">-- Chọn --</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Input placeholder="Mô tả" value={itemForm.description} onChange={(e) => setItemForm((p) => ({ ...p, description: e.target.value }))} />
-          <Input placeholder="Đường dẫn ảnh" value={itemForm.image} onChange={(e) => setItemForm((p) => ({ ...p, image: e.target.value }))} />
-          <label className="inline-flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={itemForm.available} onChange={(e) => setItemForm((p) => ({ ...p, available: e.target.checked }))} />
-            Đang bán
-          </label>
-        </div>
-        <div className="mt-3 flex items-center gap-3 rounded-lg border p-3">
-          <div className="h-16 w-16 overflow-hidden rounded-lg border bg-gray-50">
-            <img
-              src={itemForm.image || `https://placehold.co/120x120?text=${encodeURIComponent(itemForm.name || 'Mon')}`}
-              alt={itemForm.name || 'Ảnh món'}
-              className="h-full w-full object-cover"
-              onError={(event) => {
-                event.currentTarget.src = `https://placehold.co/120x120?text=${encodeURIComponent(itemForm.name || 'Mon')}`
-              }}
-            />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="space-y-3 lg:col-span-2">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <Input
+                label="Tên món"
+                placeholder="Ví dụ: Bạc xỉu nóng"
+                value={itemForm.name}
+                onChange={(e) => setItemForm((p) => ({ ...p, name: e.target.value }))}
+              />
+              <Input
+                label="Giá bán (VND)"
+                type="number"
+                min={0}
+                placeholder="Ví dụ: 42000"
+                value={itemForm.price}
+                onChange={(e) => setItemForm((p) => ({ ...p, price: e.target.value }))}
+              />
+              <label className="text-sm md:col-span-2">
+                Danh mục
+                <select
+                  className="mt-1 block w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm"
+                  value={itemForm.categoryId}
+                  onChange={(e) => setItemForm((p) => ({ ...p, categoryId: e.target.value }))}
+                >
+                  <option value="">-- Chọn danh mục --</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm md:col-span-2">
+                Mô tả món
+                <textarea
+                  rows={3}
+                  className="mt-1 block w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm"
+                  placeholder="Mô tả hương vị, thành phần nổi bật, nhiệt độ phục vụ..."
+                  value={itemForm.description}
+                  onChange={(e) => setItemForm((p) => ({ ...p, description: e.target.value }))}
+                />
+              </label>
+            </div>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={itemForm.available}
+                onChange={(e) => setItemForm((p) => ({ ...p, available: e.target.checked }))}
+              />
+              Đang bán trên menu khách
+            </label>
+            <p className="text-xs text-gray-500">
+              Món đang bán bắt buộc phải có công thức nguyên liệu để hệ thống trừ kho tự động.
+            </p>
           </div>
-          <p className="text-sm text-gray-600">Xem trước ảnh món từ URL</p>
+
+          <div className="rounded-xl border border-sky-100/80 bg-white/90 p-3">
+            <Input
+              label="URL hình ảnh món"
+              placeholder="https://..."
+              value={itemForm.image}
+              onChange={(e) => setItemForm((p) => ({ ...p, image: e.target.value }))}
+            />
+            <label className="mt-2 block text-sm">
+              Upload ảnh từ máy
+              <input
+                type="file"
+                accept="image/*"
+                className="mt-1 block w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm"
+                onChange={(e) => onItemImageFileChange(e.target.files?.[0] || null)}
+                disabled={isUploadingImage}
+              />
+            </label>
+            <div className="mt-2 flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => setItemForm((prev) => ({ ...prev, image: '' }))}
+              >
+                Xóa ảnh
+              </Button>
+              {isUploadingImage && <span className="text-xs text-gray-500">Đang xử lý ảnh...</span>}
+            </div>
+            <div className="mt-3 overflow-hidden rounded-lg border bg-gray-50">
+              <img
+                src={resolveMenuImage(itemForm.image, itemForm.name, '360x220')}
+                alt={itemForm.name || 'Ảnh món'}
+                className="h-40 w-full object-cover"
+                onError={(event) => {
+                  event.currentTarget.src = fallbackMenuImage(itemForm.name, '360x220')
+                }}
+              />
+            </div>
+            <p className="mt-2 text-xs text-gray-500">
+              Khuyến nghị ảnh ngang, rõ món, nền sạch để khách dễ nhận diện.
+            </p>
+          </div>
         </div>
 
         <div className="mt-3 rounded-lg border p-3">
@@ -659,7 +799,11 @@ export default function Menu() {
                   onChange={(e) => updateRecipeRow(index, { unit: e.target.value })}
                 />
 
-                <Input value={row.ingredientName} disabled placeholder="Tên nguyên liệu" />
+                <Input
+                  placeholder="Tên nguyên liệu"
+                  value={row.ingredientName}
+                  onChange={(e) => updateRecipeRow(index, { ingredientName: e.target.value })}
+                />
 
                 <div className="flex gap-2">
                   <Button type="button" variant="secondary" onClick={addRecipeRow}>
@@ -719,24 +863,29 @@ export default function Menu() {
               {items.map((item) => (
                 <tr key={item.id} className="border-b">
                   <td className="py-2">
-                    <div className="h-12 w-12 overflow-hidden rounded-md border bg-gray-50">
+                    <div className="h-14 w-20 overflow-hidden rounded-md border bg-gray-50">
                       <img
-                        src={item.image || `https://placehold.co/96x96?text=${encodeURIComponent(item.name || 'Mon')}`}
+                        src={resolveMenuImage(item.image, item.name, '160x110')}
                         alt={item.name}
                         className="h-full w-full object-cover"
                         onError={(event) => {
-                          event.currentTarget.src = `https://placehold.co/96x96?text=${encodeURIComponent(item.name || 'Mon')}`
+                          event.currentTarget.src = fallbackMenuImage(item.name, '160x110')
                         }}
                       />
                     </div>
                   </td>
-                  <td className="py-2">{item.name}</td>
+                  <td className="py-2">
+                    <p className="font-medium text-slate-900">{item.name}</p>
+                    <p className="max-w-xs truncate text-xs text-gray-500">{item.description || 'Chưa có mô tả món'}</p>
+                  </td>
                   <td>{Number(item.price).toLocaleString('vi-VN')}đ</td>
                   <td>{item.category || '-'}</td>
                   <td>{item.optionGroups?.length || 0}</td>
                   <td title={recipeSummary(item)}>
                     <div className="max-w-xs">
-                      <p>{item.recipe?.length || 0} nguyên liệu</p>
+                      <p className={item.recipe?.length ? 'text-emerald-700' : 'text-red-600'}>
+                        {item.recipe?.length ? `${item.recipe.length} nguyên liệu` : 'Thiếu công thức'}
+                      </p>
                       <p className="truncate text-xs text-gray-500">{recipeSummary(item)}</p>
                     </div>
                   </td>
@@ -747,6 +896,7 @@ export default function Menu() {
                       variant="secondary"
                       onClick={() => {
                         setEditingItemId(item.id)
+                        setEditingItemBranchId(item.branchId || null)
                         setItemForm({
                           name: item.name,
                           price: String(item.price),

@@ -132,6 +132,7 @@ export class OrderService {
     const items = await this.prisma.menuItem.findMany({
       where: {
         available: true,
+        ingredients: { some: {} },
         ...(resolvedBranchId
           ? {
               OR: [{ branchId: resolvedBranchId }, { branchId: null }],
@@ -482,6 +483,10 @@ export class OrderService {
     const category = await this.resolveCategory(dto.categoryId, branchId);
     const optionBindings = this.normalizeOptionBindings(dto.optionGroups);
     const recipe = await this.hydrateRecipeWithInventory(this.normalizeRecipe(dto.recipe), branchId);
+    const nextAvailable = dto.available ?? true;
+    if (nextAvailable && !recipe.length) {
+      throw new BadRequestException('Mon dang ban phai co cong thuc nguyen lieu de tru kho tu dong');
+    }
     const optionGroups = await this.loadOptionGroupsForBinding(optionBindings, branchId);
     const customizations = this.buildCustomizations(optionGroups, optionBindings);
 
@@ -532,7 +537,17 @@ export class OrderService {
   async updateMenuItemForAdmin(id: string, dto: UpdateMenuItemManagementDto) {
     const existing = await this.prisma.menuItem.findUnique({
       where: { id },
-      select: { id: true, branchId: true, categoryId: true },
+      select: {
+        id: true,
+        branchId: true,
+        categoryId: true,
+        available: true,
+        _count: {
+          select: {
+            ingredients: true,
+          },
+        },
+      },
     });
     if (!existing) {
       throw new NotFoundException(`Khong tim thay mon ${id}`);
@@ -553,6 +568,12 @@ export class OrderService {
     const optionGroups = shouldUpdateOptionBindings
       ? await this.loadOptionGroupsForBinding(optionBindings, nextBranchId)
       : [];
+
+    const nextAvailable = dto.available !== undefined ? dto.available : existing.available;
+    const nextRecipeCount = shouldUpdateRecipe ? recipe.length : Number(existing._count?.ingredients || 0);
+    if (nextAvailable && nextRecipeCount <= 0) {
+      throw new BadRequestException('Mon dang ban phai co cong thuc nguyen lieu de tru kho tu dong');
+    }
 
     const hasCategoryField = dto.categoryId !== undefined;
     const category = hasCategoryField ? await this.resolveCategory(dto.categoryId, nextBranchId) : undefined;
@@ -1484,6 +1505,16 @@ export class OrderService {
 
     const menuItemIds = dto.items.map((i) => i.menuItemId);
     const menuItems = await this.prisma.menuItem.findMany({
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        _count: {
+          select: {
+            ingredients: true,
+          },
+        },
+      },
       where: {
         id: { in: menuItemIds },
         available: true,
@@ -1498,6 +1529,7 @@ export class OrderService {
     if (menuItems.length !== menuItemIds.length) {
       throw new BadRequestException('Một hoặc nhiều món không hợp lệ hoặc đã hết');
     }
+    this.ensureSellableMenuItemsHaveRecipe(menuItems);
 
     const priceMap = new Map(menuItems.map((m) => [m.id, m.price]));
     const normalizedItems = dto.items.map((item) => {
@@ -1855,12 +1887,31 @@ export class OrderService {
 
     const uniqueMenuIds = [...new Set(items.map((item) => item.menuItemId))];
     const menuItems = await this.prisma.menuItem.findMany({
-      where: { id: { in: uniqueMenuIds } },
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        _count: {
+          select: {
+            ingredients: true,
+          },
+        },
+      },
+      where: {
+        id: { in: uniqueMenuIds },
+        available: true,
+        ...(order.branchId
+          ? {
+              OR: [{ branchId: order.branchId }, { branchId: null }],
+            }
+          : {}),
+      },
     });
 
     if (menuItems.length !== uniqueMenuIds.length) {
       throw new BadRequestException('Mot hoac nhieu mon khong hop le');
     }
+    this.ensureSellableMenuItemsHaveRecipe(menuItems);
 
     const priceMap = new Map(menuItems.map((item) => [item.id, item.price]));
     const normalizedItems = items.map((item) => {
@@ -2178,6 +2229,21 @@ export class OrderService {
     } catch {
       return [] as string[];
     }
+  }
+
+  private ensureSellableMenuItemsHaveRecipe(
+    menuItems: Array<{ id: string; name: string; _count?: { ingredients?: number } }>,
+  ) {
+    const invalid = menuItems.filter((item) => Number(item._count?.ingredients || 0) <= 0);
+    if (!invalid.length) {
+      return;
+    }
+
+    const names = invalid.map((item) => String(item.name || item.id)).slice(0, 5);
+    const suffix = invalid.length > 5 ? '...' : '';
+    throw new BadRequestException(
+      `Mon chua khai bao cong thuc kho, khong the ban: ${names.join(', ')}${suffix}`,
+    );
   }
 
   private toToppingIngredientId(optionValue: string) {

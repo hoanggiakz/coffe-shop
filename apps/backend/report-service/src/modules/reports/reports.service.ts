@@ -605,9 +605,6 @@ export class ReportsService implements OnModuleDestroy {
   private async getRevenueSeries(range: DateRange, groupBy: TimeGroup) {
     const branchId = this.normalizeBranchId(range.branchId);
     const scopedOrderIds = await this.getScopedOrderIdsForBranch(branchId);
-    if (branchId && scopedOrderIds && !scopedOrderIds.length) {
-      return [];
-    }
 
     const dateWhere = this.buildDateWhere(
       'COALESCE(p."paidAt", p."createdAt")',
@@ -622,10 +619,7 @@ export class ReportsService implements OnModuleDestroy {
     }
 
     const params: any[] = [groupBy, ...dateWhere.params];
-    if (scopedOrderIds) {
-      params.push(scopedOrderIds);
-      whereParts.push(`p."orderId" = ANY($${params.length}::text[])`);
-    }
+    this.appendPaymentBranchScope(whereParts, params, branchId, scopedOrderIds);
 
     const sql = `
       SELECT
@@ -649,20 +643,6 @@ export class ReportsService implements OnModuleDestroy {
   private async getPaymentOverview(range: DateRange) {
     const branchId = this.normalizeBranchId(range.branchId);
     const scopedOrderIds = await this.getScopedOrderIdsForBranch(branchId);
-    if (branchId && scopedOrderIds && !scopedOrderIds.length) {
-      return {
-        summary: {
-          totalTransactions: 0,
-          paidTransactions: 0,
-          pendingTransactions: 0,
-          failedTransactions: 0,
-          totalRevenue: 0,
-          averagePaidValue: 0,
-        },
-        byProvider: [],
-        byStatus: [],
-      };
-    }
 
     const dateWhere = this.buildDateWhere(
       'COALESCE(p."paidAt", p."createdAt")',
@@ -676,10 +656,7 @@ export class ReportsService implements OnModuleDestroy {
     if (dateWhere.clause) {
       whereParts.push(dateWhere.clause);
     }
-    if (scopedOrderIds) {
-      whereParams.push(scopedOrderIds);
-      whereParts.push(`p."orderId" = ANY($${whereParams.length}::text[])`);
-    }
+    this.appendPaymentBranchScope(whereParts, whereParams, branchId, scopedOrderIds);
 
     const whereClause = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
 
@@ -769,6 +746,31 @@ export class ReportsService implements OnModuleDestroy {
     );
 
     return rows.rows.map((row) => String(row.id));
+  }
+
+  private appendPaymentBranchScope(
+    whereParts: string[],
+    params: any[],
+    branchId?: string | null,
+    scopedOrderIds?: string[] | null,
+  ) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) {
+      return;
+    }
+
+    const orderFilter = Array.isArray(scopedOrderIds) && scopedOrderIds.length > 0;
+    if (orderFilter) {
+      params.push(scopedOrderIds);
+      const orderExpr = `p."orderId" = ANY($${params.length}::text[])`;
+      params.push(normalizedBranchId);
+      const metadataExpr = `p."metadata"->>'branchId' = $${params.length}`;
+      whereParts.push(`(${orderExpr} OR ${metadataExpr})`);
+      return;
+    }
+
+    params.push(normalizedBranchId);
+    whereParts.push(`p."metadata"->>'branchId' = $${params.length}`);
   }
 
   private async getTodayOrderStatus(branchId?: string) {

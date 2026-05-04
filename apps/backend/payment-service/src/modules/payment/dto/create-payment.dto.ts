@@ -28,4 +28,9 @@ export class CreatePaymentDto {
   @IsOptional()
   @IsString()
   customerName?: string;
+
+  @ApiProperty({ example: '2fec0fbf-7e8b-4790-9189-de7cb5748ff8', required: false })
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }
