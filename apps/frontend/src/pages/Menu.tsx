@@ -90,6 +90,13 @@ const resolveMenuImage = (image?: string | null, name?: string | null, size = '1
   return raw
 }
 
+const normalizeBranchIdForApi = (value?: string | null) => {
+  const raw = String(value || '').trim()
+  if (!raw) return undefined
+  const uuidV4Like = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  return uuidV4Like.test(raw) ? raw : undefined
+}
+
 export default function Menu() {
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const [includeInactive, setIncludeInactive] = useState(false)
@@ -122,27 +129,32 @@ export default function Menu() {
   })
 
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
+  const [editingItemBranchId, setEditingItemBranchId] = useState<string | null>(null)
   const [itemForm, setItemForm] = useState(defaultItemForm)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [recipeRows, setRecipeRows] = useState<RecipeRow[]>([emptyRecipeRow()])
 
   const loadCategories = async () => {
+    const normalizedBranchId = normalizeBranchIdForApi(branchId)
     const { data } = await api.get('/orders/admin/menu/categories', {
-      params: { includeInactive, branchId: branchId.trim() || undefined },
+      params: { includeInactive, branchId: normalizedBranchId },
     })
     setCategories(data || [])
   }
 
   const loadGroups = async () => {
+    const normalizedBranchId = normalizeBranchIdForApi(branchId)
     const { data } = await api.get('/orders/admin/menu/options/groups', {
-      params: { includeInactive, branchId: branchId.trim() || undefined },
+      params: { includeInactive, branchId: normalizedBranchId },
     })
     setGroups(data || [])
   }
 
   const loadItems = async () => {
     const params: Record<string, string | boolean> = { includeInactive }
-    if (branchId.trim()) params.branchId = branchId.trim()
+    const normalizedBranchId = normalizeBranchIdForApi(branchId)
+    if (normalizedBranchId) params.branchId = normalizedBranchId
     if (keyword.trim()) params.keyword = keyword.trim()
     if (categoryFilter !== 'ALL') params.categoryId = categoryFilter
     const { data } = await api.get('/orders/admin/menu/items', { params })
@@ -150,9 +162,10 @@ export default function Menu() {
   }
 
   const loadIngredients = async () => {
+    const normalizedBranchId = normalizeBranchIdForApi(branchId)
     const { data } = await api.get('/v1/ingredients', {
       params: {
-        branchId: branchId.trim() || undefined,
+        branchId: normalizedBranchId,
       },
     })
 
@@ -191,6 +204,7 @@ export default function Menu() {
 
   const resetItemForm = () => {
     setEditingItemId(null)
+    setEditingItemBranchId(null)
     setItemForm(defaultItemForm)
     setSelectedGroupIds([])
     setRecipeRows([emptyRecipeRow()])
@@ -291,6 +305,37 @@ export default function Menu() {
     setRecipeRows((prev) => (prev.length > 1 ? prev.filter((_, rowIndex) => rowIndex !== index) : [emptyRecipeRow()]))
   }
 
+  const onItemImageFileChange = (file?: File | null) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Chỉ chấp nhận file ảnh')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Ảnh tối đa 5MB')
+      return
+    }
+
+    setIsUploadingImage(true)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '')
+      if (!dataUrl.startsWith('data:image/')) {
+        toast.error('Không đọc được file ảnh')
+        setIsUploadingImage(false)
+        return
+      }
+      setItemForm((prev) => ({ ...prev, image: dataUrl }))
+      setIsUploadingImage(false)
+      toast.success('Đã tải ảnh lên form')
+    }
+    reader.onerror = () => {
+      setIsUploadingImage(false)
+      toast.error('Không thể đọc file ảnh')
+    }
+    reader.readAsDataURL(file)
+  }
+
   const submitItem = async () => {
     const normalizedName = String(itemForm.name || '').trim()
     if (!normalizedName) {
@@ -305,8 +350,8 @@ export default function Menu() {
     }
 
     const imageUrl = String(itemForm.image || '').trim()
-    if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
-      toast.error('URL ảnh phải bắt đầu bằng http:// hoặc https://')
+    if (imageUrl && !/^(https?:\/\/|data:image\/)/i.test(imageUrl)) {
+      toast.error('Ảnh phải là URL http(s) hoặc ảnh upload hợp lệ')
       return
     }
 
@@ -336,7 +381,9 @@ export default function Menu() {
     const payload = {
       ...itemForm,
       name: normalizedName,
-      branchId: branchId.trim() || undefined,
+      branchId: editingItemId
+        ? normalizeBranchIdForApi(editingItemBranchId)
+        : normalizeBranchIdForApi(branchId),
       price: normalizedPrice,
       categoryId: itemForm.categoryId || null,
       description: String(itemForm.description || '').trim() || null,
@@ -647,6 +694,27 @@ export default function Menu() {
               value={itemForm.image}
               onChange={(e) => setItemForm((p) => ({ ...p, image: e.target.value }))}
             />
+            <label className="mt-2 block text-sm">
+              Upload ảnh từ máy
+              <input
+                type="file"
+                accept="image/*"
+                className="mt-1 block w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm"
+                onChange={(e) => onItemImageFileChange(e.target.files?.[0] || null)}
+                disabled={isUploadingImage}
+              />
+            </label>
+            <div className="mt-2 flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => setItemForm((prev) => ({ ...prev, image: '' }))}
+              >
+                Xóa ảnh
+              </Button>
+              {isUploadingImage && <span className="text-xs text-gray-500">Đang xử lý ảnh...</span>}
+            </div>
             <div className="mt-3 overflow-hidden rounded-lg border bg-gray-50">
               <img
                 src={resolveMenuImage(itemForm.image, itemForm.name, '360x220')}
@@ -731,7 +799,11 @@ export default function Menu() {
                   onChange={(e) => updateRecipeRow(index, { unit: e.target.value })}
                 />
 
-                <Input value={row.ingredientName} disabled placeholder="Tên nguyên liệu" />
+                <Input
+                  placeholder="Tên nguyên liệu"
+                  value={row.ingredientName}
+                  onChange={(e) => updateRecipeRow(index, { ingredientName: e.target.value })}
+                />
 
                 <div className="flex gap-2">
                   <Button type="button" variant="secondary" onClick={addRecipeRow}>
@@ -824,6 +896,7 @@ export default function Menu() {
                       variant="secondary"
                       onClick={() => {
                         setEditingItemId(item.id)
+                        setEditingItemBranchId(item.branchId || null)
                         setItemForm({
                           name: item.name,
                           price: String(item.price),
