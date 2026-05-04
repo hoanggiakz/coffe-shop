@@ -8,6 +8,8 @@ import { CustomLogger } from './common/logger.service';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import compression from 'compression';
+import { existsSync, mkdirSync } from 'fs';
+import { isAbsolute, join } from 'path';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -28,6 +30,14 @@ async function bootstrap() {
       max: 1000, // relaxed limit to avoid hitting during local SPA bursts
     }),
   );
+
+  // Static uploads (menu images, etc.)
+  const uploadDirSetting = String(process.env.UPLOAD_DIR || 'uploads').trim() || 'uploads';
+  const uploadDir = isAbsolute(uploadDirSetting) ? uploadDirSetting : join(process.cwd(), uploadDirSetting);
+  if (!existsSync(uploadDir)) {
+    mkdirSync(uploadDir, { recursive: true });
+  }
+  app.useStaticAssets(uploadDir, { prefix: '/api/orders/uploads' });
 
   // Global validation pipe
   app.useGlobalPipes(new ValidationPipe({

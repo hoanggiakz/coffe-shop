@@ -180,6 +180,7 @@ Base URL khi qua Nginx: `https://localhost/api`
 - `POST /orders/admin/menu/options/groups/{groupId}/values`
 - `PATCH|DELETE /orders/admin/menu/options/values/{id}`
 - `GET|POST|PATCH|DELETE /orders/admin/menu/items*`
+- `POST /orders/admin/menu/items/{id}/image` (multipart/form-data, field `file`) -> upload ảnh món (cập nhật `MenuItem.image` thành `/api/orders/uploads/...`)
 - `GET|POST|PATCH /orders/admin/promotions*`
 - `POST /orders/admin/promotions/{id}/disable`
 

@@ -116,6 +116,7 @@ export default function Menu() {
   const [itemForm, setItemForm] = useState(defaultItemForm)
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [recipeRows, setRecipeRows] = useState<RecipeRow[]>([emptyRecipeRow()])
+  const [uploadingImage, setUploadingImage] = useState(false)
 
   const loadCategories = async () => {
     const { data } = await api.get('/orders/admin/menu/categories', {
@@ -325,6 +326,33 @@ export default function Menu() {
       await loadItems()
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Không lưu được món')
+    }
+  }
+
+  const uploadItemImage = async (file: File) => {
+    if (!editingItemId) {
+      toast.error('Hãy lưu món trước rồi mới upload ảnh')
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      setUploadingImage(true)
+      const { data } = await api.post(`/orders/admin/menu/items/${editingItemId}/image`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      const nextImage = String(data?.image || '').trim()
+      if (nextImage) {
+        setItemForm((prev) => ({ ...prev, image: nextImage }))
+      }
+      toast.success('Đã upload ảnh món')
+      await loadItems()
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Không upload được ảnh')
+    } finally {
+      setUploadingImage(false)
     }
   }
 
@@ -572,6 +600,21 @@ export default function Menu() {
           </label>
           <Input placeholder="Mô tả" value={itemForm.description} onChange={(e) => setItemForm((p) => ({ ...p, description: e.target.value }))} />
           <Input placeholder="Đường dẫn ảnh" value={itemForm.image} onChange={(e) => setItemForm((p) => ({ ...p, image: e.target.value }))} />
+          <label className="text-sm">
+            Upload ảnh (png/jpg/webp/gif, ≤ 5MB)
+            <input
+              type="file"
+              accept="image/*"
+              className="mt-1 block w-full rounded-lg border px-3 py-2"
+              disabled={!editingItemId || uploadingImage}
+              onChange={(e) => {
+                const file = e.currentTarget.files?.[0]
+                if (file) void uploadItemImage(file)
+                e.currentTarget.value = ''
+              }}
+            />
+            {!editingItemId && <p className="mt-1 text-xs text-gray-500">Lưu món trước rồi mới upload ảnh.</p>}
+          </label>
           <label className="inline-flex items-center gap-2 text-sm">
             <input type="checkbox" checked={itemForm.available} onChange={(e) => setItemForm((p) => ({ ...p, available: e.target.checked }))} />
             Đang bán

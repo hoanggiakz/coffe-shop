@@ -144,6 +144,8 @@ services:
     command: sh -c "npx prisma db push --accept-data-loss && npx prisma db seed && node dist/src/main.js"
     expose:
       - "3001"
+    volumes:
+      - order_uploads:/app/uploads
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3001
@@ -433,6 +435,7 @@ volumes:
   redis_data:
   grafana_data:
   elastic_data:
+  order_uploads:
 
 networks:
   backend:
