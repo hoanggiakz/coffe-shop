@@ -629,6 +629,28 @@ export class OrderService {
     return { id, deleted: true };
   }
 
+  async setMenuItemImageForAdmin(id: string, imageUrl: string) {
+    const normalizedUrl = String(imageUrl || '').trim();
+    if (!normalizedUrl) {
+      throw new BadRequestException('imageUrl khong hop le');
+    }
+
+    const existing = await this.prisma.menuItem.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Khong tim thay mon ${id}`);
+    }
+
+    await this.prisma.menuItem.update({
+      where: { id },
+      data: { image: normalizedUrl },
+    });
+
+    return this.getMenuItemForAdmin(id);
+  }
+
   private async getMenuItemForAdmin(id: string) {
     const item = await this.prisma.menuItem.findUnique({
       where: { id },

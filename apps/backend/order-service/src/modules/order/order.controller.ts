@@ -1,4 +1,7 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UsePipes, ValidationPipe, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UsePipes, ValidationPipe, HttpCode, HttpStatus, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname, isAbsolute, join } from 'path';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -14,6 +17,9 @@ import {
 } from './dto/menu-option.dto';
 import { CreateMenuItemManagementDto, UpdateMenuItemManagementDto } from './dto/menu-item-management.dto';
 import { CreatePromotionDto, QueryPromotionDto, UpdatePromotionDto } from './dto/promotion.dto';
+
+const MAX_MENU_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_MENU_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 
 @Controller('api/orders')
 @UsePipes(new ValidationPipe({ transform: true }))
@@ -136,6 +142,45 @@ export class OrderController {
   @Patch('admin/menu/items/:id')
   updateMenuItem(@Param('id') id: string, @Body() dto: UpdateMenuItemManagementDto) {
     return this.orderService.updateMenuItemForAdmin(id, dto);
+  }
+
+  @Post('admin/menu/items/:id/image')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: MAX_MENU_IMAGE_SIZE_BYTES },
+    fileFilter: (_req, file, cb) => {
+      const mime = String(file?.mimetype || '');
+      const extension = extname(String(file?.originalname || '')).toLowerCase();
+      const looksLikeImage = mime.startsWith('image/');
+      const allowedExt = ALLOWED_MENU_IMAGE_EXTENSIONS.has(extension);
+      if (!looksLikeImage || !allowedExt) {
+        return cb(new BadRequestException('Chi ho tro file anh (png/jpg/jpeg/webp/gif), toi da 5MB') as any, false);
+      }
+      return cb(null, true);
+    },
+    storage: diskStorage({
+      destination: (_req, _file, cb) => {
+        const uploadDirSetting = String(process.env.UPLOAD_DIR || 'uploads').trim() || 'uploads';
+        const uploadDir = isAbsolute(uploadDirSetting) ? uploadDirSetting : join(process.cwd(), uploadDirSetting);
+        cb(null, uploadDir);
+      },
+      filename: (req, file, cb) => {
+        const id = String((req as any)?.params?.id || '').trim();
+        const extension = extname(String(file?.originalname || '')).toLowerCase();
+        const safeExt = ALLOWED_MENU_IMAGE_EXTENSIONS.has(extension) ? extension : '.png';
+        const filename = `menu-${id}-${Date.now()}${safeExt}`;
+        cb(null, filename);
+      },
+    }),
+  }))
+  async uploadMenuItemImage(
+    @Param('id') id: string,
+    @UploadedFile() file?: any,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Thieu file upload (field: file)');
+    }
+    return this.orderService.setMenuItemImageForAdmin(id, `/api/orders/uploads/${file.filename}`);
   }
 
   @Delete('admin/menu/items/:id')
