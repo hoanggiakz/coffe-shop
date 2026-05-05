@@ -1,12 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString } from 'class-validator';
 
-const RETURN_PROVIDERS = ['VIETQR', 'VNPAY'] as const;
+const RETURN_PROVIDERS = ['SEPAY'] as const;
 
 export class PaymentReturnDto {
-  @ApiProperty({ enum: RETURN_PROVIDERS, example: 'VIETQR' })
+  @ApiProperty({ enum: RETURN_PROVIDERS, example: 'SEPAY' })
   @IsString()
-  @IsIn(RETURN_PROVIDERS, { message: 'Provider must be VIETQR or VNPAY' })
+  @IsIn(RETURN_PROVIDERS, { message: 'Provider must be SEPAY' })
   provider: string;
 
   @ApiProperty({ example: 'order_123' })

@@ -68,7 +68,7 @@ export interface Order {
 }
 
 // Payment
-export type PaymentMethod = 'CASH' | 'VIETQR' | 'VNPAY'
+export type PaymentMethod = 'CASH' | 'SEPAY'
 export type PaymentStatus =
   | 'PENDING'
   | 'WAITING_TRANSFER'

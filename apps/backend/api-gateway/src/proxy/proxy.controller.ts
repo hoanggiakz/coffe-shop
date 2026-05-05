@@ -294,7 +294,13 @@ export class ProxyController {
     }
 
     const tableId = String(req.query.tableId || '').trim();
+    const branchId = String(req.query.branchId || '').trim();
+    const allowBranchOnlyForTest = this.configService.get<boolean>('MENU_QR_ALLOW_BRANCH_ONLY_TEST') === true;
     if (!tableId) {
+      // Test-only shortcut: allow customer menu loading by branchId without tableId.
+      if (allowBranchOnlyForTest && branchId) {
+        return;
+      }
       throw new BadRequestException('tableId la bat buoc cho luong quet QR');
     }
 

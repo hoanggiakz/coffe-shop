@@ -1,0 +1,67 @@
+{
+  "generatedAt": "2026-04-21T04:00:05.743Z",
+  "baseUrl": "https://localhost",
+  "runId": "1776743984188-6907",
+  "summary": {
+    "total": 3,
+    "pass": 0,
+    "fail": 2,
+    "skip": 1
+  },
+  "state": {
+    "token": "",
+    "branchId": "",
+    "staffId": "",
+    "employeeCode": "",
+    "shiftId": "",
+    "tableA": "",
+    "tableB": "",
+    "chatId": "",
+    "categoryId": "",
+    "optionGroupId": "",
+    "optionValueId": "",
+    "menuItemId": "",
+    "promoId": "",
+    "promoCode": "",
+    "orderId": "",
+    "orderItemId": "",
+    "ingredientId": "",
+    "syncIngredientId": "sync-1776743984188-6907",
+    "cashOrderId": "ORD-CASH-1776743984188-6907",
+    "cashPaymentId": "",
+    "vnpOrderId": "ORD-VNP-1776743984188-6907",
+    "orderCustomerEmail": "order.1776743984188-6907@mail.local"
+  },
+  "results": [
+    {
+      "index": 1,
+      "name": "Gateway health",
+      "method": "GET",
+      "path": "/",
+      "expected": [
+        200
+      ],
+      "actual": "NETWORK_ERROR",
+      "status": "FAIL",
+      "detail": "fetch failed"
+    },
+    {
+      "index": 2,
+      "name": "Admin login",
+      "method": "POST",
+      "path": "/api/users/login",
+      "expected": [
+        200
+      ],
+      "actual": "NETWORK_ERROR",
+      "status": "FAIL",
+      "detail": "fetch failed"
+    },
+    {
+      "index": 3,
+      "name": "Stop",
+      "status": "SKIP",
+      "detail": "Missing admin token"
+    }
+  ]
+}

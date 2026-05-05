@@ -48,7 +48,7 @@ interface PaymentApi {
   paymentId: string
   orderId: string
   status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED' | 'EXPIRED' | 'CANCELLED'
-  provider: 'CASH' | 'VIETQR' | 'VNPAY'
+  provider: 'CASH' | 'SEPAY'
   paymentUrl?: string | null
   vietQr?: {
     qrImageUrl: string
@@ -57,7 +57,7 @@ interface PaymentApi {
   changeDue?: number | null
 }
 
-const paymentMethods: PaymentMethod[] = ['CASH', 'VIETQR', 'VNPAY']
+const paymentMethods: PaymentMethod[] = ['CASH', 'SEPAY']
 const orderStatuses: Array<OrderApi['status']> = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
 const selectClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
@@ -372,7 +372,7 @@ export default function Orders() {
         if (!existingPayment) {
           if (payment.paymentUrl) {
             window.open(payment.paymentUrl, '_blank')
-          } else if (payment.provider === 'VIETQR' && payment.vietQr?.qrImageUrl) {
+          } else if (payment.provider === 'SEPAY' && payment.vietQr?.qrImageUrl) {
             window.open(payment.vietQr.qrImageUrl, '_blank')
           }
           toast.success(tv('Đã tạo giao dịch online. Chờ webhook hoặc đối soát thanh toán', 'Online payment created. Waiting for webhook or reconciliation'))

@@ -1,0 +1,1404 @@
+{
+  "generatedAt": "2026-04-21T03:39:41.055Z",
+  "baseUrl": "https://localhost",
+  "runId": "1776742776051-5455",
+  "summary": {
+    "total": 105,
+    "pass": 105,
+    "fail": 0,
+    "skip": 0
+  },
+  "state": {
+    "token": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI2NzBmZGRjZS0wNDJmLTQyZWQtOWE5MS01MTUzYzM0ZDUxMzIiLCJlbWFpbCI6ImFkbWluLnRlc3RAY29mZmVlc2hvcC5sb2NhbCIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3Njc0Mjc3NiwiZXhwIjoxNzc2ODI5MTc2fQ.XUHUsC2FMUnfD7jgrgtn5e4BOI0WY4Kfl4K1AiB4Lno",
+    "branchId": "3e30648c-314f-4c1e-b452-1c7f7e0324e9",
+    "staffId": "bb425d9a-b903-40db-9dfc-caddb9674ba5",
+    "employeeCode": "EMP970959",
+    "shiftId": "e2ce28b7-e1e4-4c0e-ac2f-14c17aa1a9d8",
+    "tableA": "6829ffc1-ccc5-446f-b778-f1102760478b",
+    "tableB": "66623898-84ae-401d-83ff-d85ee863dd3f",
+    "chatId": "cmo82rydw0003ijohydqz48dc",
+    "categoryId": "cmo82ryjl0000xhyioshk5zd7",
+    "optionGroupId": "cmo82rykl0001xhyiv5psyv61",
+    "optionValueId": "cmo82rylh0003xhyikd5vlufc",
+    "menuItemId": "cmo82rymt0007xhyi5kkoo1ou",
+    "promoId": "cmo82ryo8000axhyinm1xrohx",
+    "promoCode": "PROMO6563",
+    "orderId": "cmo82rypa000cxhyinhf21abm",
+    "orderItemId": "cmo82ryvd000hxhyisnre23l7",
+    "ingredientId": "cmo82rz83000013c9w5y4gns5",
+    "syncIngredientId": "sync-1776742776051-5455",
+    "cashOrderId": "ORD-CASH-1776742776051-5455",
+    "cashPaymentId": "cmo82rz160000y883b9snjoc4",
+    "vnpOrderId": "ORD-VNP-1776742776051-5455",
+    "orderCustomerEmail": "order.1776742776051-5455@mail.local"
+  },
+  "results": [
+    {
+      "index": 1,
+      "name": "Gateway health",
+      "method": "GET",
+      "path": "/",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "<!doctype html>\r\n<html lang=\"vi\" class=\"dark\">\r\n  <head>\r\n    <meta charset=\"UTF-8\" />\r\n    <link rel=\"icon\" type=\"image/svg+xml\" href=\"/favicon.svg\" />\r\n    <link rel=\"apple-touch-icon\" href=\"/favicon.svg\" />\r\n    <link..."
+    },
+    {
+      "index": 2,
+      "name": "Admin login",
+      "method": "POST",
+      "path": "/api/users/login",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"accessToken\":\"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI2NzBmZGRjZS0wNDJmLTQyZWQtOWE5MS01MTUzYzM0ZDUxMzIiLCJlbWFpbCI6ImFkbWluLnRlc3RAY29mZmVlc2hvcC5sb2NhbCIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3Njc0Mjc3NiwiZXhwIjoxNzc2ODI5MTc2fQ.XUHU..."
+    },
+    {
+      "index": 3,
+      "name": "User health",
+      "method": "GET",
+      "path": "/api/users/health",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"timestamp\":\"2026-04-21T03:39:36.672282761Z\",\"service\":\"user-service\",\"status\":\"ok\"}"
+    },
+    {
+      "index": 4,
+      "name": "Table health",
+      "method": "GET",
+      "path": "/api/tables/health",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"status\":\"ok\",\"timestamp\":\"2026-04-21T03:39:36.680400582Z\",\"service\":\"table-service\"}"
+    },
+    {
+      "index": 5,
+      "name": "Order health",
+      "method": "GET",
+      "path": "/api/orders/health",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"service\":\"order-service\",\"status\":\"ok\",\"timestamp\":\"2026-04-21T03:39:36.688Z\"}"
+    },
+    {
+      "index": 6,
+      "name": "Chat health",
+      "method": "GET",
+      "path": "/api/chats/health",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"service\":\"chat-service\",\"status\":\"ok\",\"timestamp\":\"2026-04-21T03:39:36.697Z\"}"
+    },
+    {
+      "index": 7,
+      "name": "Inventory health",
+      "method": "GET",
+      "path": "/api/v1/ingredients/health",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"service\":\"inventory-service\",\"status\":\"ok\",\"timestamp\":\"2026-04-21T03:39:36.704Z\"}"
+    },
+    {
+      "index": 8,
+      "name": "Payment health",
+      "method": "GET",
+      "path": "/api/v1/payments/health",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"service\":\"payment-service\",\"status\":\"ok\",\"timestamp\":\"2026-04-21T03:39:36.711Z\"}"
+    },
+    {
+      "index": 9,
+      "name": "Report health",
+      "method": "GET",
+      "path": "/api/reports/health",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"service\":\"report-service\",\"status\":\"ok\",\"timestamp\":\"2026-04-21T03:39:36.717Z\"}"
+    },
+    {
+      "index": 10,
+      "name": "User profile",
+      "method": "GET",
+      "path": "/api/users/profile",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"670fddce-042f-42ed-9a91-5153c34d5132\",\"email\":\"admin.test@coffeeshop.local\",\"name\":\"Admin Test\",\"role\":\"ADMIN\",\"phone\":\"0900000001\",\"branchId\":\"2fec0fbf-7e8b-4790-9189-de7cb5748ff8\",\"loyaltyPoints\":0,\"memberTier\":..."
+    },
+    {
+      "index": 11,
+      "name": "Create branch",
+      "method": "POST",
+      "path": "/api/users/admin/branches",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"name\":\"Branch 1776742776051-5455\",\"address\":\"Test\",\"phone\":\"0901234567\",\"managerId\":null,\"managerName\":null,\"isActive\":true,\"staffCount\":0,\"createdAt\":\"2026-04-21T03:39:36.77..."
+    },
+    {
+      "index": 12,
+      "name": "List branches",
+      "method": "GET",
+      "path": "/api/users/admin/branches?includeInactive=true",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"name\":\"Branch 1776742776051-5455\",\"address\":\"Test\",\"phone\":\"0901234567\",\"managerId\":null,\"managerName\":null,\"isActive\":true,\"staffCount\":0,\"createdAt\":\"2026-04-21T03:39:36.7..."
+    },
+    {
+      "index": 13,
+      "name": "Create staff",
+      "method": "POST",
+      "path": "/api/users/staff",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"name\":\"Staff 1776742776051-5455\",\"email\":\"staff.1776742776051-5455@coffeeshop.local\",\"phone\":\"0925237366\",\"role\":\"BARISTA\",\"employeeCode\":\"EMP970959\",\"personalQrCode\":\"QR-EMP..."
+    },
+    {
+      "index": 14,
+      "name": "List staff",
+      "method": "GET",
+      "path": "/api/users/staff?includeInactive=true",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"name\":\"Staff 1776742776051-5455\",\"email\":\"staff.1776742776051-5455@coffeeshop.local\",\"phone\":\"0925237366\",\"role\":\"BARISTA\",\"employeeCode\":\"EMP970959\",\"personalQrCode\":\"QR-EM..."
+    },
+    {
+      "index": 15,
+      "name": "Update staff",
+      "method": "PATCH",
+      "path": "/api/users/staff/bb425d9a-b903-40db-9dfc-caddb9674ba5",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"name\":\"Staff 1776742776051-5455\",\"email\":\"staff.1776742776051-5455@coffeeshop.local\",\"phone\":\"0925237366\",\"role\":\"BARISTA\",\"employeeCode\":\"EMP970959\",\"personalQrCode\":\"QR-EMP..."
+    },
+    {
+      "index": 16,
+      "name": "Upsert schedule",
+      "method": "POST",
+      "path": "/api/users/staff/schedules",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"e2ce28b7-e1e4-4c0e-ac2f-14c17aa1a9d8\",\"staffId\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"staffName\":\"Staff 1776742776051-5455\",\"shiftDate\":\"2026-04-21\",\"shiftType\":\"MORNING\",\"note\":\"smoke\",\"createdAt\":\"2026-04-21T0..."
+    },
+    {
+      "index": 17,
+      "name": "Get schedules",
+      "method": "GET",
+      "path": "/api/users/staff/schedules?staffId=bb425d9a-b903-40db-9dfc-caddb9674ba5&weekStart=2026-04-21",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"weekStart\":\"2026-04-20\",\"weekEnd\":\"2026-04-26\",\"shifts\":[{\"id\":\"e2ce28b7-e1e4-4c0e-ac2f-14c17aa1a9d8\",\"staffId\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"staffName\":\"Staff 1776742776051-5455\",\"shiftDate\":\"2026-04-21\",\"sh..."
+    },
+    {
+      "index": 18,
+      "name": "Check-in",
+      "method": "POST",
+      "path": "/api/users/staff/attendance/check-in",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"8d538c64-fcde-4713-a3e3-064f25623bb0\",\"staffId\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"staffName\":\"Staff 1776742776051-5455\",\"workDate\":\"2026-04-21\",\"scheduledShift\":\"MORNING\",\"checkInAt\":\"2026-04-21T03:39:37.238..."
+    },
+    {
+      "index": 19,
+      "name": "Attendance list",
+      "method": "GET",
+      "path": "/api/users/staff/attendance?staffId=bb425d9a-b903-40db-9dfc-caddb9674ba5&dateFrom=2026-04-21&dateTo=2026-04-21",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"8d538c64-fcde-4713-a3e3-064f25623bb0\",\"staffId\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"staffName\":\"Staff 1776742776051-5455\",\"workDate\":\"2026-04-21\",\"scheduledShift\":\"MORNING\",\"checkInAt\":\"2026-04-21T03:39:37.23..."
+    },
+    {
+      "index": 20,
+      "name": "Shift overview",
+      "method": "GET",
+      "path": "/api/users/staff/shift-overview?staffId=bb425d9a-b903-40db-9dfc-caddb9674ba5&date=2026-04-21",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"date\":\"2026-04-21\",\"staffId\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"staffName\":\"Staff 1776742776051-5455\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"branchName\":\"Branch 1776742776051-5455\",\"selectedShiftType\":..."
+    },
+    {
+      "index": 21,
+      "name": "Check-out",
+      "method": "POST",
+      "path": "/api/users/staff/attendance/check-out",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"8d538c64-fcde-4713-a3e3-064f25623bb0\",\"staffId\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"staffName\":\"Staff 1776742776051-5455\",\"workDate\":\"2026-04-21\",\"scheduledShift\":\"MORNING\",\"checkInAt\":\"2026-04-21T03:39:37.238..."
+    },
+    {
+      "index": 22,
+      "name": "Payroll",
+      "method": "GET",
+      "path": "/api/users/staff/payroll?staffId=bb425d9a-b903-40db-9dfc-caddb9674ba5&dateFrom=2026-04-21&dateTo=2026-04-21",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"dateFrom\":\"2026-04-21\",\"dateTo\":\"2026-04-21\",\"totalWorkingMinutes\":0,\"totalWorkingHours\":0,\"completedShifts\":1,\"totalEstimatedPay\":0,\"items\":[{\"staffId\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"staffName\":\"Staff 1776742..."
+    },
+    {
+      "index": 23,
+      "name": "Customer OTP request",
+      "method": "POST",
+      "path": "/api/users/customer/request-otp",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"message\":\"OTP generated (sandbox)\",\"otp\":\"286864\",\"expiresInSeconds\":300}"
+    },
+    {
+      "index": 24,
+      "name": "Customer register OTP",
+      "method": "POST",
+      "path": "/api/users/customer/register-otp",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"accessToken\":\"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjYzM4ODAyZS1lOGVlLTQ0ZTItYjFjOC0wYjUzYzY3NzNlYzUiLCJlbWFpbCI6Im90cC4xNzc2NzQyNzc2MDUxLTU0NTVAbWFpbC5sb2NhbCIsInJvbGUiOiJDVVNUT01FUiIsImlhdCI6MTc3Njc0Mjc3NywiZXhwIjoxNzc2ODI..."
+    },
+    {
+      "index": 25,
+      "name": "Customer register email",
+      "method": "POST",
+      "path": "/api/users/customer/register-email",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"accessToken\":\"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIzNWRjZDZkZS0xMzlmLTQ1N2YtYjFlYi1mYzVkNDA1MGJkNTIiLCJlbWFpbCI6ImN1c3RvbWVyLjE3NzY3NDI3NzYwNTEtNTQ1NUBtYWlsLmxvY2FsIiwicm9sZSI6IkNVU1RPTUVSIiwiaWF0IjoxNzc2NzQyNzc3LCJleHAiOjE..."
+    },
+    {
+      "index": 26,
+      "name": "Customer login email",
+      "method": "POST",
+      "path": "/api/users/customer/login-email",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"accessToken\":\"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIzNWRjZDZkZS0xMzlmLTQ1N2YtYjFlYi1mYzVkNDA1MGJkNTIiLCJlbWFpbCI6ImN1c3RvbWVyLjE3NzY3NDI3NzYwNTEtNTQ1NUBtYWlsLmxvY2FsIiwicm9sZSI6IkNVU1RPTUVSIiwiaWF0IjoxNzc2NzQyNzc4LCJleHAiOjE..."
+    },
+    {
+      "index": 27,
+      "name": "Customer profile",
+      "method": "GET",
+      "path": "/api/users/customer/profile",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"35dcd6de-139f-457f-b1eb-fc5d4050bd52\",\"email\":\"customer.1776742776051-5455@mail.local\",\"name\":\"Customer 1776742776051-5455\",\"role\":\"CUSTOMER\",\"phone\":\"0930022884\",\"branchId\":null,\"loyaltyPoints\":0,\"memberTier\":\"ST..."
+    },
+    {
+      "index": 28,
+      "name": "Customer offers",
+      "method": "GET",
+      "path": "/api/users/customer/offers",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"tier\":\"STANDARD\",\"loyaltyPoints\":0,\"offers\":[\"Tich 1 diem cho moi 10.000d chi tieu\",\"Nang cap SILVER khi tong chi tieu dat 3.000.000d\"]}"
+    },
+    {
+      "index": 29,
+      "name": "Customer points accrual",
+      "method": "POST",
+      "path": "/api/users/customer/points/accrual",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"customerId\":\"35dcd6de-139f-457f-b1eb-fc5d4050bd52\",\"orderId\":\"ORDER-1776742776051-5455\",\"pointsEarned\":20,\"totalPoints\":20,\"memberTier\":\"STANDARD\"}"
+    },
+    {
+      "index": 30,
+      "name": "List tables",
+      "method": "GET",
+      "path": "/api/tables",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"eb636c2b-c264-4434-9826-5e730a9c75a2\",\"number\":1,\"area\":\"A\",\"capacity\":4,\"status\":\"AVAILABLE\",\"qrCode\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsAQAAAABRBrPYAAACQElEQVR4Xu2XQa7bMAxEpZWPoZtK9k19hC69kj..."
+    },
+    {
+      "index": 31,
+      "name": "Create table A",
+      "method": "POST",
+      "path": "/api/tables",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"number\":8114,\"area\":\"API_A\",\"capacity\":4,\"status\":\"AVAILABLE\",\"qrCode\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsAQAAAABRBrPYAAACkUlEQVR4Xu2VQa7bMAxEqZWO4ZuK9k19..."
+    },
+    {
+      "index": 32,
+      "name": "Create table B",
+      "method": "POST",
+      "path": "/api/tables",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"number\":8115,\"area\":\"API_B\",\"capacity\":4,\"status\":\"AVAILABLE\",\"qrCode\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsAQAAAABRBrPYAAACmElEQVR4Xu2VQZLdIAxExYpj+KZg39RH..."
+    },
+    {
+      "index": 33,
+      "name": "Get table by id",
+      "method": "GET",
+      "path": "/api/tables/6829ffc1-ccc5-446f-b778-f1102760478b",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"number\":8114,\"area\":\"API_A\",\"capacity\":4,\"status\":\"AVAILABLE\",\"qrCode\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsAQAAAABRBrPYAAACkUlEQVR4Xu2VQa7bMAxEqZWO4ZuK9k19..."
+    },
+    {
+      "index": 34,
+      "name": "Update table",
+      "method": "PATCH",
+      "path": "/api/tables/6829ffc1-ccc5-446f-b778-f1102760478b",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"number\":8114,\"area\":\"API_A_UPD\",\"capacity\":6,\"status\":\"AVAILABLE\",\"qrCode\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsAQAAAABRBrPYAAACkUlEQVR4Xu2VQa7bMAxEqZWO4ZuK..."
+    },
+    {
+      "index": 35,
+      "name": "Update table status",
+      "method": "PATCH",
+      "path": "/api/tables/6829ffc1-ccc5-446f-b778-f1102760478b/status",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"number\":8114,\"area\":\"API_A_UPD\",\"capacity\":6,\"status\":\"AVAILABLE\",\"qrCode\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsAQAAAABRBrPYAAACkUlEQVR4Xu2VQa7bMAxEqZWO4ZuK..."
+    },
+    {
+      "index": 36,
+      "name": "Get table QR",
+      "method": "GET",
+      "path": "/api/tables/6829ffc1-ccc5-446f-b778-f1102760478b/qr",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"qrCode\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsAQAAAABRBrPYAAACkUlEQVR4Xu2VQa7bMAxEqZWO4ZuK9k19hC61EjszjD9+/Au0y4YwYQQ09RTAwxFl8S/xy+6VP8aD3eLBbvFgt/jvsdMQPY65rR6LL+bThvFhXghDsjp/j8ninnA/R3+tlsH47T1Xt5j..."
+    },
+    {
+      "index": 37,
+      "name": "Batch QR",
+      "method": "POST",
+      "path": "/api/tables/qr/batch",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"qrCode\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsAQAAAABRBrPYAAACkUlEQVR4Xu2VQa7bMAxEqZWO4ZuK9k19hC61EjszjD9+/Au0y4YwYQQ09RTAwxFl8S/xy+6VP8aD3eLBbvFgt/jvsdMQPY65rR6LL+bThvFhXghDsjp/j8ninnA/R3+tlsH47T1Xt5..."
+    },
+    {
+      "index": 38,
+      "name": "Call staff",
+      "method": "POST",
+      "path": "/api/tables/6829ffc1-ccc5-446f-b778-f1102760478b/call-staff",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"reason\":\"Need water\",\"message\":\"Đã gửi yêu cầu gọi nhân viên\",\"tableId\":\"6829ffc1-ccc5-446f-b778-f1102760478b\"}"
+    },
+    {
+      "index": 39,
+      "name": "List open chats",
+      "method": "GET",
+      "path": "/api/chats",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo82ryc50000ijohqi2cqasr\",\"tableId\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"customerName\":\"Bàn 8114\",\"customerPhone\":null,\"status\":\"OPEN\",\"createdAt\":\"2026-04-21T03:39:39.030Z\",\"updatedAt\":\"2026-04-21T03:39:39.0..."
+    },
+    {
+      "index": 40,
+      "name": "Create chat",
+      "method": "POST",
+      "path": "/api/chats",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"cmo82rydw0003ijohydqz48dc\",\"tableId\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"customerName\":\"Chat 1776742776051-5455\",\"customerPhone\":null,\"status\":\"OPEN\",\"createdAt\":\"2026-04-21T03:39:39.092Z\",\"updatedAt\":\"2026-04..."
+    },
+    {
+      "index": 41,
+      "name": "Emit staff notification",
+      "method": "POST",
+      "path": "/api/chats/staff-notifications",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"success\":true,\"notification\":{\"id\":\"CHAT_MESSAGE:1776742779104:6829ffc1-ccc5-446f-b778-f1102760478b\",\"type\":\"CHAT_MESSAGE\",\"title\":\"smoke\",\"message\":\"ping\",\"tableId\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"createdAt\":\"..."
+    },
+    {
+      "index": 42,
+      "name": "Send chat message",
+      "method": "POST",
+      "path": "/api/chats/cmo82rydw0003ijohydqz48dc/messages",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"cmo82ryeh0005ijohmog26r3j\",\"chatId\":\"cmo82rydw0003ijohydqz48dc\",\"senderType\":\"CUSTOMER\",\"senderId\":null,\"senderName\":\"Smoke\",\"content\":\"Hello\",\"createdAt\":\"2026-04-21T03:39:39.113Z\"}"
+    },
+    {
+      "index": 43,
+      "name": "List chat messages",
+      "method": "GET",
+      "path": "/api/chats/cmo82rydw0003ijohydqz48dc/messages",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo82ryeh0005ijohmog26r3j\",\"chatId\":\"cmo82rydw0003ijohydqz48dc\",\"senderType\":\"CUSTOMER\",\"senderId\":null,\"senderName\":\"Smoke\",\"content\":\"Hello\",\"createdAt\":\"2026-04-21T03:39:39.113Z\"}]"
+    },
+    {
+      "index": 44,
+      "name": "Close chat",
+      "method": "PATCH",
+      "path": "/api/chats/cmo82rydw0003ijohydqz48dc/close",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rydw0003ijohydqz48dc\",\"tableId\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"customerName\":\"Chat 1776742776051-5455\",\"customerPhone\":null,\"status\":\"CLOSED\",\"createdAt\":\"2026-04-21T03:39:39.092Z\",\"updatedAt\":\"2026-..."
+    },
+    {
+      "index": 45,
+      "name": "Menu list",
+      "method": "GET",
+      "path": "/api/orders/menu?tableId=6829ffc1-ccc5-446f-b778-f1102760478b",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo17okbe0009n1ifbauf1pt1\",\"branchId\":null,\"name\":\"Bac xiu\",\"description\":\"Ca phe sua nhieu sua\",\"price\":32000,\"image\":\"https://placehold.co/600x400?text=Bac%20xiu\",\"categoryId\":\"cmo80y6wb0000zg51e3zfb2ps\",\"categ..."
+    },
+    {
+      "index": 46,
+      "name": "List menu categories",
+      "method": "GET",
+      "path": "/api/orders/admin/menu/categories?includeInactive=true",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo17okai0000n1if6o29kfau\",\"name\":\"Ca phe\",\"branchId\":\"e3e322d0-1b04-4595-928a-4dc4de856921\",\"description\":null,\"sortOrder\":0,\"isActive\":false,\"createdAt\":\"2026-04-16T08:22:35.707Z\",\"updatedAt\":\"2026-04-21T02:28:..."
+    },
+    {
+      "index": 47,
+      "name": "Create menu category",
+      "method": "POST",
+      "path": "/api/orders/admin/menu/categories",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"cmo82ryjl0000xhyioshk5zd7\",\"name\":\"Cat 1776742776051-5455\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"description\":\"smoke\",\"sortOrder\":99,\"isActive\":true,\"createdAt\":\"2026-04-21T03:39:39.298Z\",\"updatedAt\":..."
+    },
+    {
+      "index": 48,
+      "name": "Update menu category",
+      "method": "PATCH",
+      "path": "/api/orders/admin/menu/categories/cmo82ryjl0000xhyioshk5zd7",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82ryjl0000xhyioshk5zd7\",\"name\":\"Cat 1776742776051-5455\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"description\":\"updated\",\"sortOrder\":99,\"isActive\":true,\"createdAt\":\"2026-04-21T03:39:39.298Z\",\"updatedAt..."
+    },
+    {
+      "index": 49,
+      "name": "List option groups",
+      "method": "GET",
+      "path": "/api/orders/admin/menu/options/groups?includeInactive=true",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[]"
+    },
+    {
+      "index": 50,
+      "name": "Create option group",
+      "method": "POST",
+      "path": "/api/orders/admin/menu/options/groups",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"cmo82rykl0001xhyiv5psyv61\",\"name\":\"Size 1776742776051-5455\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"type\":\"SINGLE\",\"isActive\":true,\"isGlobal\":false,\"sortOrder\":1,\"createdAt\":\"2026-04-21T03:39:39.333Z\",\"..."
+    },
+    {
+      "index": 51,
+      "name": "Update option group",
+      "method": "PATCH",
+      "path": "/api/orders/admin/menu/options/groups/cmo82rykl0001xhyiv5psyv61",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rykl0001xhyiv5psyv61\",\"name\":\"Size Upd 1776742776051-5455\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"type\":\"SINGLE\",\"isActive\":true,\"isGlobal\":false,\"sortOrder\":1,\"createdAt\":\"2026-04-21T03:39:39.333..."
+    },
+    {
+      "index": 52,
+      "name": "Create option value",
+      "method": "POST",
+      "path": "/api/orders/admin/menu/options/groups/cmo82rykl0001xhyiv5psyv61/values",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"cmo82rylh0003xhyikd5vlufc\",\"groupId\":\"cmo82rykl0001xhyiv5psyv61\",\"value\":\"M\",\"label\":\"Medium\",\"priceDelta\":5000,\"isDefault\":true,\"isActive\":true,\"sortOrder\":0,\"createdAt\":\"2026-04-21T03:39:39.366Z\",\"updatedAt\":\"20..."
+    },
+    {
+      "index": 53,
+      "name": "Update option value",
+      "method": "PATCH",
+      "path": "/api/orders/admin/menu/options/values/cmo82rylh0003xhyikd5vlufc",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rylh0003xhyikd5vlufc\",\"groupId\":\"cmo82rykl0001xhyiv5psyv61\",\"value\":\"M\",\"label\":\"Medium Upd\",\"priceDelta\":5000,\"isDefault\":true,\"isActive\":true,\"sortOrder\":0,\"createdAt\":\"2026-04-21T03:39:39.366Z\",\"updatedAt\"..."
+    },
+    {
+      "index": 54,
+      "name": "List menu items admin",
+      "method": "GET",
+      "path": "/api/orders/admin/menu/items?includeInactive=true",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo19z2wo000a14duwuq9lzgz\",\"branchId\":\"00a742a4-0152-421c-af36-c938dae78e3b\",\"name\":\"Smoke Latte 1776331601062-8352\",\"description\":\"smoke menu item\",\"price\":56000,\"image\":null,\"categoryId\":null,\"category\":\"Cat 17..."
+    },
+    {
+      "index": 55,
+      "name": "Create menu item",
+      "method": "POST",
+      "path": "/api/orders/admin/menu/items",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"cmo82rymt0007xhyi5kkoo1ou\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"name\":\"Smoke Latte 1776742776051-5455\",\"description\":\"smoke menu item\",\"price\":55000,\"image\":null,\"categoryId\":\"cmo82ryjl0000xhyioshk5z..."
+    },
+    {
+      "index": 56,
+      "name": "Update menu item",
+      "method": "PATCH",
+      "path": "/api/orders/admin/menu/items/cmo82rymt0007xhyi5kkoo1ou",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rymt0007xhyi5kkoo1ou\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"name\":\"Smoke Latte 1776742776051-5455\",\"description\":\"smoke menu item\",\"price\":56000,\"image\":null,\"categoryId\":\"cmo82ryjl0000xhyioshk5z..."
+    },
+    {
+      "index": 57,
+      "name": "List promotions",
+      "method": "GET",
+      "path": "/api/orders/admin/promotions?includeInactive=true",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo2ppnfs000a6xns58nfg0kr\",\"code\":\"PROMO53809\",\"branchId\":\"7be078f2-0a54-4a1b-9121-943f14f1c8c2\",\"description\":\"smoke\",\"discountType\":\"PERCENT\",\"discountValue\":12,\"appliesTo\":\"ORDER\",\"menuItemIds\":[],\"minOrderAmo..."
+    },
+    {
+      "index": 58,
+      "name": "Create promotion",
+      "method": "POST",
+      "path": "/api/orders/admin/promotions",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"cmo82ryo8000axhyinm1xrohx\",\"code\":\"PROMO6563\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"description\":\"smoke\",\"discountType\":\"PERCENT\",\"discountValue\":10,\"appliesTo\":\"ORDER\",\"menuItemIds\":[],\"minOrderAmoun..."
+    },
+    {
+      "index": 59,
+      "name": "Update promotion",
+      "method": "PATCH",
+      "path": "/api/orders/admin/promotions/cmo82ryo8000axhyinm1xrohx",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82ryo8000axhyinm1xrohx\",\"code\":\"PROMO6563\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"description\":\"smoke\",\"discountType\":\"PERCENT\",\"discountValue\":12,\"appliesTo\":\"ORDER\",\"menuItemIds\":[],\"minOrderAmoun..."
+    },
+    {
+      "index": 60,
+      "name": "Validate promotion",
+      "method": "GET",
+      "path": "/api/orders/promotions/validate?code=PROMO6563&subtotal=120000",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"code\":\"PROMO6563\",\"description\":\"smoke\",\"discountType\":\"PERCENT\",\"appliesTo\":\"ORDER\",\"discountValue\":12,\"discountAmount\":14400,\"finalAmount\":105600,\"eligibleAmount\":120000,\"minOrderAmount\":0,\"maxDiscount\":null,\"menuIte..."
+    },
+    {
+      "index": 61,
+      "name": "Create order",
+      "method": "POST",
+      "path": "/api/orders",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"cmo82rypa000cxhyinhf21abm\",\"tableId\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"customerId\":null,\"customerEmail\":\"order.1776742776051-5455@mail.local\",\"customerName\":..."
+    },
+    {
+      "index": 62,
+      "name": "List orders by table A",
+      "method": "GET",
+      "path": "/api/orders?tableId=6829ffc1-ccc5-446f-b778-f1102760478b",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo82rypa000cxhyinhf21abm\",\"tableId\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"customerId\":null,\"customerEmail\":\"order.1776742776051-5455@mail.local\",\"customerName\"..."
+    },
+    {
+      "index": 63,
+      "name": "Get order by id",
+      "method": "GET",
+      "path": "/api/orders/cmo82rypa000cxhyinhf21abm",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rypa000cxhyinhf21abm\",\"tableId\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"customerId\":null,\"customerEmail\":\"order.1776742776051-5455@mail.local\",\"customerName\":..."
+    },
+    {
+      "index": 64,
+      "name": "Update customer order items",
+      "method": "PATCH",
+      "path": "/api/orders/cmo82rypa000cxhyinhf21abm/customer-items",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rypa000cxhyinhf21abm\",\"tableId\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"customerId\":null,\"customerEmail\":\"order.1776742776051-5455@mail.local\",\"customerName\":..."
+    },
+    {
+      "index": 65,
+      "name": "Update order items",
+      "method": "PATCH",
+      "path": "/api/orders/cmo82rypa000cxhyinhf21abm/items",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rypa000cxhyinhf21abm\",\"tableId\":\"6829ffc1-ccc5-446f-b778-f1102760478b\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"customerId\":null,\"customerEmail\":\"order.1776742776051-5455@mail.local\",\"customerName\":..."
+    },
+    {
+      "index": 66,
+      "name": "Update order item status",
+      "method": "PATCH",
+      "path": "/api/orders/cmo82rypa000cxhyinhf21abm/items/cmo82ryvd000hxhyisnre23l7/status",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82ryvd000hxhyisnre23l7\",\"orderId\":\"cmo82rypa000cxhyinhf21abm\",\"menuItemId\":\"cmo82rymt0007xhyi5kkoo1ou\",\"quantity\":2,\"price\":56000,\"note\":\"staff update\",\"options\":null,\"status\":\"READY\"}"
+    },
+    {
+      "index": 67,
+      "name": "Transfer table action",
+      "method": "POST",
+      "path": "/api/orders/table-actions/transfer",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"mode\":\"TRANSFER\",\"sourceOrderId\":\"cmo82rypa000cxhyinhf21abm\",\"targetOrderId\":\"cmo82rypa000cxhyinhf21abm\",\"resultOrder\":{\"id\":\"cmo82rypa000cxhyinhf21abm\",\"tableId\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"branchId\":\"3e30..."
+    },
+    {
+      "index": 68,
+      "name": "List orders by table B",
+      "method": "GET",
+      "path": "/api/orders?tableId=66623898-84ae-401d-83ff-d85ee863dd3f",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo82rypa000cxhyinhf21abm\",\"tableId\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"customerId\":null,\"customerEmail\":\"order.1776742776051-5455@mail.local\",\"customerName\"..."
+    },
+    {
+      "index": 69,
+      "name": "Update order status COMPLETED",
+      "method": "PATCH",
+      "path": "/api/orders/cmo82rypa000cxhyinhf21abm/status",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rypa000cxhyinhf21abm\",\"tableId\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"customerId\":null,\"customerEmail\":\"order.1776742776051-5455@mail.local\",\"customerName\":..."
+    },
+    {
+      "index": 70,
+      "name": "Order history by email",
+      "method": "GET",
+      "path": "/api/orders/history?email=order.1776742776051-5455%40mail.local",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo82rypa000cxhyinhf21abm\",\"tableId\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"customerId\":null,\"customerEmail\":\"order.1776742776051-5455@mail.local\",\"customerName\"..."
+    },
+    {
+      "index": 71,
+      "name": "Disable promotion",
+      "method": "POST",
+      "path": "/api/orders/admin/promotions/cmo82ryo8000axhyinm1xrohx/disable",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82ryo8000axhyinm1xrohx\",\"code\":\"PROMO6563\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"description\":\"smoke\",\"discountType\":\"PERCENT\",\"discountValue\":12,\"appliesTo\":\"ORDER\",\"menuItemIds\":[],\"minOrderAmoun..."
+    },
+    {
+      "index": 72,
+      "name": "Create CASH payment",
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"paymentId\":\"cmo82rz160000y883b9snjoc4\",\"orderId\":\"ORD-CASH-1776742776051-5455\",\"tableId\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"amount\":120000,\"status\":\"WAITING_CASH\",\"provider\":\"CASH\",\"transactionId\":null,\"transferCo..."
+    },
+    {
+      "index": 73,
+      "name": "Get payment by order",
+      "method": "GET",
+      "path": "/api/v1/payments/orders/ORD-CASH-1776742776051-5455",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"paymentId\":\"cmo82rz160000y883b9snjoc4\",\"orderId\":\"ORD-CASH-1776742776051-5455\",\"tableId\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"amount\":120000,\"status\":\"WAITING_CASH\",\"provider\":\"CASH\",\"transactionId\":null,\"transferCo..."
+    },
+    {
+      "index": 74,
+      "name": "Get payment by id",
+      "method": "GET",
+      "path": "/api/v1/payments/cmo82rz160000y883b9snjoc4",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"paymentId\":\"cmo82rz160000y883b9snjoc4\",\"orderId\":\"ORD-CASH-1776742776051-5455\",\"tableId\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"amount\":120000,\"status\":\"WAITING_CASH\",\"provider\":\"CASH\",\"transactionId\":null,\"transferCo..."
+    },
+    {
+      "index": 75,
+      "name": "Confirm CASH payment",
+      "method": "POST",
+      "path": "/api/v1/payments/cmo82rz160000y883b9snjoc4/confirm-cash",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"paymentId\":\"cmo82rz160000y883b9snjoc4\",\"orderId\":\"ORD-CASH-1776742776051-5455\",\"tableId\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"amount\":120000,\"status\":\"PAID\",\"provider\":\"CASH\",\"transactionId\":null,\"transferContent\":n..."
+    },
+    {
+      "index": 76,
+      "name": "Create VIETQR payment",
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"paymentId\":\"cmo82rz570001y883314igmna\",\"orderId\":\"ORD-VNP-1776742776051-5455\",\"tableId\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"amount\":150000,\"status\":\"WAITING_TRANSFER\",\"provider\":\"VIETQR\",\"transactionId\":\"vietqr_ORD..."
+    },
+    {
+      "index": 77,
+      "name": "Handle payment return",
+      "method": "POST",
+      "path": "/api/v1/payments/return",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"paymentId\":\"cmo82rz570001y883314igmna\",\"orderId\":\"ORD-VNP-1776742776051-5455\",\"tableId\":\"66623898-84ae-401d-83ff-d85ee863dd3f\",\"amount\":150000,\"status\":\"WAITING_TRANSFER\",\"provider\":\"VIETQR\",\"transactionId\":\"txn-177674..."
+    },
+    {
+      "index": 78,
+      "name": "Webhook status check",
+      "method": "POST",
+      "path": "/api/v1/payments/webhook",
+      "expected": [
+        200,
+        400
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"success\":true,\"paymentId\":\"cmo82rz570001y883314igmna\",\"newStatus\":\"PAID\"}"
+    },
+    {
+      "index": 79,
+      "name": "List ingredients",
+      "method": "GET",
+      "path": "/api/v1/ingredients",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo17okbe0009n1ifbauf1pt1\",\"branchId\":\"e3e322d0-1b04-4595-928a-4dc4de856921\",\"name\":\"Bac xiu\",\"unit\":\"portion\",\"stock\":0,\"minStock\":0,\"importPrice\":0,\"isActive\":true,\"createdAt\":\"2026-04-21T00:14:31.880Z\",\"update..."
+    },
+    {
+      "index": 80,
+      "name": "Create ingredient",
+      "method": "POST",
+      "path": "/api/v1/ingredients",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"id\":\"cmo82rz83000013c9w5y4gns5\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"name\":\"Ingredient 1776742776051-5455\",\"unit\":\"kg\",\"stock\":20,\"minStock\":5,\"importPrice\":100000,\"isActive\":true,\"createdAt\":\"2026-04-21T..."
+    },
+    {
+      "index": 81,
+      "name": "Update ingredient",
+      "method": "PATCH",
+      "path": "/api/v1/ingredients/cmo82rz83000013c9w5y4gns5",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rz83000013c9w5y4gns5\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"name\":\"Ingredient 1776742776051-5455\",\"unit\":\"kg\",\"stock\":20,\"minStock\":6,\"importPrice\":110000,\"isActive\":true,\"createdAt\":\"2026-04-21T..."
+    },
+    {
+      "index": 82,
+      "name": "Import stock",
+      "method": "POST",
+      "path": "/api/v1/ingredients/stock/import",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"movement\":{\"id\":\"cmo82rz94000313c9asipiszb\",\"ingredientId\":\"cmo82rz83000013c9w5y4gns5\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"type\":\"IMPORT\",\"source\":\"MANUAL\",\"quantity\":5,\"unitPrice\":100000,\"totalPrice\":50..."
+    },
+    {
+      "index": 83,
+      "name": "Create stock receipt",
+      "method": "POST",
+      "path": "/api/v1/ingredients/stock/receipts",
+      "expected": [
+        201
+      ],
+      "actual": 201,
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "responsePreview": "{\"receiptCode\":\"RCPT-20260421-187\",\"supplier\":\"Smoke Supplier\",\"note\":\"Smoke receipt\",\"totalAmount\":360000,\"items\":[{\"movement\":{\"id\":\"cmo82rz9o000613c9bi2y8df8\",\"ingredientId\":\"cmo82rz83000013c9w5y4gns5\",\"branchId\":\"3e3..."
+    },
+    {
+      "index": 84,
+      "name": "Adjust stock",
+      "method": "POST",
+      "path": "/api/v1/ingredients/stock/adjust",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"movement\":{\"id\":\"cmo82rza5000913c9ywupsyix\",\"ingredientId\":\"cmo82rz83000013c9w5y4gns5\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"type\":\"ADJUST\",\"source\":\"STOCKTAKE\",\"quantity\":3,\"unitPrice\":0,\"totalPrice\":0,\"r..."
+    },
+    {
+      "index": 85,
+      "name": "Export stock bulk",
+      "method": "POST",
+      "path": "/api/v1/ingredients/stock/export-bulk",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"exported\":1,\"items\":[{\"movement\":{\"id\":\"cmo82rzan000c13c9g6s6suqn\",\"ingredientId\":\"cmo82rz83000013c9w5y4gns5\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"type\":\"EXPORT\",\"source\":\"ORDER\",\"quantity\":1,\"unitPrice\":..."
+    },
+    {
+      "index": 86,
+      "name": "Get stock movements",
+      "method": "GET",
+      "path": "/api/v1/ingredients/stock/movements?ingredientId=cmo82rz83000013c9w5y4gns5&limit=20",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"id\":\"cmo82rzan000c13c9g6s6suqn\",\"ingredientId\":\"cmo82rz83000013c9w5y4gns5\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"type\":\"EXPORT\",\"source\":\"ORDER\",\"quantity\":1,\"unitPrice\":0,\"totalPrice\":0,\"reason\":\"Smoke e..."
+    },
+    {
+      "index": 87,
+      "name": "Sync menu to inventory",
+      "method": "POST",
+      "path": "/api/v1/ingredients/sync-menu",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"synced\":1,\"items\":[{\"id\":\"sync-1776742776051-5455\",\"branchId\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"name\":\"Synced 1776742776051-5455\",\"unit\":\"portion\",\"stock\":0,\"minStock\":0,\"importPrice\":0,\"isActive\":true,\"createdAt..."
+    },
+    {
+      "index": 88,
+      "name": "Delete ingredient",
+      "method": "DELETE",
+      "path": "/api/v1/ingredients/cmo82rz83000013c9w5y4gns5",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rz83000013c9w5y4gns5\",\"deleted\":true}"
+    },
+    {
+      "index": 89,
+      "name": "Delete synced ingredient",
+      "method": "DELETE",
+      "path": "/api/v1/ingredients/sync-1776742776051-5455",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"sync-1776742776051-5455\",\"deleted\":true}"
+    },
+    {
+      "index": 90,
+      "name": "Report revenue",
+      "method": "GET",
+      "path": "/api/reports/revenue?dateFrom=2026-04-21&dateTo=2026-04-21&groupBy=day",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"range\":{\"dateFrom\":\"2026-04-21\",\"dateTo\":\"2026-04-21\",\"branchId\":null},\"groupBy\":\"day\",\"summary\":{\"totalRevenue\":270000,\"totalOrders\":2,\"averageOrderValue\":135000},\"series\":[{\"period\":\"2026-04-21T00:00:00.000Z\",\"revenu..."
+    },
+    {
+      "index": 91,
+      "name": "Report top items",
+      "method": "GET",
+      "path": "/api/reports/top-items?dateFrom=2026-04-21&dateTo=2026-04-21&limit=10",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "[{\"menuItemId\":\"cmo82rymt0007xhyi5kkoo1ou\",\"menuItemName\":\"Smoke Latte 1776742776051-5455\",\"quantity\":2,\"revenue\":112000,\"orderCount\":1}]"
+    },
+    {
+      "index": 92,
+      "name": "Report inventory",
+      "method": "GET",
+      "path": "/api/reports/inventory?dateFrom=2026-04-21&dateTo=2026-04-21&includeMovements=true&movementLimit=50",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"range\":{\"dateFrom\":\"2026-04-21\",\"dateTo\":\"2026-04-21\",\"branchId\":null},\"summary\":{\"totalIngredients\":27,\"activeIngredients\":21,\"lowStockCount\":1,\"totalStockValue\":22205000},\"stocks\":[{\"id\":\"cmo17okbe0009n1ifbauf1pt1\",\"..."
+    },
+    {
+      "index": 93,
+      "name": "Report staff performance",
+      "method": "GET",
+      "path": "/api/reports/staff-performance?dateFrom=2026-04-21&dateTo=2026-04-21&limit=10",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"range\":{\"dateFrom\":\"2026-04-21\",\"dateTo\":\"2026-04-21\",\"branchId\":null},\"totals\":{\"totalOrders\":2,\"totalRevenue\":270000},\"items\":[{\"staffId\":\"SYSTEM\",\"staffName\":\"System / Unknown\",\"email\":null,\"role\":null,\"orderCount\":..."
+    },
+    {
+      "index": 94,
+      "name": "Report dashboard",
+      "method": "GET",
+      "path": "/api/reports/dashboard?dateFrom=2026-04-21&dateTo=2026-04-21&groupBy=day",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"updatedAt\":\"2026-04-21T03:39:40.451Z\",\"range\":{\"dateFrom\":\"2026-04-21\",\"dateTo\":\"2026-04-21\",\"branchId\":null},\"revenue\":{\"totalRevenue\":270000,\"totalOrders\":2,\"series\":[{\"period\":\"2026-04-21T00:00:00.000Z\",\"revenue\":27..."
+    },
+    {
+      "index": 95,
+      "name": "Report daily stats",
+      "method": "GET",
+      "path": "/api/reports/daily-stats?dateFrom=2026-04-21&dateTo=2026-04-21",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"updatedAt\":\"2026-04-21T03:39:40.463Z\",\"range\":{\"dateFrom\":\"2026-04-21\",\"dateTo\":\"2026-04-21\",\"branchId\":null},\"revenue\":{\"totalRevenue\":270000,\"totalOrders\":2,\"series\":[{\"period\":\"2026-04-21T00:00:00.000Z\",\"revenue\":27..."
+    },
+    {
+      "index": 96,
+      "name": "Report export excel",
+      "method": "GET",
+      "path": "/api/reports/export?reportType=revenue&format=excel&dateFrom=2026-04-21&dateTo=2026-04-21",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"byteLength\":6536}"
+    },
+    {
+      "index": 97,
+      "name": "Delete menu item",
+      "method": "DELETE",
+      "path": "/api/orders/admin/menu/items/cmo82rymt0007xhyi5kkoo1ou",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rymt0007xhyi5kkoo1ou\",\"deleted\":true}"
+    },
+    {
+      "index": 98,
+      "name": "Delete option value",
+      "method": "DELETE",
+      "path": "/api/orders/admin/menu/options/values/cmo82rylh0003xhyikd5vlufc",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rylh0003xhyikd5vlufc\",\"deleted\":true}"
+    },
+    {
+      "index": 99,
+      "name": "Delete option group",
+      "method": "DELETE",
+      "path": "/api/orders/admin/menu/options/groups/cmo82rykl0001xhyiv5psyv61",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82rykl0001xhyiv5psyv61\",\"deleted\":true}"
+    },
+    {
+      "index": 100,
+      "name": "Delete category",
+      "method": "DELETE",
+      "path": "/api/orders/admin/menu/categories/cmo82ryjl0000xhyioshk5zd7",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"cmo82ryjl0000xhyioshk5zd7\",\"deleted\":true}"
+    },
+    {
+      "index": 101,
+      "name": "Delete table A",
+      "method": "DELETE",
+      "path": "/api/tables/6829ffc1-ccc5-446f-b778-f1102760478b",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"deleted\":true,\"id\":\"6829ffc1-ccc5-446f-b778-f1102760478b\"}"
+    },
+    {
+      "index": 102,
+      "name": "Delete table B",
+      "method": "DELETE",
+      "path": "/api/tables/66623898-84ae-401d-83ff-d85ee863dd3f",
+      "expected": [
+        200,
+        409
+      ],
+      "actual": 409,
+      "status": "PASS",
+      "detail": "HTTP 409",
+      "responsePreview": "{\"timestamp\":\"2026-04-21T03:39:40.638+00:00\",\"status\":409,\"error\":\"Conflict\",\"path\":\"/api/tables/66623898-84ae-401d-83ff-d85ee863dd3f\"}"
+    },
+    {
+      "index": 103,
+      "name": "Delete schedule",
+      "method": "DELETE",
+      "path": "/api/users/staff/schedules/e2ce28b7-e1e4-4c0e-ac2f-14c17aa1a9d8",
+      "expected": [
+        204
+      ],
+      "actual": 204,
+      "status": "PASS",
+      "detail": "HTTP 204",
+      "responsePreview": ""
+    },
+    {
+      "index": 104,
+      "name": "Delete staff",
+      "method": "DELETE",
+      "path": "/api/users/staff/bb425d9a-b903-40db-9dfc-caddb9674ba5",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"bb425d9a-b903-40db-9dfc-caddb9674ba5\",\"name\":\"Staff 1776742776051-5455\",\"email\":\"deleted+bb425d9a-b903-40db-9dfc-caddb9674ba5+1776742780891@archived.local\",\"phone\":null,\"role\":\"BARISTA\",\"employeeCode\":null,\"person..."
+    },
+    {
+      "index": 105,
+      "name": "Delete branch",
+      "method": "DELETE",
+      "path": "/api/users/admin/branches/3e30648c-314f-4c1e-b452-1c7f7e0324e9",
+      "expected": [
+        200
+      ],
+      "actual": 200,
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "responsePreview": "{\"id\":\"3e30648c-314f-4c1e-b452-1c7f7e0324e9\",\"name\":\"Branch 1776742776051-5455\",\"address\":\"Test\",\"phone\":\"0901234567\",\"managerId\":null,\"managerName\":null,\"isActive\":false,\"staffCount\":1,\"createdAt\":\"2026-04-21T03:39:36.7..."
+    }
+  ]
+}

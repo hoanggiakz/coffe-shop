@@ -17,7 +17,7 @@ Hệ thống phục vụ 3 nhóm người dùng:
 | `order-service` | NestJS + Prisma | Menu, đơn hàng, KDS, promotions |
 | `chat-service` | NestJS + Socket.IO | Chat realtime theo bàn + staff notifications |
 | `inventory-service` | NestJS + Prisma | Kho, nhập/xuất/kiểm kê, đồng bộ menu |
-| `payment-service` | NestJS + Prisma | Thanh toán CASH/VietQR/VNPay |
+| `payment-service` | NestJS + Prisma | Thanh toán CASH/SePay |
 | `report-service` | NestJS + Prisma | Báo cáo doanh thu/kho/nhân sự/dashboard |
 | `postgres` | PostgreSQL | Dữ liệu chính |
 | `redis` | Redis | Cache/realtime |
@@ -210,7 +210,7 @@ Base URL khi qua Nginx: `https://localhost/api`
   - `POST /v1/ingredients/sync-menu`
 - Payment (`/v1/payments`):
   - `POST /v1/payments`
-  - Provider hỗ trợ: `CASH`, `VIETQR`, `VNPAY`
+  - Provider hỗ trợ: `CASH`, `SEPAY`
   - `GET /v1/payments/orders/{orderId}`
   - `GET /v1/payments/online/qr`
   - `GET /v1/payments/{paymentId}`
@@ -254,9 +254,9 @@ Base URL khi qua Nginx: `https://localhost/api`
 
 | ID | Trạng thái | Ghi chú triển khai hiện tại |
 |---|---|---|
-| `I-01` VNPay | ✅ | `payment-service` nhận provider `VNPAY`, tạo `paymentUrl` có `vnp_SecureHash` (HMACSHA512), hỗ trợ `return`/`webhook` và endpoint verify giao dịch thật trước khi set `PAID`. |
+| `I-01` SePay | ✅ | `payment-service` nhận provider `SEPAY`, hỗ trợ tạo giao dịch online, `return`/`webhook` và endpoint verify giao dịch thật trước khi set `PAID`. |
 | `I-02` MoMo | ❌ (đã loại bỏ) | Hình thức thanh toán MoMo không còn được hỗ trợ trong codebase hiện tại. |
-| `I-03` Webhook VietQR | ✅ | `POST /v1/payments/webhook` cập nhật trạng thái thanh toán và phát sự kiện hoàn tất. |
+| `I-03` Webhook SePay | ✅ | `POST /v1/payments/webhook` nhận IPN SePay, cập nhật trạng thái thanh toán và phát sự kiện hoàn tất. |
 | `I-04` Email thông báo (tùy chọn) | ✅ (mức kho) | `inventory-service` gửi email cảnh báo tồn kho thấp qua SMTP (`LOW_STOCK_ALERT_EMAILS`). |
 
 ### 5.9 Luồng Đặt Món Qua QR (Chuẩn Sequence)

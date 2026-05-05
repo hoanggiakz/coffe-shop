@@ -54,10 +54,9 @@ Tạo tối thiểu:
 - `POSTGRES_PASSWORD`
 - `JWT_SECRET`
 - `INTERNAL_SERVICE_TOKEN`
-- `ONLINE_PAYMENT_QR_URL` (optional, ảnh VietQR)
-- `VNPAY_PAY_URL`, `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET` (optional, nếu bật VNPay)
-- `VNPAY_QUERY_URL`, `VIETQR_QUERY_URL` (khuyến nghị để verify giao dịch thật trước khi set `PAID`)
-- `PAYMENT_WEBHOOK_SECRET` hoặc secret riêng từng cổng (`VNPAY_WEBHOOK_SECRET`, `VIETQR_WEBHOOK_SECRET`)
+- `ONLINE_PAYMENT_QR_URL` (optional, ảnh QR chuyển khoản)
+- `PAYMENT_WEBHOOK_SECRET` (optional, secret chung webhook)
+- `SEPAY_QUERY_URL`, `SEPAY_WEBHOOK_SECRET`, `SEPAY_IPN_API_KEY` (nếu bật SePay IPN)
 - `KAFKA_BROKERS` (optional, nếu bật flow event `OrderCreated` -> KDS qua Kafka)
 
 ## 3.2 Tạo file `.env` cho production
@@ -80,15 +79,22 @@ SMTP_HOST=smtp.your-provider.com
 SMTP_USER=noreply@coffee.example.com
 SMTP_PASS=REPLACE_SMTP_PASSWORD
 ONLINE_PAYMENT_QR_URL=https://img.vietqr.io/image/VCB-1026422235-qr_only.png
-VNPAY_PAY_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
-VNPAY_TMN_CODE=REPLACE_VNPAY_TMN_CODE
-VNPAY_HASH_SECRET=REPLACE_VNPAY_HASH_SECRET
-VNPAY_QUERY_URL=https://sandbox-api.vnpayment.vn/merchant_webapi/api/transaction
-VIETQR_QUERY_URL=https://api.your-bank-provider.vn/transactions/query
+SEPAY_QUERY_URL=https://my.sepay.vn/userapi/transactions/list
 ONLINE_PAYMENT_TIMEOUT_MINUTES=30
 PAYMENT_WEBHOOK_SECRET=REPLACE_WEBHOOK_SECRET
+SEPAY_WEBHOOK_SECRET=REPLACE_SEPAY_WEBHOOK_SECRET
+SEPAY_IPN_API_KEY=REPLACE_SEPAY_IPN_API_KEY
 KAFKA_BROKERS=kafka-1:9092,kafka-2:9092
 ```
+
+## 3.4 Public webhook cho SePay
+
+- Endpoint nhận IPN: `POST https://<domain>/api/v1/payments/webhook`
+- Bắt buộc public HTTPS, không dùng localhost/private IP.
+- Cấu hình SePay gửi một trong hai header xác thực:
+  - `Authorization: Apikey <SEPAY_IPN_API_KEY>`
+  - hoặc `x-secret-key: <SEPAY_WEBHOOK_SECRET>`
+- Khuyến nghị thêm WAF/rate-limit cho đường dẫn webhook.
 
 ## 3.3 SSL certificate thật (khuyến nghị bắt buộc)
 
@@ -192,7 +198,7 @@ cat backup-manual.sql | docker compose exec -T postgres psql -U postgres
   - FE `GET /api/orders/menu?tableId=...` -> Gateway validate table với `table-service` -> `order-service` trả menu -> `POST /api/orders` -> `OrderCreated` lên Kafka -> KDS nhận đơn mới.
 - Đã kiểm tra backup file được sinh đúng lịch.
 - Đã cấu hình giám sát log và cảnh báo resource (CPU/RAM/Disk).
-- Nếu bật VNPay: đã cấu hình đầy đủ signing key/secret theo cổng thanh toán và test luồng return/webhook thật.
+- Nếu bật SePay IPN: đã cấu hình header xác thực và test luồng return/webhook thật.
 - Đã đối chiếu NFR 4.1-4.6 theo code hiện tại tại `reports/nfr/non-functional-readiness.md`.
 
 Nếu cần stack quan sát trong cùng file compose:

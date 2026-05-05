@@ -8,7 +8,7 @@ import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToa
 import { ChatBubbleLeftRightIcon, ShoppingBagIcon, XMarkIcon, MinusIcon } from '@heroicons/react/24/outline'
 
 type PaymentMode = 'POSTPAY' | 'PREPAY'
-type PaymentProvider = 'VIETQR'
+type PaymentProvider = 'SEPAY'
 
 interface CustomizationOption {
   value: string
@@ -142,7 +142,7 @@ interface PaymentStatusResponse {
   paymentId: string
   orderId: string
   status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED' | 'EXPIRED' | 'CANCELLED'
-  provider: 'VIETQR' | 'CASH'
+  provider: 'SEPAY' | 'CASH'
   paymentUrl?: string | null
   transferContent?: string | null
   vietQr?: {
@@ -331,7 +331,7 @@ export default function CustomerMenu() {
   const [cartDrafts, setCartDrafts] = useState<Record<string, CartDraft>>({})
   const [cartLoaded, setCartLoaded] = useState(false)
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('POSTPAY')
-  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('VIETQR')
+  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('SEPAY')
   const [promoCode, setPromoCode] = useState('')
   const [promoPreview, setPromoPreview] = useState<PromotionPreview | null>(null)
   const [applyingPromo, setApplyingPromo] = useState(false)
@@ -1677,7 +1677,7 @@ export default function CustomerMenu() {
                   disabled={editingCurrentOrder}
                   className={`${fieldClass} mt-2`}
                 >
-                  <option value="VIETQR">VietQR</option>
+                  <option value="SEPAY">SePay</option>
                 </select>
               )}
             </div>
@@ -1860,7 +1860,7 @@ export default function CustomerMenu() {
                       <p>
                         Trạng thái: <span className="font-semibold">{trangThaiThanhToan(currentPayment.status)}</span>
                       </p>
-                      {currentPayment.provider === 'VIETQR' &&
+                      {currentPayment.provider === 'SEPAY' &&
                         (currentPayment.paymentUrl || currentPayment.vietQr?.qrImageUrl) && (
                           <div className="space-y-2">
                             {currentPayment.paymentUrl && (

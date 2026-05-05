@@ -107,6 +107,8 @@ export function phuongThucThanhToan(method?: string | null): string {
       return 'Tiền mặt'
     case 'VIETQR':
       return 'VietQR'
+    case 'SEPAY':
+      return 'SePay'
     case 'VNPAY':
       return 'VNPay'
     default:

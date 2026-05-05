@@ -8,9 +8,10 @@ import { WebhookDto } from './dto/webhook.dto';
 import { PaymentReturnDto } from './dto/return.dto';
 import { PaymentStatus } from '@prisma/client';
 
-type SupportedProvider = 'VIETQR' | 'CASH' | 'VNPAY';
+type SupportedProvider = 'SEPAY' | 'CASH';
 type OnlineProvider = Exclude<SupportedProvider, 'CASH'>;
 type ReturnStatusHint = PaymentStatus | 'SUCCESS_HINT' | null;
+type RequestHeaders = Record<string, string | string[] | undefined>;
 
 const TERMINAL_PAYMENT_STATUSES = new Set<PaymentStatus>([
   PaymentStatus.PAID,
@@ -71,6 +72,10 @@ export class PaymentService {
     return String(this.config.get<string>('VIETQR_QUERY_URL', '') || '').trim();
   }
 
+  private get sepayQueryUrl() {
+    return String(this.config.get<string>('SEPAY_QUERY_URL', '') || '').trim();
+  }
+
   private get onlinePaymentTimeoutMinutes() {
     const value = Number(this.config.get<string>('ONLINE_PAYMENT_TIMEOUT_MINUTES', '30'));
     if (!Number.isFinite(value) || value <= 0) {
@@ -121,7 +126,7 @@ export class PaymentService {
 
   private normalizeProvider(provider: string): SupportedProvider {
     const normalized = String(provider || '').toUpperCase();
-    if (!['VIETQR', 'CASH', 'VNPAY'].includes(normalized)) {
+    if (!['SEPAY', 'CASH'].includes(normalized)) {
       throw new BadRequestException(`Unsupported provider: ${provider}`);
     }
     return normalized as SupportedProvider;
@@ -253,7 +258,116 @@ export class PaymentService {
 
   private getOnlineProviderStatusQueryUrl(provider: OnlineProvider) {
     if (provider === 'VNPAY') return this.vnpayQueryUrl;
+    if (provider === 'SEPAY') return this.sepayQueryUrl || this.vietQrQueryUrl;
     return this.vietQrQueryUrl;
+  }
+
+  private getHeaderValue(headers: RequestHeaders | undefined, key: string) {
+    if (!headers) return '';
+    const lowerKey = key.toLowerCase();
+    const entry = Object.entries(headers).find(([k]) => k.toLowerCase() === lowerKey)?.[1];
+    if (Array.isArray(entry)) return String(entry[0] || '').trim();
+    return String(entry || '').trim();
+  }
+
+  private verifySepayWebhookAuth(headers?: RequestHeaders) {
+    const expectedApiKey = String(this.config.get<string>('SEPAY_IPN_API_KEY', '') || '').trim();
+    const expectedSecretKey =
+      String(this.config.get<string>('SEPAY_WEBHOOK_SECRET', '') || '').trim() || this.commonWebhookSecret;
+
+    if (!expectedApiKey && !expectedSecretKey) {
+      return;
+    }
+
+    const authHeader = this.getHeaderValue(headers, 'authorization');
+    const secretHeader = this.getHeaderValue(headers, 'x-secret-key');
+
+    const isApiKeyMatch = expectedApiKey
+      ? authHeader.toLowerCase() === `apikey ${expectedApiKey}`.toLowerCase()
+      : false;
+    const isSecretMatch = expectedSecretKey ? secretHeader === expectedSecretKey : false;
+
+    if (!isApiKeyMatch && !isSecretMatch) {
+      throw new BadRequestException('Invalid SePay webhook authentication');
+    }
+  }
+
+  private extractOrderHintsFromText(raw: string) {
+    const text = String(raw || '').trim();
+    if (!text) return [];
+
+    const matches = new Set<string>();
+    const patterns = [
+      /\bPAY\s+([A-Z0-9_-]{6,64})\b/gi,
+      /\bORDER[_\s:-]*([A-Z0-9_-]{6,64})\b/gi,
+      /\bINV[_\s:-]*([A-Z0-9_-]{6,64})\b/gi,
+      /\b([a-z0-9]{20,64})\b/gi,
+    ];
+
+    for (const pattern of patterns) {
+      let result: RegExpExecArray | null;
+      do {
+        result = pattern.exec(text);
+        if (result?.[1]) {
+          matches.add(String(result[1]).trim());
+        }
+      } while (result);
+    }
+
+    return Array.from(matches);
+  }
+
+  private async resolvePaymentFromSepayPayload(payload: Record<string, any>) {
+    const code = String(payload.code || payload.payment_code || '').trim();
+    const content = String(payload.content || '').trim();
+    const transactionId = String(payload.id || payload.transaction_id || '').trim();
+
+    const orderHints = new Set<string>();
+    if (code) orderHints.add(code);
+    for (const hint of this.extractOrderHintsFromText(content)) {
+      orderHints.add(hint);
+    }
+
+    for (const orderId of orderHints) {
+      const payment = await this.prisma.payment.findUnique({ where: { orderId } });
+      if (payment) return payment;
+    }
+
+    if (transactionId) {
+      const payment = await this.prisma.payment.findFirst({
+        where: { transactionId },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (payment) return payment;
+    }
+
+    const recentPending = await this.prisma.payment.findMany({
+      where: {
+        provider: 'SEPAY',
+        status: { in: [PaymentStatus.WAITING_TRANSFER, PaymentStatus.PENDING] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    const normalizedContent = content.toLowerCase();
+    const byTransferContent = recentPending.find((item) => {
+      const transfer = String(item.transferContent || '').trim().toLowerCase();
+      return transfer && normalizedContent.includes(transfer);
+    });
+
+    return byTransferContent || null;
+  }
+
+  private normalizeSepayWebhookStatus(payload: Record<string, any>) {
+    const transferType = String(payload.transferType || payload.transfer_type || '').toLowerCase();
+    if (transferType === 'in' || transferType === 'credit') {
+      return PaymentStatus.PAID;
+    }
+    if (transferType === 'out' || transferType === 'debit') {
+      return PaymentStatus.CANCELLED;
+    }
+    return null;
   }
 
   private isPaymentTerminal(status: PaymentStatus) {
@@ -404,7 +518,7 @@ export class PaymentService {
   }
 
   private buildFrontendReturnUrl(
-    provider: 'VIETQR' | 'VNPAY',
+    provider: 'VIETQR' | 'SEPAY' | 'VNPAY',
     payload: { orderId: string; transactionId: string; resultCode?: string; message?: string },
   ) {
     const url = new URL(this.paymentReturnBaseUrl);
@@ -760,9 +874,10 @@ export class PaymentService {
       return this.buildResponse(payment);
     }
 
-    if (provider === 'VIETQR') {
+    if (provider === 'SEPAY') {
       const onlineQr = this.getOnlineQr();
-      const transactionId = `vietqr_${String(orderId).slice(0, 24)}_${Date.now()}`;
+      const providerPrefix = provider.toLowerCase();
+      const transactionId = `${providerPrefix}_${String(orderId).slice(0, 24)}_${Date.now()}`;
       const transferContent = `PAY ${String(orderId).toUpperCase()}`;
       const payment = await this.prisma.payment.create({
         data: {
@@ -775,6 +890,7 @@ export class PaymentService {
           transferContent,
           metadata: this.buildOnlinePaymentMetadata({
             branchId,
+            gateway: provider,
             vietQr: {
               qrImageUrl: onlineQr.qrImageUrl,
               htmlTag: onlineQr.htmlTag,
@@ -787,7 +903,7 @@ export class PaymentService {
         },
       });
 
-      this.logger.log(`Created VietQR payment ${payment.id} for order ${orderId}`);
+      this.logger.log(`Created ${provider} payment ${payment.id} for order ${orderId}`);
       return this.buildResponse(payment);
     }
 
@@ -913,37 +1029,83 @@ export class PaymentService {
     return this.buildResponse(updated);
   }
 
-  async handleWebhook(webhookDto: WebhookDto) {
-    const provider = this.ensureOnlineProvider(this.normalizeProvider(webhookDto.provider));
-    this.verifyIncomingWebhookSignature(provider, webhookDto);
+  async handleWebhook(webhookDto: WebhookDto | Record<string, any>, headers?: RequestHeaders) {
+    const payload = (webhookDto || {}) as Record<string, any>;
+
+    const isSepayIpnFormat =
+      Object.prototype.hasOwnProperty.call(payload, 'transferType') ||
+      Object.prototype.hasOwnProperty.call(payload, 'transfer_type') ||
+      Object.prototype.hasOwnProperty.call(payload, 'transferAmount') ||
+      Object.prototype.hasOwnProperty.call(payload, 'amount');
+
+    if (isSepayIpnFormat) {
+      this.verifySepayWebhookAuth(headers);
+
+      const mappedStatus = this.normalizeSepayWebhookStatus(payload);
+      if (!mappedStatus) {
+        return { success: true, ignored: true, reason: 'unsupported-transfer-type' };
+      }
+
+      const payment = await this.resolvePaymentFromSepayPayload(payload);
+      if (!payment) {
+        return { success: true, ignored: true, reason: 'payment-not-found' };
+      }
+
+      if (payment.provider !== 'SEPAY') {
+        throw new BadRequestException(`Order ${payment.orderId} is not using SEPAY`);
+      }
+
+      const transactionId =
+        String(payload.id || payload.transaction_id || '').trim() ||
+        payment.transactionId ||
+        undefined;
+
+      const rawAmount = Number(payload.transferAmount ?? payload.amount ?? 0);
+      const paidAmount = Number.isFinite(rawAmount) ? rawAmount : 0;
+
+      const updated = await this.updatePaymentStatus(payment.id, mappedStatus, transactionId, {
+        webhookAt: new Date().toISOString(),
+        webhookStatus: mappedStatus,
+        webhookRaw: payload,
+        amountReceived: paidAmount > 0 ? paidAmount : undefined,
+        verificationSource: 'sepay-ipn',
+      });
+
+      this.logger.log(`Updated SEPAY payment ${updated.id} to ${updated.status} via webhook ${transactionId || '-'}`);
+      return { success: true, paymentId: updated.id, newStatus: updated.status };
+    }
+
+    const legacyWebhook = webhookDto as WebhookDto;
+    const provider = this.ensureOnlineProvider(this.normalizeProvider(legacyWebhook.provider));
+    this.verifyIncomingWebhookSignature(provider, legacyWebhook);
 
     const existingPayment = await this.prisma.payment.findUnique({
-      where: { orderId: webhookDto.orderId },
+      where: { orderId: legacyWebhook.orderId },
     });
     if (!existingPayment) {
-      throw new NotFoundException(`Payment for order ${webhookDto.orderId} not found`);
+      throw new NotFoundException(`Payment for order ${legacyWebhook.orderId} not found`);
     }
     if (existingPayment.provider !== provider) {
-      throw new BadRequestException(`Order ${webhookDto.orderId} is not using ${provider}`);
+      throw new BadRequestException(`Order ${legacyWebhook.orderId} is not using ${provider}`);
     }
 
-    const mappedStatus = this.normalizePaymentStatus(webhookDto.status);
+    const mappedStatus = this.normalizePaymentStatus(legacyWebhook.status);
     if (!mappedStatus) {
-      throw new BadRequestException(`Unsupported webhook payment status: ${webhookDto.status}`);
+      throw new BadRequestException(`Unsupported webhook payment status: ${legacyWebhook.status}`);
     }
 
     const updated = await this.updatePaymentStatus(
       existingPayment.id,
       mappedStatus,
-      webhookDto.transactionId || existingPayment.transactionId || undefined,
+      legacyWebhook.transactionId || existingPayment.transactionId || undefined,
       {
         webhookAt: new Date().toISOString(),
-        webhookStatus: webhookDto.status,
-        webhookRaw: webhookDto.rawData || null,
+        webhookStatus: legacyWebhook.status,
+        webhookRaw: legacyWebhook.rawData || null,
       },
     );
 
-    this.logger.log(`Updated ${provider} payment ${updated.id} to ${updated.status} via webhook ${webhookDto.transactionId}`);
+    this.logger.log(`Updated ${provider} payment ${updated.id} to ${updated.status} via webhook ${legacyWebhook.transactionId}`);
     return { success: true, paymentId: updated.id, newStatus: updated.status };
   }
 

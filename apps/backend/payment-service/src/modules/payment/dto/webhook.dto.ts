@@ -1,7 +1,7 @@
 import { IsString, IsOptional, IsIn } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
-const WEBHOOK_PROVIDERS = ['VIETQR', 'VNPAY'] as const;
+const WEBHOOK_PROVIDERS = ['SEPAY'] as const;
 
 export class WebhookDto {
   @ApiProperty({ example: 'order_123' })
@@ -16,13 +16,13 @@ export class WebhookDto {
   @IsIn(['PAID', 'FAILED', 'EXPIRED', 'CANCELLED', 'WAITING_TRANSFER'])
   status: 'PAID' | 'FAILED' | 'EXPIRED' | 'CANCELLED' | 'WAITING_TRANSFER';
 
-  @ApiProperty({ example: 'vietqr_signature', required: false })
+  @ApiProperty({ example: 'sepay_signature', required: false })
   @IsOptional()
   @IsString()
   signature?: string;
 
-  @ApiProperty({ example: 'VIETQR', enum: WEBHOOK_PROVIDERS })
-  @IsIn(WEBHOOK_PROVIDERS, { message: 'Provider must be VIETQR or VNPAY' })
+  @ApiProperty({ example: 'SEPAY', enum: WEBHOOK_PROVIDERS })
+  @IsIn(WEBHOOK_PROVIDERS, { message: 'Provider must be SEPAY' })
   @IsString()
   provider: string;
 

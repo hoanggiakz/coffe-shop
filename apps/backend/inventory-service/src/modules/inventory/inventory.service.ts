@@ -468,19 +468,19 @@ export class InventoryService {
       quantity = Math.abs(afterStock - beforeStock);
     } else if (input.type === StockType.IMPORT) {
       if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw new BadRequestException('So luong nhap khong hop le');
+        throw new BadRequestException('Số lượng nhập không hợp lệ!');
       }
       afterStock = beforeStock + quantity;
     } else if (input.type === StockType.EXPORT) {
       if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw new BadRequestException('So luong xuat khong hop le');
+        throw new BadRequestException('Số lượng xuất không hợp lệ!');
       }
       afterStock = beforeStock - quantity;
       if (afterStock < 0) {
-        throw new BadRequestException(`Ton kho khong du cho ingredient ${ingredient.id}`);
+        throw new BadRequestException(`Tồn kho không đủ cho ingredient ${ingredient.id}`);
       }
     } else {
-      throw new BadRequestException(`Khong ho tro type ${input.type}`);
+      throw new BadRequestException(`Không hỗ trợ loại ${input.type}`);
     }
 
     const unitPrice = Number(input.unitPrice || 0);
@@ -530,7 +530,7 @@ export class InventoryService {
     }
 
     this.lowStockState.set(String(ingredient.id), true);
-    const title = `Canh bao ton kho thap: ${ingredient.name}`;
+    const title = `Cảnh báo tồn kho thấp: ${ingredient.name}`;
     const message = `${ingredient.name} con ${stock} ${ingredient.unit}, thap hon/ bang muc toi thieu ${minStock}`;
 
     // Fire-and-forget: khong de luong canh bao lam tre request chinh.

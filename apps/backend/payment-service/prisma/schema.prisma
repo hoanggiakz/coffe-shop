@@ -23,7 +23,7 @@ model Payment {
   tableId   String?
   amount    Decimal
   status    PaymentStatus  @default(PENDING)
-  provider  String         // "VIETQR" | "CASH" | "VNPAY"
+  provider  String         // "SEPAY" | "CASH"
   transactionId String?
   transferContent String?
   metadata  Json?

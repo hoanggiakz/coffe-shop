@@ -67,7 +67,7 @@ export class CreateMenuItemManagementDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(1000)
+  @MaxLength(4000000)
   image?: string;
 
   @IsOptional()
@@ -116,7 +116,7 @@ export class UpdateMenuItemManagementDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(1000)
+  @MaxLength(4000000)
   image?: string;
 
   @IsOptional()
