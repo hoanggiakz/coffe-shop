@@ -20,6 +20,7 @@ import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 import { phuongThucThanhToan, trangThaiThanhToan, vaiTroNhanVien } from '@/utils/display'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
+import { useAuthStore } from '@/stores/authStore'
 
 type TimeGroup = 'day' | 'week' | 'month' | 'year'
 type ExportType = 'revenue' | 'top-items' | 'inventory' | 'staff-performance' | 'dashboard'
@@ -129,6 +130,8 @@ const selectClass =
 export default function Reports() {
   const { tv } = useI18n()
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
+  const setSelectedBranchId = useBranchScopeStore((state) => state.setSelectedBranchId)
+  const currentUserBranchId = useAuthStore((state) => String(state.user?.branchId || '').trim())
   const now = new Date()
   const oneMonthAgo = new Date()
   oneMonthAgo.setDate(now.getDate() - 30)
@@ -231,6 +234,18 @@ export default function Reports() {
     [dashboard?.payments.byStatus],
   )
 
+  const noBusinessDataForSelectedBranch = useMemo(() => {
+    if (!selectedBranchId || !dashboard) return false
+
+    const noRevenue = Number(dashboard.revenue?.totalRevenue || 0) <= 0
+    const noOrders = Number(dashboard.revenue?.totalOrders || 0) <= 0
+    const noTransactions = Number(dashboard.payments?.summary?.totalTransactions || 0) <= 0
+    const noTopItems = (topItems || []).length === 0
+    const noStaffStats = (staffItems || []).length === 0
+
+    return noRevenue && noOrders && noTransactions && noTopItems && noStaffStats
+  }, [dashboard, selectedBranchId, staffItems, topItems])
+
   const handleExport = async () => {
     try {
       const response = await api.get('/reports/export', {
@@ -282,6 +297,27 @@ export default function Reports() {
           {tv('Làm mới', 'Refresh')}
         </Button>
       </div>
+
+      {noBusinessDataForSelectedBranch && (
+        <Card className="border border-amber-200 bg-amber-50/80">
+          <p className="text-sm font-medium text-amber-800">
+            Không có dữ liệu giao dịch cho chi nhánh đang chọn trong khoảng thời gian này.
+          </p>
+          <p className="mt-1 text-xs text-amber-700">
+            BranchId hiện tại: {selectedBranchId}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setSelectedBranchId('')}>
+              Xem toàn hệ thống
+            </Button>
+            {currentUserBranchId && currentUserBranchId !== selectedBranchId && (
+              <Button size="sm" variant="secondary" onClick={() => setSelectedBranchId(currentUserBranchId)}>
+                Về chi nhánh của tôi
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
 
       {loading && !dashboard && <RoutePageSkeleton kind="reports" />}
 

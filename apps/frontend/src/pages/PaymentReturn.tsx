@@ -20,9 +20,7 @@ export default function PaymentReturn() {
       ''
 
     const explicitProvider = String(searchParams.get('provider') || '').toUpperCase()
-    const inferredProvider = searchParams.get('vnp_TxnRef')
-      ? 'VNPAY'
-      : 'VIETQR'
+    const inferredProvider = 'SEPAY'
     const provider = explicitProvider || inferredProvider
 
     const resultCode =

@@ -7,6 +7,36 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { useUiStore } from './stores/uiStore.ts'
 
+const CHUNK_RELOAD_GUARD_KEY = '__chunk_reload_guard__'
+
+function tryRecoverFromChunkLoadError() {
+  if (sessionStorage.getItem(CHUNK_RELOAD_GUARD_KEY) === '1') {
+    sessionStorage.removeItem(CHUNK_RELOAD_GUARD_KEY)
+    return
+  }
+  sessionStorage.setItem(CHUNK_RELOAD_GUARD_KEY, '1')
+  window.location.reload()
+}
+
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault()
+  tryRecoverFromChunkLoadError()
+})
+
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason
+  const message =
+    typeof reason?.message === 'string' ? reason.message : String(reason ?? '')
+
+  if (
+    message.includes('Failed to fetch dynamically imported module') ||
+    message.includes('Importing a module script failed')
+  ) {
+    event.preventDefault()
+    tryRecoverFromChunkLoadError()
+  }
+})
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

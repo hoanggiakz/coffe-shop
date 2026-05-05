@@ -49,6 +49,8 @@ const getMethodIcon = (provider: string): string => {
       return '💵'
     case 'VIETQR':
       return '🔳'
+    case 'SEPAY':
+      return '🏦'
     case 'VNPAY':
       return '🏦'
     default:
@@ -212,9 +214,7 @@ export default function Payments() {
                   <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
                     {getMethodIcon(payment.provider)} {phuongThucThanhToan(payment.provider)}
                   </p>
-                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                    Mã GD VNPay: {payment.provider === 'VNPAY' ? payment.transactionId || '-' : '-'}
-                  </p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Mã GD: {payment.transactionId || '-'}</p>
                 </div>
               ))}
             </div>
@@ -227,7 +227,7 @@ export default function Payments() {
                     <th className="pb-3 font-medium text-gray-500">Đơn hàng</th>
                     <th className="pb-3 font-medium text-gray-500">Số tiền</th>
                     <th className="pb-3 font-medium text-gray-500">Phương thức</th>
-                    <th className="pb-3 font-medium text-gray-500">Mã GD VNPay</th>
+                    <th className="pb-3 font-medium text-gray-500">Mã giao dịch</th>
                     <th className="pb-3 font-medium text-gray-500">Trạng thái</th>
                     <th className="pb-3 font-medium text-gray-500">Thời gian</th>
                   </tr>
@@ -245,7 +245,7 @@ export default function Payments() {
                           {getMethodIcon(payment.provider)} {phuongThucThanhToan(payment.provider)}
                         </span>
                       </td>
-                      <td className="py-3 text-gray-500">{payment.provider === 'VNPAY' ? payment.transactionId || '-' : '-'}</td>
+                      <td className="py-3 text-gray-500">{payment.transactionId || '-'}</td>
                       <td className="py-3">
                         <span
                           className={cn(

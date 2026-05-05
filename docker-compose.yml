@@ -59,6 +59,7 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:3005
       PAYMENT_SERVICE_URL: http://payment-service:3004
       REPORT_SERVICE_URL: http://report-service:3006
+      MENU_QR_ALLOW_BRANCH_ONLY_TEST: ${MENU_QR_ALLOW_BRANCH_ONLY_TEST:-true}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://localhost}
     depends_on:
       redis:
@@ -251,10 +252,13 @@ services:
       VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:-}
       VNPAY_QUERY_URL: ${VNPAY_QUERY_URL:-}
       VIETQR_QUERY_URL: ${VIETQR_QUERY_URL:-}
+      SEPAY_QUERY_URL: ${SEPAY_QUERY_URL:-}
       ONLINE_PAYMENT_TIMEOUT_MINUTES: ${ONLINE_PAYMENT_TIMEOUT_MINUTES:-30}
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
       VNPAY_WEBHOOK_SECRET: ${VNPAY_WEBHOOK_SECRET:-}
       VIETQR_WEBHOOK_SECRET: ${VIETQR_WEBHOOK_SECRET:-}
+      SEPAY_WEBHOOK_SECRET: ${SEPAY_WEBHOOK_SECRET:-}
+      SEPAY_IPN_API_KEY: ${SEPAY_IPN_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

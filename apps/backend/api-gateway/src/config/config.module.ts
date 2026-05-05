@@ -18,6 +18,7 @@ import * as Joi from 'joi';
         INVENTORY_SERVICE_URL: Joi.string().uri().default('http://inventory-service:3005'),
         PAYMENT_SERVICE_URL: Joi.string().uri().default('http://payment-service:3004'),
         REPORT_SERVICE_URL: Joi.string().uri().default('http://report-service:3006'),
+        MENU_QR_ALLOW_BRANCH_ONLY_TEST: Joi.boolean().truthy('true').falsy('false').default(false),
         ALLOWED_ORIGINS: Joi.string(),
       }),
       validationOptions: {

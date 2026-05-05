@@ -1,12 +1,12 @@
-import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Get, Param, Query } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Get, Param, Query, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
-import { WebhookDto } from './dto/webhook.dto';
 import { PaymentReturnDto } from './dto/return.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ConfirmCashDto } from './dto/confirm-cash.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
+import type { Request } from 'express';
 
 @ApiTags('Payments')
 @Controller('payments')
@@ -25,7 +25,7 @@ export class PaymentController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create payment (CASH, VIETQR, VNPAY)' })
+  @ApiOperation({ summary: 'Create payment (CASH, SEPAY)' })
   @ApiResponse({ status: 201, description: 'Payment created.' })
   @ApiBody({ type: CreatePaymentDto })
   @HttpCode(HttpStatus.CREATED)
@@ -88,10 +88,10 @@ export class PaymentController {
   @Post('webhook')
   @ApiOperation({ summary: 'Handle provider webhook (public)' })
   @ApiResponse({ status: 200, description: 'Webhook processed.' })
-  @ApiBody({ type: WebhookDto })
+  @ApiBody({ type: Object })
   @HttpCode(HttpStatus.OK)
-  handleWebhook(@Body() webhookDto: WebhookDto) {
-    return this.paymentService.handleWebhook(webhookDto);
+  handleWebhook(@Req() req: Request, @Body() webhookDto: Record<string, any>) {
+    return this.paymentService.handleWebhook(webhookDto, req.headers as Record<string, string | string[] | undefined>);
   }
 
   @Post('return')
