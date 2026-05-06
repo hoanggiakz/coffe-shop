@@ -49,7 +49,11 @@ docker compose ps
    - Kỳ vọng `201`.
 9. `GET /api/v1/payments/online/qr`
    - Kỳ vọng `200`.
-10. Health checks:
+10. `POST /api/v1/payments/webhook/relay` (mock payload SePay)
+   - Kỳ vọng `200`, có `eventId`.
+11. `GET /api/v1/payments/webhook/relay/events?sinceId=0&limit=5&consumer=acceptance`
+   - Kỳ vọng `200`, có mảng `events`.
+12. Health checks:
    - `/api/users/health`
    - `/api/tables/health`
    - `/api/orders/health`
@@ -57,15 +61,15 @@ docker compose ps
    - `/api/v1/ingredients/health`
    - `/api/v1/payments/health`
    - `/api/reports/health`
-11. `POST /api/users/customer/request-otp`
+13. `POST /api/users/customer/request-otp`
    - Kỳ vọng `200`, nhận `otp` (sandbox) và `expiresInSeconds`.
-12. `POST /api/users/customer/register-otp` hoặc `POST /api/users/customer/register-email`
+14. `POST /api/users/customer/register-otp` hoặc `POST /api/users/customer/register-email`
    - Kỳ vọng `201`, có `accessToken`.
-13. `GET /api/orders/history?customerId=<customerId>&limit=20`
+15. `GET /api/orders/history?customerId=<customerId>&limit=20`
    - Kỳ vọng `200`, dữ liệu đơn mới -> cũ.
-14. `PATCH /api/orders/{id}/status` -> `COMPLETED` với order có `customerId`
+16. `PATCH /api/orders/{id}/status` -> `COMPLETED` với order có `customerId`
    - Kỳ vọng `200`.
-15. `GET /api/users/customer/profile` và `GET /api/users/customer/offers` (Bearer customer token)
+17. `GET /api/users/customer/profile` và `GET /api/users/customer/offers` (Bearer customer token)
    - Kỳ vọng `200`, điểm tăng theo rule `floor(amount/10000)` (1 điểm = 10.000đ).
 
 ### C. Tiêu chí pass 4.1

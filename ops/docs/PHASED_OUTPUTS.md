@@ -47,8 +47,8 @@ Ngày cập nhật: `2026-04-14`
   - dashboard, revenue, top-items, inventory, staff-performance, export.
 - Promotions/admin menu:
   - quản trị menu/promotion qua `/api/orders/admin/*`.
-- Staff/branch management:
-  - `/api/users/staff*`, `/api/users/admin/branches*`.
+- Staff management (moi truong hien tai van hanh 1 chi nhanh):
+  - `/api/users/staff*`.
 - Customer advanced (C-16..C-18):
   - OTP/email register-login: `/api/users/customer/*`.
   - Lịch sử đơn: `GET /api/orders/history`.
@@ -56,7 +56,7 @@ Ngày cập nhật: `2026-04-14`
 
 ### 2.2 Frontend
 
-- Menu management, promotions, inventory, reports, staff, branches.
+- Menu management, promotions, inventory, reports, staff.
 - Thanh toán online + trang `payment/return`.
 - Hỗ trợ realtime staff notifications.
 - Khách hàng nâng cao: login OTP/email, xem lịch sử đơn, hiển thị điểm/tier hiện tại.
