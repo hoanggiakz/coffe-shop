@@ -408,3 +408,85 @@ Ghi chú bám code:
 
 - Điện thoại và máy host phải cùng mạng LAN.
 - QR cần được tạo lại nếu đổi domain/IP.
+
+## 10. Demo Trên Ubuntu VM + Cloudflare Tunnel
+
+Mục này thay cho `README-server.md` cũ, dùng khi demo public từ máy ảo Ubuntu.
+
+### 10.1 Clone và chạy đúng thư mục
+
+```bash
+cd ~
+git clone -b develop git@github.com:hoanggiakz/coffe-shop.git
+cd coffe-shop/Microservices
+cp .env.example .env
+```
+
+### 10.2 Cấu hình `.env` cho URL public
+
+Thay `<YOUR-TUNNEL-DOMAIN>` bằng URL tunnel thật:
+
+```env
+APP_BASE_URL=https://<YOUR-TUNNEL-DOMAIN>
+ALLOWED_ORIGINS=https://<YOUR-TUNNEL-DOMAIN>,https://localhost
+QR_BASE_URL=https://<YOUR-TUNNEL-DOMAIN>/menu
+VITE_WS_URL=https://<YOUR-TUNNEL-DOMAIN>
+NEXT_PUBLIC_API_URL=https://<YOUR-TUNNEL-DOMAIN>
+NEXT_PUBLIC_WS_URL=https://<YOUR-TUNNEL-DOMAIN>
+ONLINE_PAYMENT_QR_URL=https://<YOUR-TUNNEL-DOMAIN>/sepay-qr.png
+```
+
+### 10.3 Build và chạy stack
+
+```bash
+docker compose config -q
+docker compose up -d --build
+docker compose ps
+```
+
+### 10.4 Chạy Cloudflare Quick Tunnel
+
+```bash
+cloudflared tunnel --url http://localhost
+```
+
+Giữ terminal tunnel luôn mở trong lúc demo.
+
+### 10.5 Khi URL tunnel đổi
+
+1. Sửa lại các biến URL trong `.env` như mục 10.2  
+2. Rebuild service liên quan:
+
+```bash
+docker compose up -d --build frontend api-gateway table-service payment-service
+```
+
+3. Regenerate QR bàn:
+
+```bash
+curl -k -X POST https://localhost/api/tables/qr/batch -H "Content-Type: application/json" -d "{}"
+```
+
+### 10.6 Kiểm tra luồng QR order
+
+Lấy `tableId` thật:
+
+```bash
+curl -k https://localhost/api/tables
+```
+
+Test menu:
+
+```bash
+curl -k "https://localhost/api/orders/menu?tableId=<TABLE_ID>"
+curl "https://<YOUR-TUNNEL-DOMAIN>/api/orders/menu?tableId=<TABLE_ID>"
+```
+
+Kỳ vọng: cả 2 trả `200` và có danh sách món.
+
+### 10.7 SePay relay endpoint (nếu dùng)
+
+- IPN public cố định: `POST /api/v1/payments/webhook/relay`
+- Pull event: `GET /api/v1/payments/webhook/relay/events`
+
+Chi tiết xem thêm: [docs/sepay-webhook-relay.md](docs/sepay-webhook-relay.md)
