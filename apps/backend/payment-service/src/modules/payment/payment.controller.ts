@@ -94,6 +94,42 @@ export class PaymentController {
     return this.paymentService.handleWebhook(webhookDto, req.headers as Record<string, string | string[] | undefined>);
   }
 
+  @Post('webhook/relay')
+  @ApiOperation({ summary: 'Relay ingest endpoint (fixed public IPN target)' })
+  @ApiResponse({ status: 200, description: 'Relay event accepted.' })
+  @ApiBody({ type: Object })
+  @HttpCode(HttpStatus.OK)
+  relayIngest(@Req() req: Request, @Body() webhookDto: Record<string, any>) {
+    return this.paymentService.relayIngest(webhookDto, req.headers as Record<string, string | string[] | undefined>);
+  }
+
+  @Get('webhook/relay/events')
+  @ApiOperation({ summary: 'Relay pull endpoint for local payment-service instances' })
+  @ApiResponse({ status: 200, description: 'Relay events fetched.' })
+  @HttpCode(HttpStatus.OK)
+  relayPull(
+    @Req() req: Request,
+    @Query('sinceId') sinceId?: string,
+    @Query('limit') limit?: string,
+    @Query('consumer') consumer?: string,
+  ) {
+    return this.paymentService.relayPull(
+      { sinceId, limit, consumer },
+      req.headers as Record<string, string | string[] | undefined>,
+    );
+  }
+
+  @Get('webhook')
+  @ApiOperation({ summary: 'Webhook endpoint probe (GET)' })
+  @ApiResponse({ status: 200, description: 'Webhook endpoint is reachable. Use POST for IPN payload.' })
+  webhookProbe() {
+    return {
+      success: true,
+      message: 'Payment webhook endpoint is reachable. SePay IPN must call this URL with POST application/json.',
+      method: 'POST',
+    };
+  }
+
   @Post('return')
   @ApiOperation({ summary: 'Handle provider redirect/return (public)' })
   @ApiResponse({ status: 200, description: 'Return processed.' })

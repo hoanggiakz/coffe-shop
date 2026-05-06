@@ -1051,7 +1051,20 @@ export default function CustomerMenu() {
     setLoadingPaymentStatus(true)
     try {
       const { data } = await api.get(`/v1/payments/orders/${orderId}?allowMissing=true`)
-      setCurrentPayment(data)
+      let payment = data as PaymentStatusResponse | null
+      if (
+        payment &&
+        payment.provider === 'SEPAY' &&
+        ['PENDING', 'WAITING_TRANSFER'].includes(payment.status)
+      ) {
+        const { data: verified } = await api.post(
+          `/v1/payments/${payment.paymentId}/verify`,
+          payment.transactionId ? { transactionId: payment.transactionId } : {},
+          customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
+        )
+        payment = verified as PaymentStatusResponse
+      }
+      setCurrentPayment(payment)
     } catch (error: any) {
       if (error.response?.status === 404) {
         setCurrentPayment(null)
@@ -1216,12 +1229,7 @@ export default function CustomerMenu() {
             customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
           )
           setCurrentPayment(payment)
-          if (payment?.paymentUrl) {
-            window.open(payment.paymentUrl, '_blank')
-          } else if (payment?.vietQr?.qrImageUrl) {
-            window.open(payment.vietQr.qrImageUrl, '_blank')
-          }
-          toast.success('Da tao don va chuyen sang cong thanh toan')
+          toast.success('Da tao don va hien ma QR thanh toan')
         } else {
           toast.success(`Đặt món thành công. Mã đơn: ${maDonHangNgan(newOrderId)}`)
         }
@@ -1863,23 +1871,31 @@ export default function CustomerMenu() {
                       {currentPayment.provider === 'SEPAY' &&
                         (currentPayment.paymentUrl || currentPayment.vietQr?.qrImageUrl) && (
                           <div className="space-y-2">
-                            {currentPayment.paymentUrl && (
-                              <button
-                                type="button"
-                                onClick={() => window.open(currentPayment.paymentUrl || '', '_blank')}
-                                className="rounded border px-2 py-1"
-                              >
-                                Mở link thanh toán
-                              </button>
-                            )}
                             {currentPayment.vietQr?.qrImageUrl && (
-                              <button
-                                type="button"
-                                onClick={() => window.open(currentPayment.vietQr?.qrImageUrl || '', '_blank')}
-                                className="rounded border px-2 py-1"
+                              <div className="rounded border border-sky-200 bg-white p-2">
+                                <p className="mb-2 text-xs text-slate-600">Quét QR SePay để thanh toán</p>
+                                <img
+                                  src={currentPayment.vietQr.qrImageUrl}
+                                  alt="SePay QR"
+                                  className="mx-auto h-48 w-48 rounded border border-slate-200 object-contain"
+                                />
+                                <p className="mt-2 break-all text-xs text-slate-600">
+                                  Nội dung CK:{' '}
+                                  <span className="font-semibold">
+                                    {currentPayment.vietQr.transferContent || currentPayment.transferContent || '-'}
+                                  </span>
+                                </p>
+                              </div>
+                            )}
+                            {currentPayment.paymentUrl && (
+                              <a
+                                href={currentPayment.paymentUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-block rounded border px-2 py-1"
                               >
-                                Mở mã VietQR
-                              </button>
+                                Mở cổng thanh toán
+                              </a>
                             )}
                           </div>
                         )}

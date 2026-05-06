@@ -45,15 +45,6 @@ type StockMovement = {
 type MenuItem = {
   id: string
   name: string
-  customizations?: Array<{
-    id: string
-    label?: string
-    options?: Array<{
-      value?: string
-      label?: string
-      priceDelta?: number
-    }>
-  }>
 }
 
 type StaffNotificationType = 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY' | 'LOW_STOCK'
@@ -100,14 +91,6 @@ const defaultReceiptRow = {
 }
 const selectClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
-const TOPPING_INGREDIENT_PREFIX = 'topping::'
-
-function toToppingIngredientId(optionValue: string) {
-  const normalized = String(optionValue || '').trim().toLowerCase()
-  if (!normalized) return ''
-  return `${TOPPING_INGREDIENT_PREFIX}${encodeURIComponent(normalized)}`
-}
-
 function toDateInputValue(date: Date) {
   return date.toISOString().slice(0, 10)
 }
@@ -210,19 +193,6 @@ export default function Inventory() {
       (data || []).map((item: any) => ({
         id: item.id,
         name: item.name,
-        customizations: Array.isArray(item?.customizations)
-          ? item.customizations.map((group: any) => ({
-              id: String(group?.id || ''),
-              label: String(group?.label || ''),
-              options: Array.isArray(group?.options)
-                ? group.options.map((option: any) => ({
-                    value: String(option?.value || ''),
-                    label: String(option?.label || ''),
-                    priceDelta: Number(option?.priceDelta || 0),
-                  }))
-                : [],
-            }))
-          : [],
       })),
     )
   }
@@ -503,32 +473,6 @@ export default function Inventory() {
           id: String(item.id),
           name: String(item.name),
           unit: 'portion',
-        })
-
-        ;(item.customizations || []).forEach((group) => {
-          ;(group.options || []).forEach((option) => {
-            const optionValue = String(option?.value || '').trim()
-            if (!optionValue) return
-
-            const optionLabel = String(option?.label || optionValue).trim()
-            const groupLabel = String(group?.label || '').trim()
-            const normalizedScope = `${groupLabel} ${optionLabel} ${optionValue}`.toLowerCase()
-            const isLikelyTopping =
-              normalizedScope.includes('topping') ||
-              normalizedScope.includes('toping') ||
-              Number(option?.priceDelta || 0) > 0
-
-            if (!isLikelyTopping) return
-
-            const toppingIngredientId = toToppingIngredientId(optionValue)
-            if (!toppingIngredientId) return
-
-            syncItems.set(toppingIngredientId, {
-              id: toppingIngredientId,
-              name: optionLabel,
-              unit: 'portion',
-            })
-          })
         })
       })
 
