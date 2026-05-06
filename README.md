@@ -436,6 +436,10 @@ NEXT_PUBLIC_WS_URL=https://<YOUR-TUNNEL-DOMAIN>
 ONLINE_PAYMENT_QR_URL=https://<YOUR-TUNNEL-DOMAIN>/sepay-qr.png
 ```
 
+Luu y:
+- Khong commit `.env` len git.
+- `.env.example` chi de placeholder (`your-public-domain`), khong de URL tunnel that.
+
 ### 10.3 Build và chạy stack
 
 ```bash
