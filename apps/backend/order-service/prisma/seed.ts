@@ -35,16 +35,6 @@ const drinkCustomizations = [
     ],
   },
   {
-    id: 'toppings',
-    label: 'Topping',
-    type: 'multi',
-    options: [
-      { value: 'boba', label: 'Tran chau (+7.000đ)', priceDelta: 7000 },
-      { value: 'foam', label: 'Kem cheese (+8.000đ)', priceDelta: 8000 },
-      { value: 'pudding', label: 'Pudding (+6.000đ)', priceDelta: 6000 },
-    ],
-  },
-  {
     id: 'note',
     label: 'Ghi chu',
     type: 'text',

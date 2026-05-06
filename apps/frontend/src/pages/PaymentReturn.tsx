@@ -66,6 +66,27 @@ export default function PaymentReturn() {
               'Request received. System is verifying transaction with payment provider.',
             ),
           )
+          let attempts = 0
+          const maxAttempts = 6
+          while (attempts < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, 3000))
+            const { data: payment } = await api.get(`/v1/payments/orders/${payload.orderId}?allowMissing=true`)
+            if (!payment) {
+              attempts += 1
+              continue
+            }
+            if (payment.status === 'PAID') {
+              setStatus('success')
+              setMessage(tv('Thanh toán thành công. Cảm ơn bạn!', 'Payment successful. Thank you!'))
+              return
+            }
+            if (['FAILED', 'EXPIRED', 'CANCELLED'].includes(String(payment.status || ''))) {
+              setStatus('failed')
+              setMessage(tv('Thanh toán thất bại, hết hạn hoặc đã hủy.', 'Payment failed, expired, or cancelled.'))
+              return
+            }
+            attempts += 1
+          }
           return
         }
 

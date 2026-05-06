@@ -37,3 +37,13 @@ model Payment {
   @@index([status])
   @@index([provider])
 }
+
+model PaymentRelayEvent {
+  id        Int      @id @default(autoincrement())
+  payload   Json
+  headers   Json?
+  createdAt DateTime @default(now())
+
+  @@map("payment_relay_events")
+  @@index([createdAt])
+}

@@ -47,14 +47,25 @@ interface OrderApi {
 interface PaymentApi {
   paymentId: string
   orderId: string
+  tableId?: string | null
+  amount: number
   status: 'PENDING' | 'WAITING_TRANSFER' | 'WAITING_CASH' | 'PAID' | 'FAILED' | 'EXPIRED' | 'CANCELLED'
   provider: 'CASH' | 'SEPAY'
   paymentUrl?: string | null
+  transferContent?: string | null
   vietQr?: {
     qrImageUrl: string
+    transferContent?: string
+    accountNo?: string
+    accountName?: string
   } | null
   amountReceived?: number | null
   changeDue?: number | null
+  paidBy?: string | null
+  customerName?: string | null
+  paidAt?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
 }
 
 const paymentMethods: PaymentMethod[] = ['CASH', 'SEPAY']
@@ -86,6 +97,10 @@ export default function Orders() {
   const [cashReceived, setCashReceived] = useState('')
   const [processingPayment, setProcessingPayment] = useState(false)
   const [createdPayment, setCreatedPayment] = useState<PaymentApi | null>(null)
+  const [paymentHistory, setPaymentHistory] = useState<PaymentApi[]>([])
+  const [loadingPaymentHistory, setLoadingPaymentHistory] = useState(false)
+  const [expandedHistoryRows, setExpandedHistoryRows] = useState<Record<string, boolean>>({})
+  const [historyOrderDetails, setHistoryOrderDetails] = useState<Record<string, OrderApi>>({})
 
   const loadData = async () => {
     setLoading(true)
@@ -128,6 +143,24 @@ export default function Orders() {
   useEffect(() => {
     loadData()
   }, [selectedStatus, filterTableId, dateFrom, dateTo, selectedBranchId])
+
+  const loadPaymentHistory = async () => {
+    setLoadingPaymentHistory(true)
+    try {
+      const { data } = await api.get<PaymentApi[]>('/v1/payments', {
+        params: { limit: 100, reconcileOnline: true },
+      })
+      setPaymentHistory(Array.isArray(data) ? data : [])
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Không tải được lịch sử thanh toán')
+    } finally {
+      setLoadingPaymentHistory(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadPaymentHistory()
+  }, [])
 
   const increase = (menuItemId: string) => {
     setCart((prev) => ({ ...prev, [menuItemId]: (prev[menuItemId] || 0) + 1 }))
@@ -370,11 +403,6 @@ export default function Orders() {
         setPayingOrder(null)
       } else {
         if (!existingPayment) {
-          if (payment.paymentUrl) {
-            window.open(payment.paymentUrl, '_blank')
-          } else if (payment.provider === 'SEPAY' && payment.vietQr?.qrImageUrl) {
-            window.open(payment.vietQr.qrImageUrl, '_blank')
-          }
           toast.success(tv('Đã tạo giao dịch online. Chờ webhook hoặc đối soát thanh toán', 'Online payment created. Waiting for webhook or reconciliation'))
         }
         const verified = await refreshPaymentAndCompleteIfPaid(payingOrder.id)
@@ -413,6 +441,48 @@ export default function Orders() {
       cancelled = true
     }
   }, [payingOrder?.id])
+
+  useEffect(() => {
+    if (!payingOrder || !createdPayment) return
+    if (createdPayment.orderId !== payingOrder.id) return
+    if (createdPayment.provider !== 'SEPAY') return
+    if (!['PENDING', 'WAITING_TRANSFER'].includes(createdPayment.status)) return
+
+    const intervalId = window.setInterval(() => {
+      void refreshPaymentAndCompleteIfPaid(payingOrder.id)
+    }, 5000)
+
+    return () => window.clearInterval(intervalId)
+  }, [createdPayment?.orderId, createdPayment?.provider, createdPayment?.status, payingOrder?.id])
+
+  useEffect(() => {
+    if (!payingOrder || !createdPayment) return
+    if (createdPayment.orderId !== payingOrder.id) return
+    if (createdPayment.status !== 'PAID') return
+
+    toast.success(tv('Thanh toán thành công', 'Payment completed'))
+    const timeoutId = window.setTimeout(() => {
+      setPayingOrder(null)
+      setCreatedPayment(null)
+      void loadPaymentHistory()
+    }, 1200)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [createdPayment?.orderId, createdPayment?.status, payingOrder?.id, tv])
+
+  const toggleHistoryRow = async (payment: PaymentApi) => {
+    const key = payment.paymentId
+    const isExpanded = !!expandedHistoryRows[key]
+    setExpandedHistoryRows((prev) => ({ ...prev, [key]: !isExpanded }))
+    if (isExpanded || historyOrderDetails[payment.orderId]) return
+
+    try {
+      const { data } = await api.get<OrderApi>(`/orders/${payment.orderId}`)
+      setHistoryOrderDetails((prev) => ({ ...prev, [payment.orderId]: data }))
+    } catch {
+      // ignore fetch errors to keep history usable
+    }
+  }
 
   const tableLabel = (tableId: string) => {
     const table = tables.find((t) => t.id === tableId)
@@ -643,6 +713,61 @@ export default function Orders() {
         </div>
       </div>
 
+      <Card title="Lịch sử thanh toán" subtitle="Dành cho nhân viên">
+        {loadingPaymentHistory && <p className="text-sm text-slate-500">Đang tải lịch sử...</p>}
+        {!loadingPaymentHistory && paymentHistory.length === 0 && (
+          <p className="text-sm text-slate-500">Chưa có giao dịch thanh toán.</p>
+        )}
+        {!loadingPaymentHistory && paymentHistory.length > 0 && (
+          <div className="space-y-2">
+            {paymentHistory.map((payment) => {
+              const order = historyOrderDetails[payment.orderId]
+              const expanded = !!expandedHistoryRows[payment.paymentId]
+              return (
+                <div key={payment.paymentId} className="rounded-xl border border-sky-100 p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-semibold" title={payment.paymentId}>
+                        {maDonHangNgan(payment.orderId)} · {phuongThucThanhToan(payment.provider)}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {payment.paidAt ? new Date(payment.paidAt).toLocaleString() : '-'} · {trangThaiThanhToan(payment.status)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-amber-700">{Number(payment.amount || 0).toLocaleString()}đ</p>
+                      <p className="text-xs text-slate-500">
+                        Bàn: {payment.tableId ? tableLabel(payment.tableId) : 'Không xác định'}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Người thanh toán: <span className="font-medium">{payment.paidBy || payment.customerName || 'Khách hàng'}</span>
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-2 rounded border px-2 py-1 text-xs"
+                    onClick={() => void toggleHistoryRow(payment)}
+                  >
+                    {expanded ? 'Ẩn chi tiết đơn' : 'Xem chi tiết đơn'}
+                  </button>
+                  {expanded && order && (
+                    <div className="mt-2 rounded bg-slate-50 p-2 text-xs">
+                      {order.orderItems.map((item) => (
+                        <div key={item.id} className="flex justify-between gap-2">
+                          <span>{item.quantity}x {orderItemLabel(item)}</span>
+                          <span>{(item.quantity * item.price).toLocaleString()}đ</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
+
       {payingOrder && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
           <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 dark:bg-slate-900">
@@ -700,6 +825,22 @@ export default function Orders() {
                     {' · '}
                     Tiền thừa: <span className="font-semibold">{Number(createdPayment.changeDue || 0).toLocaleString()}đ</span>
                   </p>
+                )}
+                {createdPayment.provider === 'SEPAY' && createdPayment.vietQr?.qrImageUrl && (
+                  <div className="mt-2 rounded border border-sky-200 bg-white p-2">
+                    <p className="mb-2 text-xs text-slate-600">Khách quét mã QR để chuyển khoản</p>
+                    <img
+                      src={createdPayment.vietQr.qrImageUrl}
+                      alt="SePay QR"
+                      className="mx-auto h-44 w-44 rounded border border-slate-200 object-contain"
+                    />
+                    {(createdPayment.vietQr.transferContent || createdPayment.transferContent) && (
+                      <p className="mt-2 text-xs text-slate-600">
+                        Nội dung CK:{' '}
+                        <span className="font-semibold">{createdPayment.vietQr.transferContent || createdPayment.transferContent}</span>
+                      </p>
+                    )}
+                  </div>
                 )}
                 {createdPayment.status !== 'PAID' && (
                   <button

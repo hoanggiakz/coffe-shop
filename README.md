@@ -6,6 +6,9 @@ Hệ thống phục vụ 3 nhóm người dùng:
 - Nhân viên: nhận đơn, xử lý KDS, quản lý bàn, xác nhận thanh toán tiền mặt, hỗ trợ chat.
 - Quản lý/Admin: quản lý nhân sự, menu, kho, khuyến mãi, chi nhánh, báo cáo.
 
+Trang thai du lieu dev hien tai:
+- He thong dang duoc don de van hanh 1 chi nhanh duy nhat: `Chi nhanh Riverside`.
+
 ## 1. Kiến trúc hiện tại
 
 | Service | Công nghệ runtime | Vai trò |
@@ -216,6 +219,8 @@ Base URL khi qua Nginx: `https://localhost/api`
   - `GET /v1/payments/{paymentId}`
   - `POST /v1/payments/{paymentId}/verify` (đối soát giao dịch thật trước khi chốt `PAID`)
   - `POST /v1/payments/webhook`
+  - `POST /v1/payments/webhook/relay` (endpoint IPN co dinh cho SePay)
+  - `GET /v1/payments/webhook/relay/events` (local pull event relay)
   - `POST /v1/payments/return`
   - `POST /v1/payments/{paymentId}/confirm-cash`
 - Reports (`/reports`):
@@ -256,7 +261,7 @@ Base URL khi qua Nginx: `https://localhost/api`
 |---|---|---|
 | `I-01` SePay | ✅ | `payment-service` nhận provider `SEPAY`, hỗ trợ tạo giao dịch online, `return`/`webhook` và endpoint verify giao dịch thật trước khi set `PAID`. |
 | `I-02` MoMo | ❌ (đã loại bỏ) | Hình thức thanh toán MoMo không còn được hỗ trợ trong codebase hiện tại. |
-| `I-03` Webhook SePay | ✅ | `POST /v1/payments/webhook` nhận IPN SePay, cập nhật trạng thái thanh toán và phát sự kiện hoàn tất. |
+| `I-03` Webhook SePay | ✅ | Su dung relay co dinh: `POST /v1/payments/webhook/relay`; cac may local pull qua `GET /v1/payments/webhook/relay/events` de xu ly PAID ma khong can doi IPN URL moi may. |
 | `I-04` Email thông báo (tùy chọn) | ✅ (mức kho) | `inventory-service` gửi email cảnh báo tồn kho thấp qua SMTP (`LOW_STOCK_ALERT_EMAILS`). |
 
 ### 5.9 Luồng Đặt Món Qua QR (Chuẩn Sequence)

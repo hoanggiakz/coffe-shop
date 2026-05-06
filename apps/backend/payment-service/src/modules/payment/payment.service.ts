@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { KafkaService } from '../../kafka/kafka.service';
@@ -21,14 +21,26 @@ const TERMINAL_PAYMENT_STATUSES = new Set<PaymentStatus>([
 ]);
 
 @Injectable()
-export class PaymentService {
+export class PaymentService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PaymentService.name);
+  private relayPullTimer: NodeJS.Timeout | null = null;
+  private relayLastEventId = 0;
 
   constructor(
     private prisma: PrismaService,
     private kafka: KafkaService,
     private config: ConfigService,
   ) {}
+
+  onModuleInit() {
+    void this.startRelayPullerIfEnabled();
+  }
+
+  onModuleDestroy() {
+    if (!this.relayPullTimer) return;
+    clearInterval(this.relayPullTimer);
+    this.relayPullTimer = null;
+  }
 
   private get chatServiceUrl() {
     return this.config.get<string>('CHAT_SERVICE_URL', 'http://chat-service:3007/api/chats');
@@ -86,6 +98,60 @@ export class PaymentService {
 
   private get commonWebhookSecret() {
     return String(this.config.get<string>('PAYMENT_WEBHOOK_SECRET', '') || '').trim();
+  }
+
+  private get onlineQrAccountName() {
+    return String(this.config.get<string>('ONLINE_PAYMENT_QR_ACCOUNT_NAME', 'Coffee Shop') || 'Coffee Shop').trim();
+  }
+
+  private get onlineQrAccountNo() {
+    return String(this.config.get<string>('ONLINE_PAYMENT_QR_ACCOUNT_NO', '1026422235') || '1026422235').trim();
+  }
+
+  private get onlineQrBankCode() {
+    return String(this.config.get<string>('ONLINE_PAYMENT_QR_BANK_CODE', 'VCB') || 'VCB').trim().toUpperCase();
+  }
+
+  private get onlineQrBankName() {
+    return String(this.config.get<string>('ONLINE_PAYMENT_QR_BANK_NAME', '') || '').trim();
+  }
+
+  private get sepayIpnAuthType() {
+    const raw = String(this.config.get<string>('SEPAY_IPN_AUTH_TYPE', 'either') || 'either')
+      .trim()
+      .toLowerCase();
+    if (raw === 'none' || raw === 'apikey' || raw === 'secret' || raw === 'either') {
+      return raw;
+    }
+    return 'either';
+  }
+
+  private get relaySharedSecret() {
+    return String(this.config.get<string>('SEPAY_RELAY_SHARED_SECRET', '') || '').trim();
+  }
+
+  private get relayBufferSize() {
+    const value = Number(this.config.get<string>('SEPAY_RELAY_BUFFER_SIZE', '1000'));
+    if (!Number.isFinite(value) || value <= 0) return 1000;
+    return Math.min(Math.trunc(value), 10000);
+  }
+
+  private get relaySourceUrl() {
+    return String(this.config.get<string>('SEPAY_RELAY_SOURCE_URL', '') || '').trim();
+  }
+
+  private get relayPullEnabled() {
+    return String(this.config.get<string>('SEPAY_RELAY_PULL_ENABLED', 'false') || 'false').trim().toLowerCase() === 'true';
+  }
+
+  private get relayPullIntervalMs() {
+    const value = Number(this.config.get<string>('SEPAY_RELAY_PULL_INTERVAL_MS', '3000'));
+    if (!Number.isFinite(value) || value < 1000) return 3000;
+    return Math.min(Math.trunc(value), 60000);
+  }
+
+  private get relayConsumerId() {
+    return String(this.config.get<string>('SEPAY_RELAY_CONSUMER_ID', 'local-dev') || 'local-dev').trim();
   }
 
   private async fetchWithRetry(
@@ -257,9 +323,8 @@ export class PaymentService {
   }
 
   private getOnlineProviderStatusQueryUrl(provider: OnlineProvider) {
-    if (provider === 'VNPAY') return this.vnpayQueryUrl;
     if (provider === 'SEPAY') return this.sepayQueryUrl || this.vietQrQueryUrl;
-    return this.vietQrQueryUrl;
+    return this.sepayQueryUrl || this.vietQrQueryUrl;
   }
 
   private getHeaderValue(headers: RequestHeaders | undefined, key: string) {
@@ -270,14 +335,37 @@ export class PaymentService {
     return String(entry || '').trim();
   }
 
+  private sanitizeHeaders(headers?: RequestHeaders) {
+    const sanitized: Record<string, string> = {};
+    if (!headers) return sanitized;
+    for (const [key, value] of Object.entries(headers)) {
+      if (value === undefined || value === null) continue;
+      const normalized = Array.isArray(value) ? String(value[0] || '').trim() : String(value).trim();
+      if (!normalized) continue;
+      sanitized[String(key).toLowerCase()] = normalized;
+    }
+    return sanitized;
+  }
+
+  private canBypassSepayAuth(headers?: RequestHeaders) {
+    const marker = this.getHeaderValue(headers, 'x-relay-internal');
+    const token = this.getHeaderValue(headers, 'x-relay-token');
+    const shared = this.relaySharedSecret;
+    return marker === '1' && !!shared && token === shared;
+  }
+
   private verifySepayWebhookAuth(headers?: RequestHeaders) {
+    if (this.canBypassSepayAuth(headers)) {
+      return;
+    }
+    this.logger.log(`SePay IPN auth mode: ${this.sepayIpnAuthType}`);
+    if (this.sepayIpnAuthType === 'none') {
+      return;
+    }
+
     const expectedApiKey = String(this.config.get<string>('SEPAY_IPN_API_KEY', '') || '').trim();
     const expectedSecretKey =
       String(this.config.get<string>('SEPAY_WEBHOOK_SECRET', '') || '').trim() || this.commonWebhookSecret;
-
-    if (!expectedApiKey && !expectedSecretKey) {
-      return;
-    }
 
     const authHeader = this.getHeaderValue(headers, 'authorization');
     const secretHeader = this.getHeaderValue(headers, 'x-secret-key');
@@ -287,9 +375,130 @@ export class PaymentService {
       : false;
     const isSecretMatch = expectedSecretKey ? secretHeader === expectedSecretKey : false;
 
+    if (this.sepayIpnAuthType === 'apikey') {
+      if (!expectedApiKey || !isApiKeyMatch) {
+        throw new BadRequestException('Invalid SePay webhook API key');
+      }
+      return;
+    }
+
+    if (this.sepayIpnAuthType === 'secret') {
+      if (!expectedSecretKey || !isSecretMatch) {
+        throw new BadRequestException('Invalid SePay webhook secret key');
+      }
+      return;
+    }
+
+    if (!expectedApiKey && !expectedSecretKey) {
+      return;
+    }
+
     if (!isApiKeyMatch && !isSecretMatch) {
       throw new BadRequestException('Invalid SePay webhook authentication');
     }
+  }
+
+  private async pushRelayEvent(payload: Record<string, any>, headers?: RequestHeaders) {
+    const created = await this.prisma.paymentRelayEvent.create({
+      data: {
+        payload,
+        headers: this.sanitizeHeaders(headers),
+      },
+    });
+
+    const keep = this.relayBufferSize;
+    const oldestKept = await this.prisma.paymentRelayEvent.findFirst({
+      orderBy: { id: 'desc' },
+      skip: Math.max(keep - 1, 0),
+      select: { id: true },
+    });
+    if (oldestKept?.id) {
+      await this.prisma.paymentRelayEvent.deleteMany({
+        where: { id: { lt: oldestKept.id } },
+      });
+    }
+
+    return {
+      id: created.id,
+      createdAt: created.createdAt.toISOString(),
+    };
+  }
+
+  private async pullRelayEvents(sinceId: number, limit: number) {
+    const safeSinceId = Number.isFinite(sinceId) ? Math.max(0, Math.trunc(sinceId)) : 0;
+    const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 200) : 50;
+    const rows = await this.prisma.paymentRelayEvent.findMany({
+      where: { id: { gt: safeSinceId } },
+      orderBy: { id: 'asc' },
+      take: safeLimit,
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      createdAt: row.createdAt.toISOString(),
+      payload: (row.payload && typeof row.payload === 'object' ? row.payload : {}) as Record<string, any>,
+      headers: (row.headers && typeof row.headers === 'object' ? row.headers : {}) as Record<string, string>,
+    }));
+  }
+
+  private async startRelayPullerIfEnabled() {
+    if (!this.relayPullEnabled || !this.relaySourceUrl) {
+      return;
+    }
+
+    this.logger.log(`SePay relay puller enabled: source=${this.relaySourceUrl}, consumer=${this.relayConsumerId}`);
+
+    const runOnce = async () => {
+      const url = new URL(this.relaySourceUrl);
+      url.searchParams.set('sinceId', String(this.relayLastEventId));
+      url.searchParams.set('limit', '50');
+      url.searchParams.set('consumer', this.relayConsumerId);
+
+      const headers: Record<string, string> = {};
+      if (this.relaySharedSecret) {
+        headers['x-relay-token'] = this.relaySharedSecret;
+      }
+
+      try {
+        const response = await this.fetchWithRetry(
+          url.toString(),
+          {
+            method: 'GET',
+            headers,
+          },
+          { attempts: 2, retryDelayMs: 200 },
+        );
+        if (!response.ok) {
+          this.logger.warn(`Relay pull failed: ${response.status}`);
+          return;
+        }
+
+        const body = (await response.json()) as {
+          events?: Array<{ id?: number; payload?: Record<string, any>; headers?: Record<string, string> }>;
+        };
+        const events = Array.isArray(body?.events) ? body.events : [];
+        for (const event of events) {
+          const eventId = Number(event?.id || 0);
+          if (!Number.isFinite(eventId) || eventId <= this.relayLastEventId) continue;
+          try {
+            await this.handleWebhook(event?.payload || {}, {
+              ...(event?.headers || {}),
+              'x-relay-internal': '1',
+              ...(this.relaySharedSecret ? { 'x-relay-token': this.relaySharedSecret } : {}),
+            });
+            this.relayLastEventId = eventId;
+          } catch (error) {
+            this.logger.warn(`Relay event ${eventId} processing failed: ${(error as Error).message}`);
+          }
+        }
+      } catch (error) {
+        this.logger.warn(`Relay pull error: ${(error as Error).message}`);
+      }
+    };
+
+    await runOnce();
+    this.relayPullTimer = setInterval(() => {
+      void runOnce();
+    }, this.relayPullIntervalMs);
   }
 
   private extractOrderHintsFromText(raw: string) {
@@ -604,15 +813,31 @@ export class PaymentService {
     return url.toString();
   }
 
-  getOnlineQr() {
-    const qrImageUrl = String(this.onlineQrImageUrl || '').trim();
+  getOnlineQr(options?: { amount?: number; transferContent?: string }) {
+    let qrImageUrl = String(this.onlineQrImageUrl || '').trim();
+    const amount = Number(options?.amount || 0);
+    const transferContent = String(options?.transferContent || '').trim();
+
+    if (this.onlineQrAccountNo && this.onlineQrBankName) {
+      const url = new URL('https://qr.sepay.vn/img');
+      url.searchParams.set('acc', this.onlineQrAccountNo);
+      url.searchParams.set('bank', this.onlineQrBankName);
+      if (Number.isFinite(amount) && amount > 0) {
+        url.searchParams.set('amount', String(Math.round(amount)));
+      }
+      if (transferContent) {
+        url.searchParams.set('des', transferContent);
+      }
+      qrImageUrl = url.toString();
+    }
+
     return {
       provider: 'VIETQR',
       qrImageUrl,
       htmlTag: `<img src='${qrImageUrl}'/>`,
-      accountName: 'Coffee Shop',
-      accountNo: '1026422235',
-      bankCode: 'VCB',
+      accountName: this.onlineQrAccountName,
+      accountNo: this.onlineQrAccountNo,
+      bankCode: this.onlineQrBankCode,
     };
   }
 
@@ -622,6 +847,11 @@ export class PaymentService {
         ? payment.metadata
         : {};
     const branchId = String((metadata as any).branchId || '').trim() || null;
+    const paidBy =
+      String((metadata as any).confirmedBy || '').trim() ||
+      String((metadata as any).customerName || '').trim() ||
+      String((metadata as any).payerName || '').trim() ||
+      null;
     return {
       paymentId: payment.id,
       orderId: payment.orderId,
@@ -636,6 +866,8 @@ export class PaymentService {
       vietQr: (metadata as any).vietQr || null,
       amountReceived: (metadata as any).amountReceived ?? null,
       changeDue: (metadata as any).changeDue ?? null,
+      paidBy,
+      customerName: (metadata as any).customerName ?? null,
       expiresAt: (metadata as any).expiresAt ?? null,
       paidAt: payment.paidAt,
       createdAt: payment.createdAt,
@@ -874,44 +1106,10 @@ export class PaymentService {
       return this.buildResponse(payment);
     }
 
-    if (provider === 'SEPAY') {
-      const onlineQr = this.getOnlineQr();
-      const providerPrefix = provider.toLowerCase();
-      const transactionId = `${providerPrefix}_${String(orderId).slice(0, 24)}_${Date.now()}`;
-      const transferContent = `PAY ${String(orderId).toUpperCase()}`;
-      const payment = await this.prisma.payment.create({
-        data: {
-          orderId,
-          tableId,
-          amount,
-          provider,
-          status: PaymentStatus.WAITING_TRANSFER,
-          transactionId,
-          transferContent,
-          metadata: this.buildOnlinePaymentMetadata({
-            branchId,
-            gateway: provider,
-            vietQr: {
-              qrImageUrl: onlineQr.qrImageUrl,
-              htmlTag: onlineQr.htmlTag,
-              accountName: onlineQr.accountName,
-              accountNo: onlineQr.accountNo,
-              bankCode: onlineQr.bankCode,
-              transferContent,
-            },
-          }),
-        },
-      });
-
-      this.logger.log(`Created ${provider} payment ${payment.id} for order ${orderId}`);
-      return this.buildResponse(payment);
-    }
-
-    const normalizedAmount = Math.max(0, Math.round(Number(amount || 0)));
+    const transferContent = `PAY ${String(orderId).toUpperCase()}`;
+    const onlineQr = this.getOnlineQr({ amount, transferContent });
     const providerPrefix = provider.toLowerCase();
     const transactionId = `${providerPrefix}_${String(orderId).slice(0, 24)}_${Date.now()}`;
-    const paymentUrl = this.buildVnpayPaymentUrl(orderId, normalizedAmount, transactionId);
-
     const payment = await this.prisma.payment.create({
       data: {
         orderId,
@@ -920,17 +1118,18 @@ export class PaymentService {
         provider,
         status: PaymentStatus.WAITING_TRANSFER,
         transactionId,
-        transferContent: `${provider} ${String(orderId).toUpperCase()}`,
+        transferContent,
         metadata: this.buildOnlinePaymentMetadata({
           branchId,
-          paymentUrl,
           gateway: provider,
-          gatewayRequest: {
-            orderId,
-            amount: normalizedAmount,
-            transactionId,
+          vietQr: {
+            qrImageUrl: onlineQr.qrImageUrl,
+            htmlTag: onlineQr.htmlTag,
+            accountName: onlineQr.accountName,
+            accountNo: onlineQr.accountNo,
+            bankCode: onlineQr.bankCode,
+            transferContent,
           },
-          returnUrl: this.buildFrontendReturnUrl(provider, { orderId, transactionId }),
         }),
       },
     });
@@ -1039,6 +1238,9 @@ export class PaymentService {
       Object.prototype.hasOwnProperty.call(payload, 'amount');
 
     if (isSepayIpnFormat) {
+      this.logger.log(
+        `SePay IPN received: transferType=${String(payload.transferType || payload.transfer_type || '').toLowerCase()} transactionId=${String(payload.id || payload.transaction_id || '-')}`,
+      );
       this.verifySepayWebhookAuth(headers);
 
       const mappedStatus = this.normalizeSepayWebhookStatus(payload);
@@ -1068,6 +1270,7 @@ export class PaymentService {
         webhookStatus: mappedStatus,
         webhookRaw: payload,
         amountReceived: paidAmount > 0 ? paidAmount : undefined,
+        payerName: String(payload.accountName || payload.account_name || payload.counterAccountName || '').trim() || undefined,
         verificationSource: 'sepay-ipn',
       });
 
@@ -1107,6 +1310,38 @@ export class PaymentService {
 
     this.logger.log(`Updated ${provider} payment ${updated.id} to ${updated.status} via webhook ${legacyWebhook.transactionId}`);
     return { success: true, paymentId: updated.id, newStatus: updated.status };
+  }
+
+  async relayIngest(webhookDto: Record<string, any>, headers?: RequestHeaders) {
+    const payload = (webhookDto || {}) as Record<string, any>;
+    const event = await this.pushRelayEvent(payload, headers);
+    return {
+      success: true,
+      eventId: event.id,
+      receivedAt: event.createdAt,
+    };
+  }
+
+  async relayPull(
+    params?: { sinceId?: string | number; limit?: string | number; consumer?: string },
+    headers?: RequestHeaders,
+  ) {
+    if (this.relaySharedSecret) {
+      const token = this.getHeaderValue(headers, 'x-relay-token');
+      if (token !== this.relaySharedSecret) {
+        throw new BadRequestException('Invalid relay token');
+      }
+    }
+
+    const sinceId = Number(params?.sinceId ?? 0);
+    const limit = Number(params?.limit ?? 50);
+    const events = await this.pullRelayEvents(sinceId, limit);
+    return {
+      success: true,
+      consumer: String(params?.consumer || '').trim() || 'anonymous',
+      nextSinceId: events.length ? events[events.length - 1].id : sinceId,
+      events,
+    };
   }
 
   async handleReturn(returnDto: PaymentReturnDto) {

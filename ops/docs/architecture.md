@@ -56,7 +56,7 @@ flowchart LR
 
 1. FE gọi `GET /api/orders/menu?tableId=...` qua gateway.
 2. Gateway xác thực `tableId` với `table-service` trước khi chuyển tiếp.
-3. `order-service` trả menu theo branch/table context.
+3. `order-service` trả menu theo `tableId` (moi truong hien tai van hanh 1 chi nhanh Riverside).
 4. FE tạo đơn `POST /api/orders`.
 5. `order-service` lưu order `PENDING`, publish `OrderCreated` lên Kafka.
 6. KDS nhận thông báo đơn mới và hiển thị cho bếp.
@@ -101,7 +101,9 @@ Ghi chú: khi `KAFKA_BROKERS` chưa bật, hệ thống dùng đường fallback
 1. FE tạo payment qua `/api/v1/payments`.
 2. `payment-service` xử lý CASH hoặc online QR.
 3. Staff xác nhận tiền mặt qua `/confirm-cash`.
-4. Kết quả payment được dùng cho reporting.
+4. SePay IPN đi qua relay co dinh `/api/v1/payments/webhook/relay`.
+5. Local payment-service pull event qua `/api/v1/payments/webhook/relay/events` de doi soat va map `PAID`.
+6. Kết quả payment được dùng cho reporting.
 
 ### Inventory flow
 

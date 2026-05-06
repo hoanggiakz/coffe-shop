@@ -57,6 +57,7 @@ Tạo tối thiểu:
 - `ONLINE_PAYMENT_QR_URL` (optional, ảnh QR chuyển khoản)
 - `PAYMENT_WEBHOOK_SECRET` (optional, secret chung webhook)
 - `SEPAY_QUERY_URL`, `SEPAY_WEBHOOK_SECRET`, `SEPAY_IPN_API_KEY` (nếu bật SePay IPN)
+- `SEPAY_RELAY_SHARED_SECRET` (neu dung relay webhook co dinh)
 - `KAFKA_BROKERS` (optional, nếu bật flow event `OrderCreated` -> KDS qua Kafka)
 
 ## 3.2 Tạo file `.env` cho production
@@ -84,17 +85,18 @@ ONLINE_PAYMENT_TIMEOUT_MINUTES=30
 PAYMENT_WEBHOOK_SECRET=REPLACE_WEBHOOK_SECRET
 SEPAY_WEBHOOK_SECRET=REPLACE_SEPAY_WEBHOOK_SECRET
 SEPAY_IPN_API_KEY=REPLACE_SEPAY_IPN_API_KEY
+SEPAY_RELAY_SHARED_SECRET=REPLACE_RELAY_SHARED_SECRET
+SEPAY_RELAY_PULL_ENABLED=false
 KAFKA_BROKERS=kafka-1:9092,kafka-2:9092
 ```
 
-## 3.4 Public webhook cho SePay
+## 3.4 Public webhook cho SePay (khuyen nghi relay co dinh)
 
-- Endpoint nhận IPN: `POST https://<domain>/api/v1/payments/webhook`
+- Endpoint nhận IPN: `POST https://<domain>/api/v1/payments/webhook/relay`
+- Endpoint local pull event: `GET https://<domain>/api/v1/payments/webhook/relay/events`
 - Bắt buộc public HTTPS, không dùng localhost/private IP.
-- Cấu hình SePay gửi một trong hai header xác thực:
-  - `Authorization: Apikey <SEPAY_IPN_API_KEY>`
-  - hoặc `x-secret-key: <SEPAY_WEBHOOK_SECRET>`
-- Khuyến nghị thêm WAF/rate-limit cho đường dẫn webhook.
+- Dat `SEPAY_RELAY_SHARED_SECRET` va gui token qua header `x-relay-token` khi pull event.
+- Khuyến nghị thêm WAF/rate-limit cho đường dẫn relay.
 
 ## 3.3 SSL certificate thật (khuyến nghị bắt buộc)
 
@@ -198,7 +200,7 @@ cat backup-manual.sql | docker compose exec -T postgres psql -U postgres
   - FE `GET /api/orders/menu?tableId=...` -> Gateway validate table với `table-service` -> `order-service` trả menu -> `POST /api/orders` -> `OrderCreated` lên Kafka -> KDS nhận đơn mới.
 - Đã kiểm tra backup file được sinh đúng lịch.
 - Đã cấu hình giám sát log và cảnh báo resource (CPU/RAM/Disk).
-- Nếu bật SePay IPN: đã cấu hình header xác thực và test luồng return/webhook thật.
+- Nếu bật SePay IPN: đã test luồng relay (`webhook/relay`) va local pull (`relay/events`) end-to-end.
 - Đã đối chiếu NFR 4.1-4.6 theo code hiện tại tại `reports/nfr/non-functional-readiness.md`.
 
 Nếu cần stack quan sát trong cùng file compose:
