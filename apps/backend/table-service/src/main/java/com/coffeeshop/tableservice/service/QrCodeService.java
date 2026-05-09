@@ -25,7 +25,11 @@ public class QrCodeService {
      * Tạo URL menu cho bàn và trả về ảnh QR dưới dạng base64.
      */
     public String generateQrBase64(CoffeeTable table) {
-        String effectiveBaseUrl = sanitizeBaseUrl();
+        return generateQrBase64(table, null);
+    }
+
+    public String generateQrBase64(CoffeeTable table, String baseUrlOverride) {
+        String effectiveBaseUrl = sanitizeBaseUrl(baseUrlOverride);
         StringBuilder menuUrl = new StringBuilder(effectiveBaseUrl)
                 .append("/menu?tableId=")
                 .append(urlEncode(table.getId()))
@@ -51,8 +55,9 @@ public class QrCodeService {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
-    private String sanitizeBaseUrl() {
-        String candidate = configuredBaseUrl == null ? "" : configuredBaseUrl.trim();
+    private String sanitizeBaseUrl(String baseUrlOverride) {
+        String source = (baseUrlOverride != null && !baseUrlOverride.isBlank()) ? baseUrlOverride : configuredBaseUrl;
+        String candidate = source == null ? "" : source.trim();
         if (candidate.endsWith("/")) {
             return candidate.substring(0, candidate.length() - 1);
         }
