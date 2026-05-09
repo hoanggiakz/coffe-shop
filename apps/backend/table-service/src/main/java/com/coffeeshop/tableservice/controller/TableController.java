@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import jakarta.servlet.http.HttpServletRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -77,15 +78,17 @@ public class TableController {
     }
 
     @GetMapping("/{id}/qr")
-    public ResponseEntity<Map<String, String>> getQrCode(@PathVariable String id) {
-        String qr = tableService.getQrCode(id);
+    public ResponseEntity<Map<String, String>> getQrCode(@PathVariable String id, HttpServletRequest request) {
+        String qr = tableService.getQrCode(id, resolvePublicBaseUrl(request));
         return ResponseEntity.ok(Map.of("qrCode", qr));
     }
 
     @PostMapping("/qr/batch")
-    public ResponseEntity<List<Map<String, String>>> getQrCodesBatch(@RequestBody(required = false) BatchQrRequest request) {
+    public ResponseEntity<List<Map<String, String>>> getQrCodesBatch(
+            @RequestBody(required = false) BatchQrRequest request,
+            HttpServletRequest httpRequest) {
         List<String> tableIds = request != null ? request.getTableIds() : null;
-        return ResponseEntity.ok(tableService.getQrBatch(tableIds));
+        return ResponseEntity.ok(tableService.getQrBatch(tableIds, resolvePublicBaseUrl(httpRequest)));
     }
 
     @PostMapping("/{id}/call-staff")
@@ -93,5 +96,30 @@ public class TableController {
             @PathVariable String id,
             @RequestBody(required = false) CallStaffRequest request) {
         return ResponseEntity.ok(tableService.callStaff(id, request));
+    }
+
+    private String resolvePublicBaseUrl(HttpServletRequest request) {
+        String forwardedProto = firstHeaderValue(request.getHeader("X-Forwarded-Proto"));
+        String forwardedHost = firstHeaderValue(request.getHeader("X-Forwarded-Host"));
+        String scheme = (forwardedProto == null || forwardedProto.isBlank()) ? request.getScheme() : forwardedProto;
+        String host = (forwardedHost == null || forwardedHost.isBlank()) ? request.getHeader("Host") : forwardedHost;
+        if (host == null || host.isBlank()) {
+            host = request.getServerName();
+            int port = request.getServerPort();
+            boolean includePort = ("http".equalsIgnoreCase(scheme) && port != 80)
+                    || ("https".equalsIgnoreCase(scheme) && port != 443);
+            if (includePort) {
+                host = host + ":" + port;
+            }
+        }
+        return scheme + "://" + host;
+    }
+
+    private String firstHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        String[] parts = value.split(",", 2);
+        return parts[0].trim();
     }
 }
