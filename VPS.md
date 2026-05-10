@@ -1,4 +1,4 @@
-﻿# Hướng dẫn triển khai demo trên VM Ubuntu (VPS giả lập)
+# Hướng dẫn triển khai demo trên VM Ubuntu (VPS giả lập)
 
 Tài liệu này hướng dẫn chạy dự án `coffe-shop` theo luồng:
 
