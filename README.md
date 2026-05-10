@@ -429,7 +429,6 @@ Thay `<YOUR-TUNNEL-DOMAIN>` bằng URL tunnel thật:
 ```env
 APP_BASE_URL=https://<YOUR-TUNNEL-DOMAIN>
 ALLOWED_ORIGINS=https://<YOUR-TUNNEL-DOMAIN>,https://localhost
-QR_BASE_URL=https://<YOUR-TUNNEL-DOMAIN>/menu
 VITE_WS_URL=https://<YOUR-TUNNEL-DOMAIN>
 NEXT_PUBLIC_API_URL=https://<YOUR-TUNNEL-DOMAIN>
 NEXT_PUBLIC_WS_URL=https://<YOUR-TUNNEL-DOMAIN>
@@ -439,6 +438,7 @@ ONLINE_PAYMENT_QR_URL=https://<YOUR-TUNNEL-DOMAIN>/sepay-qr.png
 Luu y:
 - Khong commit `.env` len git.
 - `.env.example` chi de placeholder (`your-public-domain`), khong de URL tunnel that.
+- Truoc khi run production, thay toan bo bien `CHANGE_ME_*` trong `.env`.
 
 ### 10.3 Build và chạy stack
 

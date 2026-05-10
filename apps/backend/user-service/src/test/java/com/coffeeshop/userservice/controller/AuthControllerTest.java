@@ -1,7 +1,20 @@
 package com.coffeeshop.userservice.controller;
 
 import com.coffeeshop.userservice.config.JwtUtil;
-import com.coffeeshop.userservice.dto.*;
+import com.coffeeshop.userservice.dto.AuthResponse;
+import com.coffeeshop.userservice.dto.CustomerEmailLoginRequest;
+import com.coffeeshop.userservice.dto.CustomerEmailRegisterRequest;
+import com.coffeeshop.userservice.dto.CustomerOffersResponse;
+import com.coffeeshop.userservice.dto.CustomerOtpLoginRequest;
+import com.coffeeshop.userservice.dto.CustomerOtpRegisterRequest;
+import com.coffeeshop.userservice.dto.LoginRequest;
+import com.coffeeshop.userservice.dto.OtpRequest;
+import com.coffeeshop.userservice.dto.OtpResponse;
+import com.coffeeshop.userservice.dto.PointsAccrualRequest;
+import com.coffeeshop.userservice.dto.PointsAccrualResponse;
+import com.coffeeshop.userservice.dto.RegisterRequest;
+import com.coffeeshop.userservice.dto.StaffResponse;
+import com.coffeeshop.userservice.dto.UserProfile;
 import com.coffeeshop.userservice.entity.User;
 import com.coffeeshop.userservice.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,7 +28,9 @@ import org.springframework.http.ResponseEntity;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
