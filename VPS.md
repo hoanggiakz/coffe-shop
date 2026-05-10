@@ -450,14 +450,14 @@ scp gia@<VM_IP>:/home/gia/coffe-shop/backup-*.sql .
 
 ## 17. Troubleshooting nhanh
 
-### 16.1. `fatal: not a git repository`
+### 17.1. `fatal: not a git repository`
 
 ```bash
 cd ~/coffe-shop
 git status
 ```
 
-### 16.2. `cp: cannot stat '.env.example'`
+### 17.2. `cp: cannot stat '.env.example'`
 
 ```bash
 cd ~/coffe-shop
@@ -472,7 +472,7 @@ git clone https://github.com/hoanggiakz/coffe-shop.git
 cd ~/coffe-shop
 ```
 
-### 16.3. SSH `Connection refused`
+### 17.3. SSH `Connection refused`
 
 ```bash
 sudo apt update
@@ -481,7 +481,7 @@ sudo systemctl enable --now ssh
 sudo ufw allow OpenSSH
 ```
 
-### 16.4. Cloudflare báo `502 Bad Gateway`
+### 17.4. Cloudflare báo `502 Bad Gateway`
 
 ```bash
 curl -I http://localhost
@@ -490,7 +490,7 @@ docker compose logs --tail=100 frontend
 docker compose logs --tail=100 api-gateway
 ```
 
-### 16.5. Web mở được nhưng login/order lỗi
+### 17.5. Web mở được nhưng login/order lỗi
 
 Thường do `.env` đang trỏ URL cũ. Cập nhật domain tunnel mới và build lại:
 
@@ -499,7 +499,7 @@ cd ~/coffe-shop
 docker compose up -d --build
 ```
 
-### 16.6. Docker đầy ổ
+### 17.6. Docker đầy ổ
 
 ```bash
 df -h
@@ -508,7 +508,7 @@ docker builder prune -f
 docker system prune -f
 ```
 
-### 16.7. Docker thiếu RAM
+### 17.7. Docker thiếu RAM
 
 ```bash
 free -h
