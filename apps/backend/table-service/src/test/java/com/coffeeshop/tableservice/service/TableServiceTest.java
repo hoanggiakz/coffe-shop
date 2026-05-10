@@ -22,10 +22,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.anySet;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
@@ -199,7 +204,7 @@ class TableServiceTest {
         CoffeeTable table = sampleTable("t6", 6);
         when(tableRepository.findById("t6")).thenReturn(Optional.of(table));
         when(tableRepository.save(any(CoffeeTable.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(qrCodeService.generateQrBase64(any(CoffeeTable.class))).thenReturn("qr-6");
+        when(qrCodeService.generateQrBase64(any(CoffeeTable.class), isNull())).thenReturn("qr-6");
 
         CoffeeTable updated = tableService.updateStatus("t6", CoffeeTable.TableStatus.CLEANING);
         assertEquals(CoffeeTable.TableStatus.CLEANING, updated.getStatus());
@@ -214,7 +219,7 @@ class TableServiceTest {
         CoffeeTable t1 = sampleTable("t1", 12);
         CoffeeTable t2 = sampleTable("t2", 2);
         when(tableRepository.findAllById(anySet())).thenReturn(List.of(t1, t2));
-        when(qrCodeService.generateQrBase64(any(CoffeeTable.class))).thenReturn("qr");
+        when(qrCodeService.generateQrBase64(any(CoffeeTable.class), isNull())).thenReturn("qr");
         when(tableRepository.save(any(CoffeeTable.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         List<Map<String, String>> payload = tableService.getQrBatch(List.of("t1", "t2"));

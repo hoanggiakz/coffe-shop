@@ -36,7 +36,7 @@ docker compose version
 ```bash
 git clone git@github.com:hoanggiakz/coffe-shop.git
 cd coffe-shop/Microservices
-git checkout deverlop
+git checkout develop
 ```
 
 ## 3. Cấu hình production bắt buộc
@@ -145,8 +145,8 @@ UI:
 
 ```bash
 git fetch origin
-git checkout deverlop
-git pull --ff-only origin deverlop
+git checkout develop
+git pull --ff-only origin develop
 
 docker compose up -d --build
 ```

@@ -1,6 +1,9 @@
 package com.coffeeshop.tableservice.controller;
 
-import com.coffeeshop.tableservice.dto.*;
+import com.coffeeshop.tableservice.dto.BatchQrRequest;
+import com.coffeeshop.tableservice.dto.CreateTableRequest;
+import com.coffeeshop.tableservice.dto.UpdateStatusRequest;
+import com.coffeeshop.tableservice.dto.UpdateTableRequest;
 import com.coffeeshop.tableservice.entity.CoffeeTable;
 import com.coffeeshop.tableservice.service.TableService;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,7 +18,7 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
