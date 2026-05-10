@@ -49,7 +49,7 @@ Cập nhật `.env` theo URL mới rồi build lại:
 ```bash
 cd ~/coffe-shop
 nano .env
-# sửa APP_BASE_URL, ALLOWED_ORIGINS, QR_BASE_URL, VITE_WS_URL
+# sửa APP_BASE_URL, ALLOWED_ORIGINS, VITE_WS_URL
 
 docker compose up -d --build
 ```
