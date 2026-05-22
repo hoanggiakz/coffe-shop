@@ -275,7 +275,6 @@ Base URL khi qua Nginx: `https://localhost/api`
 | ID | Trạng thái | Ghi chú triển khai hiện tại |
 |---|---|---|
 | `I-01` SePay | ✅ | `payment-service` nhận provider `SEPAY`, hỗ trợ tạo giao dịch online, `return`/`webhook` và endpoint verify giao dịch thật trước khi set `PAID`. |
-| `I-02` MoMo | ❌ (đã loại bỏ) | Hình thức thanh toán MoMo không còn được hỗ trợ trong codebase hiện tại. |
 | `I-03` Webhook SePay | ✅ | Ho tro endpoint tuong thich `POST /payment/webhook/sepay` (qua gateway: `/api/payment/webhook/sepay`) va relay co dinh `POST /v1/payments/webhook/relay`; local pull qua `GET /v1/payments/webhook/relay/events`. |
 | `I-04` Email thông báo (tùy chọn) | ✅ (mức kho) | `inventory-service` gửi email cảnh báo tồn kho thấp qua SMTP (`LOW_STOCK_ALERT_EMAILS`). |
 
