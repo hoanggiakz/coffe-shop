@@ -122,9 +122,9 @@ function getMonthStartDateString(date = new Date()): string {
 }
 
 const selectClass =
-  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
+  'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
 
-const softPanelClass = 'rounded-xl border border-sky-100 bg-white/90 p-4'
+const softPanelClass = 'rounded-xl border border-amber-100 bg-white/90 p-4'
 
 export default function StaffManagement() {
   const currentUser = useAuthStore((state) => state.user)
@@ -756,7 +756,7 @@ export default function StaffManagement() {
               </option>
             ))}
           </select>
-          <label className="flex min-h-11 items-center gap-2 rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm">
+          <label className="flex min-h-11 items-center gap-2 rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm">
             <input
               type="checkbox"
               checked={includeInactive}
@@ -828,7 +828,7 @@ export default function StaffManagement() {
                 onChange={(e) => setStaffForm((prev) => ({ ...prev, personalQrCode: e.target.value }))}
               />
             ) : (
-              <div className="rounded-xl border border-dashed border-sky-200 px-3 py-2 text-sm text-slate-600">
+              <div className="rounded-xl border border-dashed border-amber-200 px-3 py-2 text-sm text-slate-600">
                 Mã QR cá nhân sẽ được hệ thống tự sinh sau khi tạo nhân viên
               </div>
             )}
@@ -846,7 +846,7 @@ export default function StaffManagement() {
               ))}
             </select>
             {editingStaffId ? (
-              <label className="flex min-h-11 items-center gap-2 rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm">
+              <label className="flex min-h-11 items-center gap-2 rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm">
                 <input
                   type="checkbox"
                   checked={staffForm.isActive}
@@ -862,7 +862,7 @@ export default function StaffManagement() {
             </Button>
           </form>
         ) : (
-          <div className="mt-4 rounded-xl border border-sky-100 bg-white/90 px-4 py-3 text-sm text-slate-600">
+          <div className="mt-4 rounded-xl border border-amber-100 bg-white/90 px-4 py-3 text-sm text-slate-600">
             Bạn đang ở chế độ chỉ xem. Hệ thống sẽ ẩn bớt thông tin nhạy cảm và khóa toàn bộ thao tác thêm, sửa, xóa tài khoản.
           </div>
         )}
@@ -871,13 +871,13 @@ export default function StaffManagement() {
           {loadingStaff && <TableSkeleton cols={2} rows={5} />}
           {!loadingStaff &&
             staffs.map((staff) => (
-              <div key={`mobile-${staff.id}`} className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm">
+              <div key={`mobile-${staff.id}`} className="rounded-xl border border-amber-100 bg-white/90 p-3 text-sm">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="font-semibold text-slate-900">{staff.name}</p>
                     <p className="text-xs text-slate-500">{staff.email}</p>
                   </div>
-                  <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">{vaiTroNhanVien(staff.role)}</span>
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">{vaiTroNhanVien(staff.role)}</span>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
                   <p>Chi nhánh: <span className="font-medium">{staff.branchName || staff.branchId || '-'}</span></p>
@@ -958,13 +958,13 @@ export default function StaffManagement() {
             <p className="mt-1 text-sm text-slate-600">In thẻ cho nhân viên để quét QR vào ca/ra ca nhanh hơn.</p>
             <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {staffs.map((staff) => (
-                <div key={`card-${staff.id}`} className="rounded-xl border border-sky-100 bg-white/90 p-4 shadow-sm">
+                <div key={`card-${staff.id}`} className="rounded-xl border border-amber-100 bg-white/90 p-4 shadow-sm">
                   <p className="text-base font-semibold text-slate-900">{staff.name}</p>
                   <p className="mt-1 text-sm text-slate-600">Mã NV: {staff.employeeCode || '-'}</p>
                   <p className="text-sm text-slate-600">Vai trò: {vaiTroNhanVien(staff.role)}</p>
                   <p className="text-sm text-slate-600">Chi nhánh: {staff.branchName || staff.branchId || '-'}</p>
                   <p className="mt-1 break-all text-xs text-slate-500">ID: {staff.id}</p>
-                  <div className="mt-3 flex justify-center rounded-lg border border-sky-100 bg-sky-50/40 p-2">
+                  <div className="mt-3 flex justify-center rounded-lg border border-amber-100 bg-amber-50/40 p-2">
                     {staffQrImages[staff.id] ? (
                       <img
                         src={staffQrImages[staff.id]}
@@ -1078,10 +1078,10 @@ export default function StaffManagement() {
 
       <Card title="M-03 Chấm công" subtitle="Chấm công vào ca / ra ca bằng mã nhân viên hoặc mã QR cá nhân">
         <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm text-slate-700">
+          <div className="rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm text-slate-700">
             Mã NV của bạn: <span className="font-semibold">{currentStaffEntry?.employeeCode || '-'}</span>
           </div>
-          <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm text-slate-700 md:col-span-2">
+          <div className="rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm text-slate-700 md:col-span-2">
             Mã QR cá nhân: <span className="font-semibold">{currentStaffEntry?.personalQrCode || '-'}</span>
           </div>
         </div>
@@ -1126,13 +1126,13 @@ export default function StaffManagement() {
               Tắt camera quét
             </Button>
           ) : (
-            <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
+            <div className="rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
               Quét mã QR cá nhân để tự động điền mã và chấm công
             </div>
           )}
         </div>
         {scannerOpen && (
-          <div className="mt-3 rounded-xl border border-sky-100 bg-white/90 p-3">
+          <div className="mt-3 rounded-xl border border-amber-100 bg-white/90 p-3">
             <p className="text-sm text-slate-700">
               Đưa mã QR cá nhân vào khung hình để {scannerAction === 'check-out' ? 'ra ca' : 'vào ca'}.
             </p>
@@ -1156,7 +1156,7 @@ export default function StaffManagement() {
                 ))}
               </select>
           ) : (
-            <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
+            <div className="rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
               Chỉ hiển thị lịch sử chấm công của chính bạn
             </div>
           )}
@@ -1170,10 +1170,10 @@ export default function StaffManagement() {
         <div className="mt-4 space-y-3 md:hidden">
             {loadingAttendance && <TableSkeleton cols={2} rows={4} />}
             {!loadingAttendance && attendanceLogs.map((log) => (
-              <div key={`mobile-att-${log.id}`} className="rounded-xl border border-sky-100 bg-white/90 p-3 text-xs">
+              <div key={`mobile-att-${log.id}`} className="rounded-xl border border-amber-100 bg-white/90 p-3 text-xs">
                 <div className="flex items-center justify-between">
                   <p className="font-semibold text-slate-900">{log.staffName}</p>
-                  <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700">{log.workDate}</span>
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">{log.workDate}</span>
                 </div>
                 <p className="mt-1 text-slate-600">Mã NV: {employeeCodeByStaffId[log.staffId] || '-'}</p>
                 <p className="text-slate-600">Ca: {caLamViec(log.scheduledShift)}</p>
@@ -1239,14 +1239,14 @@ export default function StaffManagement() {
                 ))}
               </select>
           ) : (
-            <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
+            <div className="rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
               Đang xem theo tài khoản: {currentUser?.name || 'Nhân viên hiện tại'}
             </div>
           )}
           <Button variant="secondary" onClick={loadShiftOverview}>
             Tải lại ca làm
           </Button>
-          <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
+          <div className="rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
             {shiftOverview?.selectedShiftType ? `Ca đang chọn: ${caLamViec(shiftOverview.selectedShiftType)}` : 'Chưa có ca được phân'}
           </div>
         </div>
@@ -1265,7 +1265,7 @@ export default function StaffManagement() {
             <div className="mt-2 flex flex-wrap gap-2">
               {shiftOverview?.assignedShifts?.length ? (
                 shiftOverview.assignedShifts.map((shift) => (
-                  <span key={shift.id} className="rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-sky-200">
+                  <span key={shift.id} className="rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-amber-200">
                     {caLamViec(shift.shiftType)}
                   </span>
                 ))
@@ -1331,7 +1331,7 @@ export default function StaffManagement() {
                 ))}
               </select>
           ) : (
-            <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
+            <div className="rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
               Đang tính lương cho: {currentUser?.name || 'Tài khoản hiện tại'}
             </div>
           )}
@@ -1365,7 +1365,7 @@ export default function StaffManagement() {
           {loadingPayroll && <TableSkeleton cols={2} rows={4} />}
           {!loadingPayroll &&
             (payrollSummary?.items || []).map((item) => (
-              <div key={`mobile-pay-${item.staffId}`} className="rounded-xl border border-sky-100 bg-white/90 p-3 text-xs">
+              <div key={`mobile-pay-${item.staffId}`} className="rounded-xl border border-amber-100 bg-white/90 p-3 text-xs">
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-semibold text-slate-900">{item.staffName}</p>
                   <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700">

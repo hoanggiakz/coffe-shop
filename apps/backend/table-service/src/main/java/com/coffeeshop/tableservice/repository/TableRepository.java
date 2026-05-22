@@ -6,6 +6,7 @@ import java.util.List;
 
 public interface TableRepository extends JpaRepository<CoffeeTable, String> {
     List<CoffeeTable> findByBranchId(String branchId);
+    java.util.Optional<CoffeeTable> findByNumber(Integer number);
     boolean existsByNumber(Integer number);
     boolean existsByNumberAndIdNot(Integer number, String id);
 }

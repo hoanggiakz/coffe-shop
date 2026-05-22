@@ -195,7 +195,7 @@ export default function Payments() {
               {payments.map((payment) => (
                 <div
                   key={payment.paymentId}
-                  className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60"
+                  className="rounded-xl border border-amber-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-semibold text-slate-900 dark:text-slate-100">{payment.paymentId}</p>

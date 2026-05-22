@@ -57,7 +57,7 @@ type KdsStage = 'WAITING' | 'PREPARING' | 'READY'
 
 const KITCHEN_ORDER_STATUSES = new Set<OrderApi['status']>(['CONFIRMED', 'PREPARING', 'READY'])
 const chipButtonClass =
-  'inline-flex min-h-10 items-center justify-center rounded-xl border border-sky-200 bg-white/90 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-sky-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
+  'inline-flex min-h-10 items-center justify-center rounded-xl border border-amber-200 bg-white/90 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-amber-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
 
 function playKitchenOrderSound(enabled: boolean) {
   if (!enabled || typeof window === 'undefined') return
@@ -298,7 +298,7 @@ export default function Kitchen() {
 
       {loading && <RoutePageSkeleton kind="dashboard" />}
       {!loading && (
-        <p className="rounded-xl border border-sky-100 bg-white/85 px-3 py-2 text-sm text-slate-600">
+        <p className="rounded-xl border border-amber-100 bg-white/85 px-3 py-2 text-sm text-slate-600">
           {tv('S-12:', 'S-12:')} {orders.length} {tv('đơn đang chờ/đang làm', 'orders in queue/in progress')} · {totalPendingItems} {tv('món chưa hoàn thành', 'items not completed')}
         </p>
       )}
@@ -306,9 +306,9 @@ export default function Kitchen() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {kdsColumns.map((column) => (
           <Card key={column.key} className="min-h-[320px]">
-            <div className="mb-3 flex items-center justify-between border-b border-sky-100 pb-2">
+            <div className="mb-3 flex items-center justify-between border-b border-amber-100 pb-2">
               <p className="text-sm font-semibold text-slate-900 dark:text-white">{column.title}</p>
-              <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-medium text-sky-700">{column.orders.length}</span>
+              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700">{column.orders.length}</span>
             </div>
 
             {column.orders.length === 0 && (
@@ -317,7 +317,7 @@ export default function Kitchen() {
 
             <div className="space-y-3">
               {column.orders.map((order) => (
-                <div key={order.id} className="rounded-2xl border border-sky-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                <div key={order.id} className="rounded-2xl border border-amber-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-slate-900/60">
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="font-semibold text-slate-900 dark:text-white" title={order.id}>
@@ -327,19 +327,19 @@ export default function Kitchen() {
                         {tableLabel(order.tableId)} · {new Date(order.createdAt).toLocaleString()}
                       </p>
                     </div>
-                    <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-medium text-sky-700">
+                    <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700">
                       {trangThaiDonHang(order.status)}
                     </span>
                   </div>
 
                   <div className="mt-3 space-y-2">
                     {order.orderItems.map((item) => (
-                      <div key={item.id} className="rounded-xl border border-sky-100 bg-white/85 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                      <div key={item.id} className="rounded-xl border border-amber-100 bg-white/85 p-3 dark:border-slate-700 dark:bg-slate-900/60">
                         <div className="flex items-center justify-between text-sm">
                           <span>
                             {item.quantity}x {itemLabel(item.menuItemId)}
                           </span>
-                          <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">{itemStatusLabel(item.status)}</span>
+                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">{itemStatusLabel(item.status)}</span>
                         </div>
                         {(item.note || item.options) && (
                           <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
@@ -374,7 +374,7 @@ export default function Kitchen() {
                     ))}
                   </div>
 
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-sky-100 pt-3 text-sm">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-amber-100 pt-3 text-sm">
                     <span>
                       Món chưa xong: <strong>{order.orderItems.filter((item) => item.status !== 'READY').length}</strong>
                     </span>

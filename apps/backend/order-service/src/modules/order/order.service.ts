@@ -1816,6 +1816,126 @@ export class OrderService {
     return this.enrichOrders(orders);
   }
 
+  async getCustomerRecommendations(params: {
+    customerId?: string;
+    email?: string;
+    phone?: string;
+    branchId?: string;
+    tableId?: string;
+    limit?: number;
+  }) {
+    const customerId = String(params.customerId || '').trim();
+    const email = String(params.email || '').trim();
+    const phone = String(params.phone || '').trim();
+    const limit = Number.isFinite(params.limit) && (params.limit || 0) > 0 ? Math.min(params.limit || 0, 20) : 8;
+
+    const requestedBranchId = this.normalizeBranchId(params.branchId);
+    const tableId = String(params.tableId || '').trim();
+    const resolvedBranchId = requestedBranchId || (tableId ? await this.resolveBranchIdFromTable(tableId) : null);
+
+    const menuItems = await this.getMenu({
+      branchId: resolvedBranchId || undefined,
+      tableId: tableId || undefined,
+    });
+    if (!menuItems.length) {
+      return [];
+    }
+
+    const menuById = new Map(menuItems.map((item: any) => [String(item.id), item]));
+    const allMenuIds = Array.from(menuById.keys());
+    const identityFilters = this.buildCustomerIdentityOrConditions({ customerId, email, phone });
+
+    if (!identityFilters.length) {
+      const popularIds = await this.getPopularMenuItemIds(allMenuIds, resolvedBranchId, limit);
+      return popularIds
+        .map((id, index) => {
+          const item = menuById.get(id);
+          if (!item) return null;
+          return {
+            ...item,
+            recommendationReason: index === 0 ? 'popular_now' : 'popular',
+            recommendationScore: Number((limit - index).toFixed(2)),
+          };
+        })
+        .filter(Boolean);
+    }
+
+    const completedOrders = await this.prisma.order.findMany({
+      where: {
+        status: 'COMPLETED' as any,
+        OR: identityFilters,
+        ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
+      },
+      include: { orderItems: true },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    if (!completedOrders.length) {
+      const popularIds = await this.getPopularMenuItemIds(allMenuIds, resolvedBranchId, limit);
+      return popularIds
+        .map((id, index) => {
+          const item = menuById.get(id);
+          if (!item) return null;
+          return {
+            ...item,
+            recommendationReason: index === 0 ? 'popular_now' : 'popular',
+            recommendationScore: Number((limit - index).toFixed(2)),
+          };
+        })
+        .filter(Boolean);
+    }
+
+    const now = Date.now();
+    const scoreByMenuId = new Map<string, number>();
+    for (const order of completedOrders) {
+      const orderAgeDays = Math.max(0, (now - new Date(order.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+      const recencyBoost = Math.max(0.25, 1.25 - Math.min(orderAgeDays / 30, 1));
+      for (const item of order.orderItems || []) {
+        const menuItemId = String(item.menuItemId || '').trim();
+        if (!menuById.has(menuItemId)) {
+          continue;
+        }
+        const qty = Number(item.quantity || 0);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          continue;
+        }
+        const current = scoreByMenuId.get(menuItemId) || 0;
+        scoreByMenuId.set(menuItemId, current + qty * recencyBoost);
+      }
+    }
+
+    const personalizedIds = Array.from(scoreByMenuId.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([menuItemId]) => menuItemId);
+
+    const popularIds = await this.getPopularMenuItemIds(allMenuIds, resolvedBranchId, limit);
+    const selectedIds: string[] = [];
+    for (const id of personalizedIds) {
+      if (selectedIds.length >= limit) break;
+      selectedIds.push(id);
+    }
+    for (const id of popularIds) {
+      if (selectedIds.length >= limit) break;
+      if (!selectedIds.includes(id)) {
+        selectedIds.push(id);
+      }
+    }
+
+    return selectedIds
+      .map((id, index) => {
+        const item = menuById.get(id);
+        if (!item) return null;
+        const personalizedScore = scoreByMenuId.get(id);
+        return {
+          ...item,
+          recommendationReason: personalizedScore ? 'history_preference' : 'popular',
+          recommendationScore: Number((personalizedScore || limit - index).toFixed(2)),
+        };
+      })
+      .filter(Boolean);
+  }
+
   async findOne(id: string) {
     const order = await this.prisma.order.findUnique({
       where: { id },
@@ -2276,6 +2396,68 @@ export class OrderService {
       );
       return 0;
     }
+  }
+
+  private buildCustomerIdentityOrConditions(identity: { customerId?: string; email?: string; phone?: string }) {
+    const conditions: Prisma.OrderWhereInput[] = [];
+    if (identity.customerId) {
+      conditions.push({ customerId: identity.customerId });
+    }
+    if (identity.email) {
+      conditions.push({ customerEmail: identity.email });
+    }
+    if (identity.phone) {
+      conditions.push({ customerPhone: identity.phone });
+    }
+    return conditions;
+  }
+
+  private async getPopularMenuItemIds(menuItemIds: string[], branchId: string | null, limit: number) {
+    if (!menuItemIds.length) {
+      return [];
+    }
+    const fromDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const orders = await this.prisma.order.findMany({
+      where: {
+        status: 'COMPLETED' as any,
+        createdAt: { gte: fromDate },
+        ...(branchId ? { branchId } : {}),
+      },
+      include: {
+        orderItems: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+    });
+
+    const allowed = new Set(menuItemIds);
+    const totals = new Map<string, number>();
+    for (const order of orders) {
+      for (const item of order.orderItems || []) {
+        const id = String(item.menuItemId || '').trim();
+        if (!allowed.has(id)) continue;
+        const qty = Number(item.quantity || 0);
+        if (!Number.isFinite(qty) || qty <= 0) continue;
+        totals.set(id, (totals.get(id) || 0) + qty);
+      }
+    }
+
+    const sorted = Array.from(totals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([id]) => id);
+
+    if (sorted.length >= limit) {
+      return sorted;
+    }
+
+    for (const id of menuItemIds) {
+      if (sorted.length >= limit) break;
+      if (!sorted.includes(id)) {
+        sorted.push(id);
+      }
+    }
+    return sorted;
   }
 
   private async notifyNewOrder(order: {

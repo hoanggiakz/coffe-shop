@@ -165,7 +165,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private chatRoom(tableId: string) {
-    return `chat:${tableId}`;
+    return tableId;
   }
 
   private legacyTableRoom(tableId: string) {

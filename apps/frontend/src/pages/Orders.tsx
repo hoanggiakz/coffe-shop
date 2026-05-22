@@ -71,7 +71,7 @@ interface PaymentApi {
 const paymentMethods: PaymentMethod[] = ['CASH', 'SEPAY']
 const orderStatuses: Array<OrderApi['status']> = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
 const selectClass =
-  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
+  'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
 
 export default function Orders() {
   const { tv } = useI18n()
@@ -591,7 +591,7 @@ export default function Orders() {
               ))}
             </select>
 
-            <div className="max-h-80 space-y-2 overflow-y-auto rounded-xl border border-sky-100 p-2">
+            <div className="max-h-80 space-y-2 overflow-y-auto rounded-xl border border-amber-100 p-2">
               {menuItems
                 .filter((item) => item.available)
                 .map((item) => (
@@ -603,7 +603,7 @@ export default function Orders() {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2"
+                        className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-amber-200 px-2"
                         onClick={() => decrease(item.id)}
                       >
                         -
@@ -611,7 +611,7 @@ export default function Orders() {
                       <span>{cart[item.id] || 0}</span>
                       <button
                         type="button"
-                        className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2"
+                        className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-amber-200 px-2"
                         onClick={() => increase(item.id)}
                       >
                         +
@@ -724,7 +724,7 @@ export default function Orders() {
               const order = historyOrderDetails[payment.orderId]
               const expanded = !!expandedHistoryRows[payment.paymentId]
               return (
-                <div key={payment.paymentId} className="rounded-xl border border-sky-100 p-3 text-sm">
+                <div key={payment.paymentId} className="rounded-xl border border-amber-100 p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="font-semibold" title={payment.paymentId}>
@@ -779,7 +779,7 @@ export default function Orders() {
                 <button
                   key={method}
                   className={`min-h-11 rounded-xl border px-3 py-2 text-sm ${
-                    selectedMethod === method ? 'border-sky-500 bg-sky-50' : 'border-sky-100'
+                    selectedMethod === method ? 'border-amber-500 bg-amber-50' : 'border-amber-100'
                   }`}
                   disabled={Boolean(lockedProvider && lockedProvider !== method)}
                   onClick={() => setSelectedMethod(method)}
@@ -827,7 +827,7 @@ export default function Orders() {
                   </p>
                 )}
                 {createdPayment.provider === 'SEPAY' && createdPayment.vietQr?.qrImageUrl && (
-                  <div className="mt-2 rounded border border-sky-200 bg-white p-2">
+                  <div className="mt-2 rounded border border-amber-200 bg-white p-2">
                     <p className="mb-2 text-xs text-slate-600">Khách quét mã QR để chuyển khoản</p>
                     <img
                       src={createdPayment.vietQr.qrImageUrl}
@@ -887,7 +887,7 @@ export default function Orders() {
               <p>Tạo lúc: {new Date(detailOrder.createdAt).toLocaleString()}</p>
             </div>
 
-            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-sky-100 p-2 text-sm">
+            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-amber-100 p-2 text-sm">
               {detailOrder.orderItems.map((item) => {
                 return (
                   <div key={item.id} className="space-y-0.5">
@@ -918,22 +918,22 @@ export default function Orders() {
             <p className="text-lg font-bold" title={editingOrder.id}>Sửa món đơn {maDonHangNgan(editingOrder.id)}</p>
             <p className="mt-1 text-sm text-slate-500">S-09: Sửa số lượng, thêm/xóa món trong đơn</p>
 
-            <div className="mt-4 max-h-80 space-y-2 overflow-y-auto rounded-xl border border-sky-100 p-2">
+            <div className="mt-4 max-h-80 space-y-2 overflow-y-auto rounded-xl border border-amber-100 p-2">
               {menuItems
                 .filter((item) => item.available || editCart[item.id])
                 .map((item) => (
-                  <div key={item.id} className="space-y-2 rounded-xl border border-sky-100 bg-white/80 p-2 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+                  <div key={item.id} className="space-y-2 rounded-xl border border-amber-100 bg-white/80 p-2 text-sm dark:border-slate-700 dark:bg-slate-900/40">
                     <div className="flex items-center justify-between">
                       <div>
                       <p className="font-medium">{item.name}</p>
                       <p className="text-xs text-gray-500">{item.price.toLocaleString()}đ</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => updateEditQuantity(item.id, -1)}>
+                        <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-amber-200 px-2" onClick={() => updateEditQuantity(item.id, -1)}>
                           -
                         </button>
                         <span>{editCart[item.id] || 0}</span>
-                        <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => updateEditQuantity(item.id, 1)}>
+                        <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-amber-200 px-2" onClick={() => updateEditQuantity(item.id, 1)}>
                           +
                         </button>
                       </div>

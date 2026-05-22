@@ -53,20 +53,33 @@ Microservices/
 
 ## 3. Chạy hệ thống
 
-### 3.1 Chạy nhanh mặc định (local TLS)
+### 3.1 Local demo (khuyen nghi)
+
+```powershell
+Copy-Item .env.local-demo.example .env -Force
+.\ops\scripts\setup-local-demo.ps1
+```
+
+Truy cap:
+
+- FE: `http://localhost`
+- API qua gateway: `http://localhost:8080/api/...`
+- WebSocket chat: `ws://localhost:3007/chat`
+
+### 3.2 Chạy nhanh mặc định
 
 ```powershell
 docker compose up -d --build
 docker compose ps
 ```
 
-Truy cập:
+Truy cap:
 
-- FE: `https://localhost` (HTTP `http://localhost` sẽ redirect).
-- API qua gateway: `https://localhost/api/...`
-- WebSocket chat: `wss://localhost/chat`
+- FE: `http://localhost`
+- API qua gateway: `http://localhost:8080/api/...`
+- WebSocket chat: `ws://localhost:3007/chat`
 
-### 3.2 Chạy dev (phục vụ phát triển frontend nhanh)
+### 3.3 Chạy dev (phuc vu phat trien frontend nhanh)
 
 ```bash
 ./deploy.sh dev
@@ -79,14 +92,14 @@ Truy cập:
 - API Gateway: `http://localhost:8080`
 - Chat WS trực tiếp: `ws://localhost:3007/chat`
 
-### 3.3 Bật stack tùy chọn cùng 1 compose file
+### 3.4 Bat stack tuy chon cung 1 compose file
 
 ```bash
 docker compose --profile monitoring up -d
 docker compose --profile logging up -d
 ```
 
-### 3.4 Chuẩn bị môi trường test toàn bộ service
+### 3.5 Chuan bi moi truong test toan bo service
 
 ```powershell
 .\ops\scripts\prepare-test-env.ps1
@@ -232,15 +245,16 @@ Base URL khi qua Nginx: `https://localhost/api`
   - `GET /reports/staff-performance`
   - `GET /reports/export`
 
-### 5.6 Khách hàng (nâng cao: C-16..C-18)
+### 5.6 Khách hàng (nâng cao: C-16..C-19)
 
 | ID | Tên chức năng | API chính (qua `/api`) | Ghi chú bám code hiện tại |
 |---|---|---|---|
 | `C-16` | Đăng ký / Đăng nhập | `POST /users/customer/request-otp`, `POST /users/customer/register-otp`, `POST /users/customer/login-otp`, `POST /users/customer/register-email`, `POST /users/customer/login-email` | Hỗ trợ cả OTP số điện thoại và email. |
 | `C-17` | Lịch sử đơn hàng | `GET /orders/history?customerId=...` (hoặc `email`/`phone`) | `limit` mặc định `20`, tối đa `50`. Trả về đơn theo thứ tự mới -> cũ. |
 | `C-18` | Tích điểm | `GET /users/customer/profile`, `GET /users/customer/offers`, `POST /users/customer/points/accrual` | Rule hiện tại: `1 điểm = 10.000đ` (`floor(amount/10000)`). Khi đơn chuyển `COMPLETED` và có `customerId`, `order-service` gọi accrual tự động. |
+| `C-19` | Gợi ý món cá nhân hóa | `GET /orders/recommendations?customerId=...` (hoặc `email`/`phone`) | Xếp hạng món theo lịch sử mua `COMPLETED` (ưu tiên gần đây), tự fallback top món phổ biến theo chi nhánh nếu chưa đủ dữ liệu lịch sử. |
 
-### 5.7 Quản lý / Admin (M-01..M-26)
+### 5.7 Quản lý / Admin (M-01..M-27)
 
 | Nhóm | Trạng thái | Bám theo code hiện tại |
 |---|---|---|
@@ -254,6 +268,7 @@ Base URL khi qua Nginx: `https://localhost/api`
 | `M-20..M-24` Báo cáo / top món / tồn kho / hiệu suất / dashboard | ✅ | `report-service` + màn `Reports` |
 | `M-25` Thêm chi nhánh | ✅ | `POST /users/admin/branches` + màn `Branches` |
 | `M-26` Chuyển đổi chi nhánh | ✅ | Bộ lọc chi nhánh chung ở header (`ADMIN/MANAGER`), áp dụng cho `Dashboard`, `Menu`, `Tables`, `Orders`, `Inventory`, `Reports` |
+| `M-27` Cấu hình hệ thống (Admin) | ✅ (UI mức cơ bản) | Màn `Settings` có khối cấu hình SePay/webhook (`APP_BASE_URL`, `SEPAY_ENV`, `SEPAY_QUERY_URL`, `SEPAY_MERCHANT_ID`, `SEPAY_IPN_AUTH_TYPE`) và URL `POST /api/payment/webhook/sepay`. Lưu cấu hình ở localStorage; cấu hình runtime thực tế vẫn qua `.env`/deploy. |
 
 ### 5.8 Tích hợp ngoài (I-01..I-04)
 
@@ -261,7 +276,7 @@ Base URL khi qua Nginx: `https://localhost/api`
 |---|---|---|
 | `I-01` SePay | ✅ | `payment-service` nhận provider `SEPAY`, hỗ trợ tạo giao dịch online, `return`/`webhook` và endpoint verify giao dịch thật trước khi set `PAID`. |
 | `I-02` MoMo | ❌ (đã loại bỏ) | Hình thức thanh toán MoMo không còn được hỗ trợ trong codebase hiện tại. |
-| `I-03` Webhook SePay | ✅ | Su dung relay co dinh: `POST /v1/payments/webhook/relay`; cac may local pull qua `GET /v1/payments/webhook/relay/events` de xu ly PAID ma khong can doi IPN URL moi may. |
+| `I-03` Webhook SePay | ✅ | Ho tro endpoint tuong thich `POST /payment/webhook/sepay` (qua gateway: `/api/payment/webhook/sepay`) va relay co dinh `POST /v1/payments/webhook/relay`; local pull qua `GET /v1/payments/webhook/relay/events`. |
 | `I-04` Email thông báo (tùy chọn) | ✅ (mức kho) | `inventory-service` gửi email cảnh báo tồn kho thấp qua SMTP (`LOW_STOCK_ALERT_EMAILS`). |
 
 ### 5.9 Luồng Đặt Món Qua QR (Chuẩn Sequence)
@@ -341,15 +356,15 @@ sequenceDiagram
     Chat Service (WS)-->>Customer Web (FE): joined {chatId, messages}
     Customer Web (FE)->>Chat Service (WS): emit send-message
     Chat Service (WS)->>DB: Lưu message
-    Chat Service (WS)-->>Customer Web (FE): new-message (room chat:{tableId})
-    Chat Service (WS)-->>Staff Web (FE): new-message (room chat:{tableId})
+    Chat Service (WS)-->>Customer Web (FE): new-message (room {tableId})
+    Chat Service (WS)-->>Staff Web (FE): new-message (room {tableId})
     Staff Web (FE)->>Chat Service (WS): emit send-message
     Chat Service (WS)->>DB: Lưu message
     Chat Service (WS)-->>Khách: new-message
 ```
 
 Ghi chú bám code:
-- Room chuẩn đang dùng là `chat:{tableId}`.
+- Room chuẩn đang dùng là `{tableId}`.
 - Service vẫn join thêm room legacy `table:{tableId}` để tương thích ngược.
 
 ## 6. Tài khoản mặc định test

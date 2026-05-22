@@ -7,16 +7,16 @@
 @layer base {
   :root {
     color-scheme: light;
-    --app-bg: #eff8ff;
+    --app-bg: #fffbeb;
     --app-surface: #ffffff;
-    --app-surface-soft: #f7fbff;
+    --app-surface-soft: #fef3c7;
     --app-ink: #1e293b;
     --app-muted: #64748b;
-    --app-accent: #0ea5e9;
-    --app-accent-strong: #0284c7;
-    --app-accent-soft: rgba(125, 211, 252, 0.2);
+    --app-accent: #f59e0b;
+    --app-accent-strong: #d97706;
+    --app-accent-soft: rgba(245, 158, 11, 0.2);
     --app-radius: 1.05rem;
-    --app-shadow: 0 18px 40px -28px rgba(2, 132, 199, 0.55);
+    --app-shadow: 0 18px 40px -28px rgba(245, 158, 11, 0.55);
   }
 
   .dark {
@@ -26,10 +26,10 @@
     --app-surface-soft: #1f2e47;
     --app-ink: #f8fafc;
     --app-muted: #cbd5e1;
-    --app-accent: #38bdf8;
-    --app-accent-strong: #0ea5e9;
-    --app-accent-soft: rgba(56, 189, 248, 0.2);
-    --app-shadow: 0 20px 48px -28px rgba(14, 165, 233, 0.4);
+    --app-accent: #fbbf24;
+    --app-accent-strong: #f59e0b;
+    --app-accent-soft: rgba(251, 191, 36, 0.2);
+    --app-shadow: 0 20px 48px -28px rgba(251, 191, 36, 0.4);
   }
 
   html {
@@ -42,9 +42,9 @@
   body {
     min-width: 320px;
     background:
-      radial-gradient(circle at 10% 10%, rgba(125, 211, 252, 0.32), transparent 26%),
-      radial-gradient(circle at 90% 0%, rgba(103, 232, 249, 0.22), transparent 32%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(239, 248, 255, 0.8)),
+      radial-gradient(circle at 10% 10%, rgba(253, 230, 138, 0.32), transparent 26%),
+      radial-gradient(circle at 90% 0%, rgba(252, 211, 77, 0.22), transparent 32%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(254, 243, 199, 0.8)),
       var(--app-bg);
     color: var(--app-ink);
     line-height: 1.5;
@@ -54,7 +54,7 @@
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(14, 165, 233, 0.35) transparent;
+    scrollbar-color: rgba(245, 158, 11, 0.35) transparent;
     box-sizing: border-box;
   }
 
@@ -89,7 +89,7 @@
   textarea.rounded.border.px-3.py-2.text-sm,
   button.rounded.border.px-3.py-2.text-sm {
     min-height: 2.75rem;
-    border-color: rgba(125, 211, 252, 0.8);
+    border-color: rgba(253, 230, 138, 0.8);
     border-radius: 0.75rem;
     background: rgba(255, 255, 255, 0.92);
     color: #0f172a;
@@ -103,7 +103,7 @@
   select.rounded.border.px-2.py-1.text-xs,
   button.rounded.border.px-2.py-1.text-xs {
     min-height: 2.2rem;
-    border-color: rgba(186, 230, 253, 0.95);
+    border-color: rgba(253, 230, 138, 0.95);
     border-radius: 0.65rem;
     background: rgba(255, 255, 255, 0.92);
     color: #0f172a;
@@ -135,7 +135,7 @@
 
 @layer components {
   .glass-panel {
-    @apply rounded-[var(--app-radius)] border border-sky-100/75 bg-white/90 shadow-[var(--app-shadow)] backdrop-blur-md dark:border-slate-700/80 dark:bg-slate-800/90;
+    @apply rounded-[var(--app-radius)] border border-amber-100/75 bg-white/90 shadow-[var(--app-shadow)] backdrop-blur-md dark:border-slate-700/80 dark:bg-slate-800/90;
   }
 
   .section-title {
@@ -192,9 +192,9 @@
 
   body {
     background:
-      radial-gradient(circle at 0% 0%, rgba(125, 211, 252, 0.28), transparent 38%),
-      radial-gradient(circle at 100% 0%, rgba(125, 211, 252, 0.2), transparent 40%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(239, 248, 255, 0.86)),
+      radial-gradient(circle at 0% 0%, rgba(253, 230, 138, 0.28), transparent 38%),
+      radial-gradient(circle at 100% 0%, rgba(253, 230, 138, 0.2), transparent 40%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(254, 243, 199, 0.86)),
       var(--app-bg);
   }
 }

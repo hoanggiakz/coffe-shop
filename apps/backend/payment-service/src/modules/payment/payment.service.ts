@@ -85,7 +85,25 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
   }
 
   private get sepayQueryUrl() {
-    return String(this.config.get<string>('SEPAY_QUERY_URL', '') || '').trim();
+    const explicit = String(this.config.get<string>('SEPAY_QUERY_URL', '') || '').trim();
+    if (explicit) {
+      return explicit;
+    }
+    return this.sepayDefaultQueryUrl;
+  }
+
+  private get sepayEnv() {
+    const raw = String(this.config.get<string>('SEPAY_ENV', 'production') || 'production')
+      .trim()
+      .toLowerCase();
+    return raw === 'sandbox' ? 'sandbox' : 'production';
+  }
+
+  private get sepayDefaultQueryUrl() {
+    if (this.sepayEnv === 'sandbox') {
+      return 'https://pgapi-sandbox.sepay.vn';
+    }
+    return 'https://pgapi.sepay.vn';
   }
 
   private get onlinePaymentTimeoutMinutes() {
@@ -365,7 +383,9 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
 
     const expectedApiKey = String(this.config.get<string>('SEPAY_IPN_API_KEY', '') || '').trim();
     const expectedSecretKey =
-      String(this.config.get<string>('SEPAY_WEBHOOK_SECRET', '') || '').trim() || this.commonWebhookSecret;
+      String(this.config.get<string>('SEPAY_WEBHOOK_SECRET', '') || '').trim() ||
+      String(this.config.get<string>('SEPAY_SECRET_KEY', '') || '').trim() ||
+      this.commonWebhookSecret;
 
     const authHeader = this.getHeaderValue(headers, 'authorization');
     const secretHeader = this.getHeaderValue(headers, 'x-secret-key');

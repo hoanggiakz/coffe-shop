@@ -26,6 +26,7 @@ describe('OrderController', () => {
     findAll: jest.fn(),
     transferOrMergeTables: jest.fn(),
     findCustomerHistory: jest.fn(),
+    getCustomerRecommendations: jest.fn(),
     validatePromotion: jest.fn(),
     findOne: jest.fn(),
     updateStatus: jest.fn(),
@@ -137,6 +138,7 @@ describe('OrderController', () => {
     controller.findAll('t1', 'PENDING', '2026-01-01', '2026-01-31', 'b1');
     controller.transferOrMergeTables(tableActionDto as any);
     controller.getCustomerHistory('c1', 'e@x.com', '0909', '5');
+    controller.getCustomerRecommendations('c1', 'e@x.com', '0909', 'b1', 't1', '6');
     controller.findOne('o1');
     controller.updateStatus('o1', statusDto as any);
     controller.updateItems('o1', staffItemsDto as any);
@@ -157,6 +159,14 @@ describe('OrderController', () => {
       email: 'e@x.com',
       phone: '0909',
       limit: 5,
+    });
+    expect(orderService.getCustomerRecommendations).toHaveBeenCalledWith({
+      customerId: 'c1',
+      email: 'e@x.com',
+      phone: '0909',
+      branchId: 'b1',
+      tableId: 't1',
+      limit: 6,
     });
     expect(orderService.findOne).toHaveBeenCalledWith('o1');
     expect(orderService.updateStatus).toHaveBeenCalledWith('o1', statusDto);

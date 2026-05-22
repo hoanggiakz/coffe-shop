@@ -90,7 +90,7 @@ const defaultReceiptRow = {
   note: '',
 }
 const selectClass =
-  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
+  'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
 function toDateInputValue(date: Date) {
   return date.toISOString().slice(0, 10)
 }
@@ -590,7 +590,7 @@ export default function Inventory() {
           {ingredients.map((ingredient) => {
             const isLow = Number(ingredient.stock) <= Number(ingredient.minStock)
             return (
-              <div key={ingredient.id} className="rounded-xl border border-sky-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+              <div key={ingredient.id} className="rounded-xl border border-amber-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-slate-900/60">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="font-semibold text-slate-900 dark:text-slate-100">{ingredient.name}</p>
@@ -906,10 +906,10 @@ export default function Inventory() {
 
         <div className="mt-4 space-y-3 md:hidden">
           {movements.map((movement) => (
-            <div key={movement.id} className="rounded-xl border border-sky-100 bg-white/90 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/60">
+            <div key={movement.id} className="rounded-xl border border-amber-100 bg-white/90 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/60">
               <div className="flex items-start justify-between gap-2">
                 <p className="font-semibold text-slate-900 dark:text-slate-100">{movement.ingredient?.name || movement.ingredientId}</p>
-                <span className="rounded-full bg-sky-100 px-2 py-0.5 font-medium text-sky-700">{movement.type}</span>
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700">{movement.type}</span>
               </div>
               <p className="mt-1 text-slate-500">{new Date(movement.createdAt).toLocaleString()}</p>
               <div className="mt-2 grid grid-cols-2 gap-2 text-slate-600 dark:text-slate-300">

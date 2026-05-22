@@ -226,6 +226,36 @@ docker compose up -d --force-recreate payment-service
 docker compose down
 ```
 
+## 12. Scale khi tải tăng (không đổi logic nghiệp vụ)
+
+### 12.1 Scale nhanh với Docker Compose
+
+Áp dụng cho service stateless (ưu tiên): `frontend`, `api-gateway`, `order-service`, `chat-service`.
+
+```bash
+docker compose up -d --scale frontend=2 --scale api-gateway=2 --scale order-service=3 --scale chat-service=2
+docker compose ps
+```
+
+Ghi chú:
+- Không scale `postgres` theo cách này.
+- Sau scale, kiểm tra health endpoint và test lại luồng QR order end-to-end.
+
+### 12.2 Scale với Kubernetes (khuyến nghị production nhiều traffic)
+
+Repo đã có manifest `Deployment` cho microservices và bổ sung HPA tại:
+- `ops/k8s/hpa-api-gateway.yaml`
+- `ops/k8s/hpa-order-service.yaml`
+- `ops/k8s/hpa-chat-service.yaml`
+
+Apply:
+
+```bash
+kubectl apply -f ops/k8s/hpa-api-gateway.yaml
+kubectl apply -f ops/k8s/hpa-order-service.yaml
+kubectl apply -f ops/k8s/hpa-chat-service.yaml
+```
+
 ## 11. Tham chiếu test service
 
 Để chuẩn bị môi trường test và kiểm thử từng service theo API hiện tại, dùng:

@@ -22,18 +22,20 @@ export class ProxyController {
 
     // Tạo proxy middleware cho mỗi service route
     for (const route of SERVICE_ROUTES) {
+      const target = this.resolveRouteTarget(route.path);
       const proxy = createProxyMiddleware({
-        target: route.target,
+        target,
         changeOrigin: true,
         // Giữ nguyên path – backend service cũng lắng nghe /api/...
         pathRewrite: undefined,
         onError: (err, req, res: any) => {
-          this.logger.error(`Proxy error → ${route.target}: ${err.message}`);
+          this.logger.error(`Proxy error → ${target}: ${err.message}`);
           if (!res.headersSent) {
             res.status(502).json({ message: 'Service unavailable' });
           }
         },
       });
+      this.logger.log(`Proxy route configured: ${route.path} -> ${target}`);
       this.proxies.set(route.path, proxy);
     }
   }
@@ -268,6 +270,29 @@ export class ProxyController {
       return value.some((item) => String(item || '').trim().length > 0);
     }
     return String(value || '').trim().length > 0;
+  }
+
+  private resolveRouteTarget(path: string): string {
+    switch (path) {
+      case '/api/users':
+        return this.configService.get<string>('USER_SERVICE_URL') || 'http://user-service:3000';
+      case '/api/tables':
+        return this.configService.get<string>('TABLE_SERVICE_URL') || 'http://table-service:3003';
+      case '/api/orders':
+        return this.configService.get<string>('ORDER_SERVICE_URL') || 'http://order-service:3001';
+      case '/api/chats':
+        return this.configService.get<string>('CHAT_SERVICE_URL') || 'http://chat-service:3007';
+      case '/api/v1/ingredients':
+        return this.configService.get<string>('INVENTORY_SERVICE_URL') || 'http://inventory-service:3005';
+      case '/api/v1/payments':
+        return this.configService.get<string>('PAYMENT_SERVICE_URL') || 'http://payment-service:3004';
+      case '/api/payment':
+        return this.configService.get<string>('PAYMENT_SERVICE_URL') || 'http://payment-service:3004';
+      case '/api/reports':
+        return this.configService.get<string>('REPORT_SERVICE_URL') || 'http://report-service:3006';
+      default:
+        throw new Error(`Unsupported route path: ${path}`);
+    }
   }
 
   private async validateQrOrderMenuRequest(req: Request) {
