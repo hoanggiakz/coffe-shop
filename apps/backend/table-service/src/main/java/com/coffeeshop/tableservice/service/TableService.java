@@ -50,7 +50,17 @@ public class TableService {
 
     public CoffeeTable findById(String id) {
         return tableRepository.findById(id)
+                .or(() -> findByNumberFallback(id))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy bàn"));
+    }
+    
+    private java.util.Optional<CoffeeTable> findByNumberFallback(String rawId) {
+        try {
+            Integer tableNumber = Integer.valueOf(String.valueOf(rawId).trim());
+            return tableRepository.findByNumber(tableNumber);
+        } catch (NumberFormatException ex) {
+            return java.util.Optional.empty();
+        }
     }
 
     public CoffeeTable create(CreateTableRequest req) {

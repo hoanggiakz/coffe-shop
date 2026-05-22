@@ -22,7 +22,7 @@ NestJS service cho chat realtime giữa khách theo bàn và nhân viên.
 
 - Client -> server: `join`, `join-staff`, `send-message`
 - Server -> client: `joined`, `joined-staff`, `new-message`, `staff-notification`, `error`
-- Phòng chat theo bàn: `chat:{tableId}` (service vẫn join thêm `table:{tableId}` để tương thích ngược).
+- Phòng chat theo bàn: `{tableId}` (service vẫn join thêm `table:{tableId}` để tương thích ngược).
 
 Frontend hiện tại kết nối bằng:
 

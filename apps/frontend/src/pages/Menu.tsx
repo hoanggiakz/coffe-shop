@@ -651,7 +651,7 @@ export default function Menu() {
               <label className="text-sm md:col-span-2">
                 Danh mục
                 <select
-                  className="mt-1 block w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm"
+                  className="mt-1 block w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm"
                   value={itemForm.categoryId}
                   onChange={(e) => setItemForm((p) => ({ ...p, categoryId: e.target.value }))}
                 >
@@ -667,7 +667,7 @@ export default function Menu() {
                 Mô tả món
                 <textarea
                   rows={3}
-                  className="mt-1 block w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm"
+                  className="mt-1 block w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm"
                   placeholder="Mô tả hương vị, thành phần nổi bật, nhiệt độ phục vụ..."
                   value={itemForm.description}
                   onChange={(e) => setItemForm((p) => ({ ...p, description: e.target.value }))}
@@ -687,7 +687,7 @@ export default function Menu() {
             </p>
           </div>
 
-          <div className="rounded-xl border border-sky-100/80 bg-white/90 p-3">
+          <div className="rounded-xl border border-amber-100/80 bg-white/90 p-3">
             <Input
               label="URL hình ảnh món"
               placeholder="https://..."
@@ -699,7 +699,7 @@ export default function Menu() {
               <input
                 type="file"
                 accept="image/*"
-                className="mt-1 block w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm"
+                className="mt-1 block w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm"
                 onChange={(e) => onItemImageFileChange(e.target.files?.[0] || null)}
                 disabled={isUploadingImage}
               />

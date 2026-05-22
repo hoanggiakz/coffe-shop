@@ -73,6 +73,19 @@ const items = [
   { name: 'Croissant', description: 'Croissant bo Phap', price: 35000, category: 'food' },
 ];
 
+const imageByItemName = {
+  'Bac xiu': '/menu-images/bac-xiu.jpg',
+  'Ca phe den': '/menu-images/ca-phe-den.jpg',
+  'Ca phe sua': '/menu-images/ca-phe-sua.jpg',
+  Cappuccino: '/menu-images/cappuccino.jpg',
+  Croissant: '/menu-images/croissant.jpg',
+  Espresso: '/menu-images/espresso.jpg',
+  Latte: '/menu-images/latte.jpg',
+  'Matcha Latte': '/menu-images/matcha-latte.jpg',
+  'Sinh to bo': '/menu-images/sinh-to-bo.jpg',
+  'Tra dao': '/menu-images/tra-dao.jpg',
+};
+
 const categoryNameMap = {
   coffee: 'Ca phe',
   tea: 'Tra',
@@ -176,7 +189,7 @@ async function main() {
   }
 
   for (const item of items) {
-    const image = `https://placehold.co/600x400?text=${encodeURIComponent(item.name)}`;
+    const image = imageByItemName[item.name] || `https://placehold.co/600x400?text=${encodeURIComponent(item.name)}`;
     const customizations = item.category === 'food' ? foodCustomizations : drinkCustomizations;
     const categoryId = categoryIds[item.category] || null;
 

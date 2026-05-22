@@ -184,6 +184,11 @@ interface CustomerOfferResponse {
   offers: string[]
 }
 
+interface MenuRecommendation extends MenuItem {
+  recommendationReason?: string
+  recommendationScore?: number
+}
+
 function normalizeCustomizations(raw: unknown): CustomizationGroup[] {
   if (!Array.isArray(raw)) return []
   return raw
@@ -364,6 +369,8 @@ export default function CustomerMenu() {
   const [customerSession, setCustomerSession] = useState<CustomerSession | null>(null)
   const [customerOffers, setCustomerOffers] = useState<string[]>([])
   const [customerOrderHistory, setCustomerOrderHistory] = useState<OrderStatusResponse[]>([])
+  const [customerRecommendations, setCustomerRecommendations] = useState<MenuRecommendation[]>([])
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false)
   const [customerHistoryOpen, setCustomerHistoryOpen] = useState(false)
   const [expandedHistoryOrderIds, setExpandedHistoryOrderIds] = useState<Record<string, boolean>>({})
   const [customerAuthOpen, setCustomerAuthOpen] = useState(false)
@@ -575,6 +582,7 @@ export default function CustomerMenu() {
     setCustomerSession(null)
     setCustomerOffers([])
     setCustomerOrderHistory([])
+    setCustomerRecommendations([])
     setCustomerHistoryOpen(false)
     setExpandedHistoryOrderIds({})
     setCustomerAuthOpen(false)
@@ -632,6 +640,34 @@ export default function CustomerMenu() {
     }
   }
 
+  const loadRecommendations = async () => {
+    if (!tableId && !qrBranchId) {
+      setCustomerRecommendations([])
+      return
+    }
+
+    setLoadingRecommendations(true)
+    try {
+      const params: Record<string, string | number> = { limit: 6 }
+      if (tableId) params.tableId = tableId
+      if (qrBranchId) params.branchId = qrBranchId
+      if (customerSession?.id) params.customerId = customerSession.id
+      else if (customerSession?.phone) params.phone = customerSession.phone
+      else if (customerSession?.email) params.email = customerSession.email
+
+      const { data } = await api.get('/orders/recommendations', { params })
+      const normalized = (Array.isArray(data) ? data : []).map((item: any) => ({
+        ...item,
+        customizations: normalizeCustomizations(item.customizations),
+      }))
+      setCustomerRecommendations(normalized)
+    } catch {
+      setCustomerRecommendations([])
+    } finally {
+      setLoadingRecommendations(false)
+    }
+  }
+
   const toggleHistoryOrderDetails = (orderId: string) => {
     setExpandedHistoryOrderIds((prev) => ({
       ...prev,
@@ -643,6 +679,10 @@ export default function CustomerMenu() {
     if (!customerToken || !customerSession?.id) return
     loadCustomerData(customerToken, customerSession)
   }, [customerToken])
+
+  useEffect(() => {
+    loadRecommendations()
+  }, [tableId, qrBranchId, customerSession?.id, customerSession?.phone, customerSession?.email])
 
   useEffect(() => {
     const orderId = String(currentOrder?.id || '')
@@ -802,6 +842,10 @@ export default function CustomerMenu() {
   }, [chatOpen, tableId])
 
   const menuMap = useMemo(() => new Map(menuItems.map((item) => [item.id, item])), [menuItems])
+  const recommendationItems = useMemo(
+    () => customerRecommendations.filter((item) => menuMap.has(item.id)),
+    [customerRecommendations, menuMap],
+  )
   const categories = useMemo(() => ['ALL', ...new Set(menuItems.map((item) => item.category))], [menuItems])
 
   const filteredItems = useMemo(() => {
@@ -1322,7 +1366,7 @@ export default function CustomerMenu() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-3 pb-28 pt-4 sm:px-6 sm:pt-6">
+    <div className="mx-auto max-w-7xl px-3 pb-36 pt-4 sm:px-6 sm:pb-28 sm:pt-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{resolvingTable ? 'Đang xác định bàn...' : `Thực đơn ${tableName}`}</h1>
@@ -1343,7 +1387,7 @@ export default function CustomerMenu() {
           <button
             type="button"
             onClick={() => setCartDrawerOpen(true)}
-            className="fixed right-4 top-4 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-600 text-white shadow-md"
+            className="fixed right-4 top-4 z-40 hidden h-12 w-12 items-center justify-center rounded-full bg-amber-600 text-white shadow-md lg:inline-flex"
             aria-label="Mở giỏ hàng"
           >
             <ShoppingBagIcon className="h-5 w-5" />
@@ -1356,7 +1400,7 @@ export default function CustomerMenu() {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm sm:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-sky-100 bg-white/92 p-3 shadow-sm sm:grid-cols-3 sm:p-4">
         <input
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
@@ -1374,7 +1418,7 @@ export default function CustomerMenu() {
             </option>
           ))}
         </select>
-        <div className="flex items-center justify-end text-sm text-slate-500">{filteredItems.length} món hiển thị</div>
+        <div className="flex items-center justify-start text-sm text-slate-500 sm:justify-end">{filteredItems.length} món hiển thị</div>
       </div>
       <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
         {categories.map((category) => (
@@ -1397,7 +1441,7 @@ export default function CustomerMenu() {
         <div className="lg:col-span-2">
           {loadingMenu && <p>Đang tải menu...</p>}
           {!loadingMenu && (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
               {filteredItems.map((item) => {
                 const draft = getDraftForMenuItem(item.id)
                 const selectedCount = cartCountByMenuItem.get(item.id) || 0
@@ -1406,7 +1450,7 @@ export default function CustomerMenu() {
                     <img
                       src={item.image || `https://placehold.co/400x280?text=${encodeURIComponent(item.name)}`}
                       alt={item.name}
-                      className="h-28 w-full rounded-xl object-cover"
+                      className="h-36 w-full rounded-xl object-cover sm:h-28"
                     />
                     <div className="mt-2 flex items-start justify-between gap-2">
                       <p className="line-clamp-2 text-sm font-semibold text-slate-900">{item.name}</p>
@@ -1417,7 +1461,7 @@ export default function CustomerMenu() {
                       <button
                         type="button"
                         onClick={() => increase(item.id)}
-                        className="inline-flex min-h-10 items-center rounded-xl bg-amber-600 px-3 text-sm font-semibold text-white disabled:opacity-60"
+                        className="inline-flex min-h-11 items-center rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
                         disabled={!item.available}
                       >
                         Thêm
@@ -1426,7 +1470,7 @@ export default function CustomerMenu() {
                         <button
                           type="button"
                           onClick={() => decrease(item.id)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sm"
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-sky-200 text-base"
                         >
                           -
                         </button>
@@ -1434,7 +1478,7 @@ export default function CustomerMenu() {
                         <button
                           type="button"
                           onClick={() => increase(item.id)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sm"
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-sky-200 text-base"
                           disabled={!item.available}
                         >
                           +
@@ -1618,6 +1662,46 @@ export default function CustomerMenu() {
                     </div>
                   </div>
                 )}
+                <div className="rounded border border-gray-100 p-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-gray-700">Gợi ý cho bạn</p>
+                    <button
+                      type="button"
+                      onClick={loadRecommendations}
+                      disabled={loadingRecommendations}
+                      className="rounded border border-sky-200 px-2 py-1 text-[11px] font-medium text-sky-700 disabled:opacity-60"
+                    >
+                      {loadingRecommendations ? 'Đang tải...' : 'Làm mới'}
+                    </button>
+                  </div>
+                  {loadingRecommendations && <p className="mt-1 text-gray-500">Đang tải gợi ý...</p>}
+                  {!loadingRecommendations && recommendationItems.length === 0 && (
+                    <p className="mt-1 text-gray-500">
+                      Chưa có gợi ý phù hợp. Hãy đặt món để hệ thống học sở thích của bạn.
+                    </p>
+                  )}
+                  {!loadingRecommendations && recommendationItems.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {recommendationItems.slice(0, 4).map((item) => (
+                        <div key={`recommend-${item.id}`} className="flex items-center justify-between gap-2 rounded bg-sky-50/60 px-2 py-1.5">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-slate-800">{item.name}</p>
+                            <p className="text-[11px] text-slate-500">
+                              {item.recommendationReason === 'history_preference' ? 'Theo lịch sử mua hàng' : 'Đang phổ biến'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => increase(item.id)}
+                            className="shrink-0 rounded-lg border border-amber-200 bg-white px-2 py-1 text-[11px] font-semibold text-amber-700"
+                          >
+                            + Thêm
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1949,6 +2033,22 @@ export default function CustomerMenu() {
             </button>
           </div>
           </div>
+        </div>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-sky-100 bg-white/95 px-3 py-2 backdrop-blur lg:hidden">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs text-slate-500">{cartItemCount} món trong giỏ</p>
+            <p className="truncate text-sm font-bold text-slate-900">Tạm tính {payableCartTotal.toLocaleString()}đ</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCartDrawerOpen(true)}
+            className="inline-flex min-h-11 items-center rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white"
+          >
+            Xem giỏ hàng
+          </button>
         </div>
       </div>
 

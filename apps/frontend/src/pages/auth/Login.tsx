@@ -33,8 +33,8 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-sky-50 via-cyan-50 to-blue-50 px-4 py-6">
-      <div className="w-full max-w-md space-y-7 rounded-2xl border border-sky-100 bg-white/92 p-6 shadow-[0_24px_42px_-26px_rgba(2,132,199,0.7)] backdrop-blur-lg sm:p-8">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-amber-50 via-cyan-50 to-blue-50 px-4 py-6">
+      <div className="w-full max-w-md space-y-7 rounded-2xl border border-amber-100 bg-white/92 p-6 shadow-[0_24px_42px_-26px_rgba(2,132,199,0.7)] backdrop-blur-lg sm:p-8">
         <div className="text-center">
           <span className="text-5xl">☕</span>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-900">{tv('Coffee Shop POS', 'Coffee Shop POS')}</h2>

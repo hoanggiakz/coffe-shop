@@ -20,12 +20,12 @@ export default function Button({
   return (
     <button
       className={cn(
-        'inline-flex min-h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent font-semibold tracking-[0.01em] transition-all duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900 disabled:pointer-events-none disabled:opacity-55',
+        'inline-flex min-h-11 min-w-[44px] items-center justify-center rounded-2xl border border-transparent font-semibold tracking-[0.01em] transition-all duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900 disabled:pointer-events-none disabled:opacity-55',
         {
-          'bg-gradient-to-br from-sky-500 to-sky-600 text-white shadow-[0_12px_22px_-12px_rgba(14,165,233,0.75)] hover:from-sky-600 hover:to-sky-700': variant === 'primary',
-          'border-sky-200/80 bg-white/90 text-slate-700 shadow-sm hover:bg-sky-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700': variant === 'secondary',
+          'bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-[0_12px_22px_-12px_rgba(14,165,233,0.75)] hover:from-amber-600 hover:to-amber-700': variant === 'primary',
+          'border-amber-200/80 bg-white/90 text-slate-700 shadow-sm hover:bg-amber-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700': variant === 'secondary',
           'bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-[0_12px_22px_-12px_rgba(244,63,94,0.75)] hover:from-rose-600 hover:to-rose-700': variant === 'danger',
-          'text-slate-600 hover:bg-sky-50/80 dark:text-slate-200 dark:hover:bg-slate-800': variant === 'ghost',
+          'text-slate-600 hover:bg-amber-50/80 dark:text-slate-200 dark:hover:bg-slate-800': variant === 'ghost',
         },
         {
           'min-h-10 rounded-xl px-3 py-2 text-xs': size === 'sm',

@@ -34,7 +34,7 @@ const defaultForm = {
   isActive: true,
 }
 const fieldClass =
-  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
+  'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
 
 export default function Branches() {
   const [branches, setBranches] = useState<BranchItem[]>([])
@@ -160,7 +160,7 @@ export default function Branches() {
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
           />
-          <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm">
+          <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm">
             <input
               type="checkbox"
               checked={includeInactive}
@@ -207,7 +207,7 @@ export default function Branches() {
               ))}
             </select>
           </label>
-          <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm">
+          <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm">
             <input
               type="checkbox"
               checked={form.isActive}

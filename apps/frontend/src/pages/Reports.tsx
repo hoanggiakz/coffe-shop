@@ -125,7 +125,7 @@ function formatHourLabel(value: string): string {
 }
 
 const selectClass =
-  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
+  'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
 
 export default function Reports() {
   const { tv } = useI18n()
@@ -279,7 +279,7 @@ export default function Reports() {
 
   return (
     <div className="space-y-5 sm:space-y-6">
-      <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-sky-100 bg-white/85 p-3 backdrop-blur sm:p-4">
+      <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-amber-100 bg-white/85 p-3 backdrop-blur sm:p-4">
         <h1 className="mr-auto text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Báo cáo và phân tích</h1>
         <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full sm:w-44" />
         <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full sm:w-44" />
@@ -409,7 +409,7 @@ export default function Reports() {
           <div className="space-y-2">
             {topItems.length === 0 && <p className="text-sm text-gray-500">Chưa có dữ liệu</p>}
             {topItems.map((item, index) => (
-              <div key={item.menuItemId} className="flex items-center justify-between rounded-xl border border-sky-100 bg-white/85 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+              <div key={item.menuItemId} className="flex items-center justify-between rounded-xl border border-amber-100 bg-white/85 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
                 <div>
                   <p className="font-medium text-slate-900 dark:text-slate-100">
                     #{index + 1} {item.menuItemName}
@@ -426,7 +426,7 @@ export default function Reports() {
           <div className="space-y-2">
             {staffItems.length === 0 && <p className="text-sm text-gray-500">Chưa có dữ liệu</p>}
             {staffItems.map((item) => (
-              <div key={item.staffId} className="flex items-center justify-between rounded-xl border border-sky-100 bg-white/85 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+              <div key={item.staffId} className="flex items-center justify-between rounded-xl border border-amber-100 bg-white/85 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
                 <div>
                   <p className="font-medium text-slate-900 dark:text-slate-100">{item.staffName}</p>
                   <p className="text-xs text-slate-500">{vaiTroNhanVien(item.role) || 'Chưa phân vai trò'} · {item.orderCount} đơn</p>
@@ -440,11 +440,11 @@ export default function Reports() {
 
       <Card title="Tồn kho hiện tại (M-21)" subtitle={`Cập nhật: ${dashboard?.updatedAt ? new Date(dashboard.updatedAt).toLocaleString('vi-VN') : '-'}`}>
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+          <div className="rounded-xl border border-amber-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
             <p className="text-slate-500">Tổng nguyên liệu</p>
             <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">{inventory?.summary.totalIngredients || 0}</p>
           </div>
-          <div className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+          <div className="rounded-xl border border-amber-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
             <p className="text-slate-500">Đang hoạt động</p>
             <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">{inventory?.summary.activeIngredients || 0}</p>
           </div>
@@ -456,7 +456,7 @@ export default function Reports() {
 
         <div className="space-y-3 sm:hidden">
           {(inventory?.stocks || []).slice(0, 15).map((item) => (
-            <div key={item.id} className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+            <div key={item.id} className="rounded-xl border border-amber-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
               <div className="flex items-center justify-between gap-2">
                 <p className="font-semibold text-slate-900 dark:text-slate-100">{item.name}</p>
                 <span className={`rounded-full px-2 py-0.5 text-xs ${item.isLowStock ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>

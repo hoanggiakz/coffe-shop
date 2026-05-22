@@ -42,7 +42,7 @@ type TableGridState = 'AVAILABLE' | 'OCCUPIED' | 'WAITING_PAYMENT' | 'MAINTENANC
 const statuses: TableStatus[] = ['AVAILABLE', 'OCCUPIED', 'RESERVED', 'CLEANING', 'MAINTENANCE']
 const activeStatuses: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY']
 const fieldClass =
-  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
+  'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
 
 export default function Tables() {
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
@@ -597,15 +597,15 @@ export default function Tables() {
                 </option>
                 ))}
             </select>
-            <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
-              Tổng tạm tính: <span className="font-semibold text-sky-700">{cartTotal.toLocaleString()}đ</span>
+            <div className="rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
+              Tổng tạm tính: <span className="font-semibold text-amber-700">{cartTotal.toLocaleString()}đ</span>
             </div>
             <Button type="submit" loading={creatingWalkInOrder}>
               Tạo đơn cho khách
             </Button>
           </div>
 
-          <div className="max-h-72 space-y-2 overflow-y-auto rounded-xl border border-sky-100 p-2">
+          <div className="max-h-72 space-y-2 overflow-y-auto rounded-xl border border-amber-100 p-2">
             {menuItems
               .filter((item) => item.available)
               .map((item) => (
@@ -615,11 +615,11 @@ export default function Tables() {
                     <p className="text-xs text-slate-500">{item.price.toLocaleString()}đ</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => decreaseItem(item.id)}>
+                    <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-amber-200 px-2" onClick={() => decreaseItem(item.id)}>
                       -
                     </button>
                     <span>{orderCart[item.id] || 0}</span>
-                    <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-sky-200 px-2" onClick={() => increaseItem(item.id)}>
+                    <button type="button" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-amber-200 px-2" onClick={() => increaseItem(item.id)}>
                       +
                     </button>
                   </div>
@@ -669,7 +669,7 @@ export default function Tables() {
                   QR
                 </label>
                 <select
-                  className="min-h-9 rounded-lg border border-sky-200 bg-white/90 px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-800"
+                  className="min-h-9 rounded-lg border border-amber-200 bg-white/90 px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-800"
                   value={table.status}
                   onChange={(e) => updateStatus(table.id, e.target.value as TableStatus)}
                 >
@@ -690,7 +690,7 @@ export default function Tables() {
               </span>
             </div>
             {(activeOrdersByTable.get(table.id) || []).slice(0, 2).map((order) => (
-              <div key={order.id} className="mt-2 rounded-lg border border-sky-100 bg-white/90 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/60">
+              <div key={order.id} className="mt-2 rounded-lg border border-amber-100 bg-white/90 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/60">
                 {maDonHangNgan(order.id)} · {trangThaiDonHang(order.status)} · {order.totalAmount.toLocaleString()}đ
               </div>
             ))}

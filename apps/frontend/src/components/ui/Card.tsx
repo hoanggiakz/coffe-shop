@@ -13,7 +13,7 @@ export default function Card({ children, className, title, subtitle, action }: C
   return (
     <div
       className={cn(
-        'glass-panel density-pad rounded-2xl ring-1 ring-sky-100/80 transition-all duration-200 hover:shadow-[0_20px_38px_-28px_rgba(2,132,199,0.85)] dark:ring-slate-700',
+        'glass-panel density-pad rounded-2xl ring-1 ring-amber-100/80 transition-all duration-200 hover:shadow-[0_20px_38px_-28px_rgba(2,132,199,0.85)] dark:ring-slate-700',
         className,
       )}
     >

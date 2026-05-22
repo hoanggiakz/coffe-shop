@@ -206,6 +206,25 @@ export class OrderController {
     });
   }
 
+  @Get('recommendations')
+  getCustomerRecommendations(
+    @Query('customerId') customerId?: string,
+    @Query('email') email?: string,
+    @Query('phone') phone?: string,
+    @Query('branchId') branchId?: string,
+    @Query('tableId') tableId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.orderService.getCustomerRecommendations({
+      customerId,
+      email,
+      phone,
+      branchId,
+      tableId,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
   @Get('promotions/validate')
   validatePromotion(
     @Query('code') code?: string,

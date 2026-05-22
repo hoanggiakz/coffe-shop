@@ -32,13 +32,7 @@ public class QrCodeService {
         String effectiveBaseUrl = sanitizeBaseUrl(baseUrlOverride);
         StringBuilder menuUrl = new StringBuilder(effectiveBaseUrl)
                 .append("/menu?tableId=")
-                .append(urlEncode(table.getId()))
-                .append("&tableNumber=")
-                .append(table.getNumber());
-
-        if (table.getBranchId() != null && !table.getBranchId().isBlank()) {
-            menuUrl.append("&branchId=").append(urlEncode(table.getBranchId()));
-        }
+                .append(urlEncode(table.getId()));
 
         try {
             QRCodeWriter writer = new QRCodeWriter();
