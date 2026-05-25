@@ -34,6 +34,13 @@ public class QrCodeService {
                 .append("/menu?tableId=")
                 .append(urlEncode(table.getId()));
 
+        if (table.getBranchId() != null && !table.getBranchId().isBlank()) {
+            menuUrl.append("&branchId=").append(urlEncode(table.getBranchId()));
+        }
+        if (table.getNumber() != null) {
+            menuUrl.append("&tableNumber=").append(table.getNumber());
+        }
+
         try {
             QRCodeWriter writer = new QRCodeWriter();
             BitMatrix matrix = writer.encode(menuUrl.toString(), BarcodeFormat.QR_CODE, 300, 300);

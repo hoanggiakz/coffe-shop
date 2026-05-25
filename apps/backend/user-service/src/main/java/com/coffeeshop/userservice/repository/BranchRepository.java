@@ -8,7 +8,9 @@ import java.util.Optional;
 
 public interface BranchRepository extends JpaRepository<Branch, String> {
     Optional<Branch> findByNameIgnoreCase(String name);
+    Optional<Branch> findByCodeIgnoreCase(String code);
     boolean existsByNameIgnoreCase(String name);
+    boolean existsByCodeIgnoreCase(String code);
     List<Branch> findByIsActiveOrderByCreatedAtDesc(Boolean isActive);
     List<Branch> findAllByOrderByCreatedAtDesc();
 }

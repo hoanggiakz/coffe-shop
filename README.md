@@ -48,7 +48,7 @@ Microservices/
 ├── .env.example
 ├── deploy.sh
 ├── seed-database.sh
-└── README_DEPLOY.md
+└── README.md
 ```
 
 ## 3. Chạy hệ thống
@@ -129,10 +129,11 @@ Một số quy tắc quyền chính ở gateway:
 - Staff role (`ADMIN|MANAGER|WAITER|BARISTA|STAFF`): profile, attendance, chat staff.
 - KDS item status (`PATCH /api/orders/:id/items/:itemId/status`): `ADMIN|MANAGER|BARISTA`.
 - Xác nhận cash (`POST /api/v1/payments/:paymentId/confirm-cash`): staff role phù hợp.
+- Branch API alias: hỗ trợ cả `/api/users/admin/branches/*` và `/api/branches/*` (khuyến nghị dùng `/api/branches/*`).
 
 ## 5. API luồng chính (đang dùng bởi frontend)
 
-Base URL khi qua Nginx: `https://localhost/api`
+Base URL khi chạy compose mặc định: `http://127.0.0.1:18080/api`
 
 ### 5.1 Auth / user
 
@@ -159,11 +160,15 @@ Base URL khi qua Nginx: `https://localhost/api`
 - `GET /users/staff/attendance`
 - `GET /users/staff/shift-overview`
 - `GET /users/staff/payroll`
-- `GET /users/admin/branches`
-- `GET /users/admin/branches/{id}`
-- `POST /users/admin/branches`
-- `PATCH /users/admin/branches/{id}`
-- `DELETE /users/admin/branches/{id}`
+- `GET /branches`
+- `GET /branches/{id}`
+- `POST /branches`
+- `PATCH /branches/{id}`
+- `PUT /branches/{id}`
+- `DELETE /branches/{id}`
+- `GET /branches/{id}/staff`
+- `POST /branches/{id}/staff`
+- `GET /branches/{id}/reports/sales`
 
 ### 5.2 Tables + QR + gọi phục vụ
 
@@ -175,6 +180,7 @@ Base URL khi qua Nginx: `https://localhost/api`
 - `PATCH /tables/{id}/status`
 - `GET /tables/{id}/qr`
 - `POST /tables/qr/batch`
+- `POST /tables/qr/batch/download`
 - `POST /tables/{id}/call-staff`
 
 ### 5.3 Orders / menu / KDS / promotions
@@ -266,9 +272,46 @@ Base URL khi qua Nginx: `https://localhost/api`
 | `M-17` Xóa / vô hiệu hóa bàn | ✅ | API đang dùng trạng thái `MAINTENANCE` (tương đương `UNAVAILABLE`) hoặc xóa cứng khi không có đơn active |
 | `M-18..M-19` Khuyến mãi | ✅ | `order-service` promotions admin + màn `Promotions` |
 | `M-20..M-24` Báo cáo / top món / tồn kho / hiệu suất / dashboard | ✅ | `report-service` + màn `Reports` |
-| `M-25` Thêm chi nhánh | ✅ | `POST /users/admin/branches` + màn `Branches` |
-| `M-26` Chuyển đổi chi nhánh | ✅ | Bộ lọc chi nhánh chung ở header (`ADMIN/MANAGER`), áp dụng cho `Dashboard`, `Menu`, `Tables`, `Orders`, `Inventory`, `Reports` |
+| `M-25` Thêm chi nhánh | ✅ | `POST /branches` + màn `Branches` |
+| `M-26` Chuyển đổi chi nhánh | ✅ | Bộ lọc chi nhánh ở header chỉ dành cho `ADMIN`; `MANAGER` bị khóa theo `branchId` trong token |
 | `M-27` Cấu hình hệ thống (Admin) | ✅ (UI mức cơ bản) | Màn `Settings` có khối cấu hình SePay/webhook (`APP_BASE_URL`, `SEPAY_ENV`, `SEPAY_QUERY_URL`, `SEPAY_MERCHANT_ID`, `SEPAY_IPN_AUTH_TYPE`) và URL `POST /api/payment/webhook/sepay`. Lưu cấu hình ở localStorage; cấu hình runtime thực tế vẫn qua `.env`/deploy. |
+
+### 5.12 Phân quyền chi nhánh (theo tài liệu)
+
+```mermaid
+flowchart TD
+    A[JWT: sub, email, role, branchId] --> B{role}
+    B -->|ADMIN| C[Toàn quyền đa chi nhánh]
+    B -->|MANAGER| D[Chỉ dữ liệu branchId trong token]
+    B -->|WAITER/BARISTA/STAFF| E[Chỉ nghiệp vụ vận hành trong branchId]
+    C --> F[/api/branches: CRUD + reports + staff/]
+    D --> G[/api/branches/:id, /:id/staff, /:id/reports/sales<br/>id phải khớp token.branchId/]
+    E --> H[/tables, /orders, /chat theo chi nhánh làm việc/]
+```
+
+### 5.13 Pre-check xóa chi nhánh liên service
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant Gateway
+    participant UserService
+    participant TableService
+    participant OrderService
+    participant InventoryService
+    Admin->>Gateway: DELETE /api/branches/{id}
+    Gateway->>UserService: Proxy request + JWT ADMIN
+    UserService->>TableService: GET /api/tables?branchId={id}
+    UserService->>OrderService: GET /api/orders?branchId={id}
+    UserService->>InventoryService: GET /api/v1/ingredients?branchId={id} (internal token)
+    alt Có dữ liệu ở 1 trong 3 service
+      UserService-->>Gateway: 400 Bad Request
+      Gateway-->>Admin: Chặn xóa branch
+    else Không còn dữ liệu + không còn staff gán branch
+      UserService-->>Gateway: 200 OK (deleted)
+      Gateway-->>Admin: Xóa thành công
+    end
+```
 
 ### 5.8 Tích hợp ngoài (I-01..I-04)
 
@@ -380,30 +423,31 @@ Ghi chú bám code:
 
 ## 7. Các URL UI quan trọng
 
-- Login: `https://localhost/login`
-- Dashboard: `https://localhost/`
-- Tables: `https://localhost/tables`
-- Orders: `https://localhost/orders`
-- Menu management: `https://localhost/menu-management`
-- Inventory: `https://localhost/inventory`
-- Promotions: `https://localhost/promotions`
-- Reports: `https://localhost/reports`
-- Kitchen: `https://localhost/kitchen`
-- Staff chat: `https://localhost/chat`
-- Staff management: `https://localhost/staff`
-- Branches: `https://localhost/branches`
-- Customer menu: `https://localhost/menu?tableId=<TABLE_ID>`
+- Frontend (compose hiện tại): `http://127.0.0.1:8088`
+- API Gateway base: `http://127.0.0.1:18080/api`
+- Chat WS: `ws://127.0.0.1:13007/chat`
+- Login: `http://127.0.0.1:8088/login`
+- Dashboard: `http://127.0.0.1:8088/`
+- Tables: `http://127.0.0.1:8088/tables`
+- Orders: `http://127.0.0.1:8088/orders`
+- Menu management: `http://127.0.0.1:8088/menu-management`
+- Inventory: `http://127.0.0.1:8088/inventory`
+- Promotions: `http://127.0.0.1:8088/promotions`
+- Reports: `http://127.0.0.1:8088/reports`
+- Kitchen: `http://127.0.0.1:8088/kitchen`
+- Staff chat: `http://127.0.0.1:8088/chat`
+- Staff management: `http://127.0.0.1:8088/staff`
+- Branches: `http://127.0.0.1:8088/branches`
+- Customer menu: `http://127.0.0.1:8088/menu?tableId=<TABLE_ID>&branchId=<BRANCH_ID>`
 
 ## 8. Tài liệu liên quan (đã giảm trùng lặp)
 
-- Triển khai production chi tiết: [README_DEPLOY.md](README_DEPLOY.md)
 - Deployment tóm tắt (dev/prod + k8s): [ops/docs/deployment-guide.md](ops/docs/deployment-guide.md)
 - Nghiệm thu: [ops/docs/ACCEPTANCE_GUIDE.md](ops/docs/ACCEPTANCE_GUIDE.md)
 - Hướng dẫn test từng service: [ops/docs/test-services-guide.md](ops/docs/test-services-guide.md)
 - Kiến trúc: [ops/docs/architecture.md](ops/docs/architecture.md)
 - Checklist bàn giao: [ops/docs/DELIVERABLES.md](ops/docs/DELIVERABLES.md)
 - Postman collection: [ops/docs/api/coffee-shop.postman_collection.json](ops/docs/api/coffee-shop.postman_collection.json)
-- Reports index: [reports/README.md](reports/README.md)
 - NFR readiness (4.1-4.6): [reports/nfr/non-functional-readiness.md](reports/nfr/non-functional-readiness.md)
 
 ## 9. Lỗi thường gặp
@@ -413,10 +457,10 @@ Ghi chú bám code:
 - Docker Desktop chưa chạy.
 - Mở Docker Desktop và chờ `Engine running`.
 
-### Lỗi cert khi mở `https://localhost`
+### Không truy cập được FE/API trên localhost
 
-- Chứng chỉ local là self-signed.
-- Chấp nhận cảnh báo ở lần truy cập đầu.
+- Kiểm tra lại port map trong `docker-compose.yml`.
+- Compose hiện tại dùng `http://127.0.0.1:8088` (FE) và `http://127.0.0.1:18080/api` (Gateway).
 
 ### Quét QR trên điện thoại bị lỗi
 

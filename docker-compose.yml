@@ -99,6 +99,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
       JWT_EXPIRATION: 86400000
       SERVER_PORT: 3000
+      TABLE_SERVICE_URL: http://table-service:3003
+      ORDER_SERVICE_URL: http://order-service:3001
+      INVENTORY_SERVICE_URL: http://inventory-service:3005
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-token}
     depends_on:
       postgres:
         condition: service_healthy

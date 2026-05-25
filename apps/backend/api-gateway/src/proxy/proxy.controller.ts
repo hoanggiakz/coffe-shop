@@ -128,9 +128,22 @@ export class ProxyController {
       this.requireRoles(req, ['ADMIN', 'MANAGER'])
       return
     }
+    if (method === 'GET' && path.startsWith('/api/branches')) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER'])
+      return
+    }
 
     // Branch management write actions (admin only)
     if (path.startsWith('/api/users/admin/branches')) {
+      this.requireRoles(req, ['ADMIN']);
+      return;
+    }
+    if (path.startsWith('/api/branches')) {
+      const isStaffWrite = method === 'POST' && /^\/api\/branches\/[^/]+\/staff$/.test(path);
+      if (isStaffWrite) {
+        this.requireRoles(req, ['ADMIN', 'MANAGER']);
+        return;
+      }
       this.requireRoles(req, ['ADMIN']);
       return;
     }
@@ -275,6 +288,7 @@ export class ProxyController {
   private resolveRouteTarget(path: string): string {
     switch (path) {
       case '/api/users':
+      case '/api/branches':
         return this.configService.get<string>('USER_SERVICE_URL') || 'http://user-service:3000';
       case '/api/tables':
         return this.configService.get<string>('TABLE_SERVICE_URL') || 'http://table-service:3003';
@@ -353,7 +367,7 @@ export class ProxyController {
     }
 
     const tableStatus = String(payload?.status || '').toUpperCase();
-    if (tableStatus === 'MAINTENANCE') {
+    if (tableStatus === 'MAINTENANCE' || tableStatus === 'UNAVAILABLE') {
       throw new ForbiddenException('Ban hien khong kha dung');
     }
   }

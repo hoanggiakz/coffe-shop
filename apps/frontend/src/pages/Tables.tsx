@@ -56,6 +56,7 @@ export default function Tables() {
   const [creatingWalkInOrder, setCreatingWalkInOrder] = useState(false)
   const [performingTableAction, setPerformingTableAction] = useState(false)
   const [printingBatch, setPrintingBatch] = useState(false)
+  const [downloadingBatchZip, setDownloadingBatchZip] = useState(false)
   const [orderTableId, setOrderTableId] = useState('')
   const [orderCart, setOrderCart] = useState<Record<string, number>>({})
   const [selectedQrTableIds, setSelectedQrTableIds] = useState<string[]>([])
@@ -354,9 +355,9 @@ export default function Tables() {
       const html = rows
         .map(
           (row: any) => `
-            <div style="width: 240px; margin: 12px; text-align: center; page-break-inside: avoid;">
-              <img src="${row.qrCode}" alt="Mã QR bàn ${row.number}" style="width: 220px; height: 220px;" />
-              <div style="font-size: 18px; margin-top: 8px; font-weight: 600;">Bàn ${row.number}</div>
+            <div style="width: 48%; margin: 1%; text-align: center; page-break-inside: avoid; border: 1px solid #e2e8f0; padding: 10px; box-sizing: border-box;">
+              <img src="${row.qrCode}" alt="Mã QR bàn ${row.number}" style="width: 200px; height: 200px;" />
+              <div style="font-size: 16px; margin-top: 8px; font-weight: 600;">Bàn ${row.number}</div>
             </div>
           `,
         )
@@ -366,8 +367,13 @@ export default function Tables() {
         <html>
           <head>
             <title>In mã QR bàn</title>
+            <style>
+              @media print {
+                @page { size: A4 portrait; margin: 12mm; }
+              }
+            </style>
           </head>
-          <body style="display:flex; flex-wrap:wrap; align-items:flex-start; margin:20px;">
+          <body style="display:flex; flex-wrap:wrap; align-items:flex-start; margin:0;">
             ${html}
             <script>window.onload = function() { window.print(); }</script>
           </body>
@@ -378,6 +384,35 @@ export default function Tables() {
       toast.error(error.response?.data?.message || 'In QR hàng loạt thất bại')
     } finally {
       setPrintingBatch(false)
+    }
+  }
+
+  const downloadSelectedQrsZip = async () => {
+    if (!selectedQrTableIds.length) {
+      toast.error('Vui lòng chọn bàn để tải QR')
+      return
+    }
+
+    setDownloadingBatchZip(true)
+    try {
+      const response = await api.post(
+        '/tables/qr/batch/download',
+        { tableIds: selectedQrTableIds },
+        { responseType: 'blob' },
+      )
+
+      const blob = new Blob([response.data], { type: 'application/zip' })
+      const url = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = 'table-qr-batch.zip'
+      anchor.click()
+      window.URL.revokeObjectURL(url)
+      toast.success('Đã tải gói QR + CSV mapping')
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Tải gói QR thất bại')
+    } finally {
+      setDownloadingBatchZip(false)
     }
   }
 
@@ -644,6 +679,9 @@ export default function Tables() {
           <span className="text-slate-500">Đã chọn: {selectedQrTableIds.length} bàn</span>
           <Button size="sm" variant="secondary" onClick={printSelectedQrs} loading={printingBatch}>
             In QR đã chọn
+          </Button>
+          <Button size="sm" variant="secondary" onClick={downloadSelectedQrsZip} loading={downloadingBatchZip}>
+            Tải ZIP + CSV
           </Button>
         </div>
       </Card>

@@ -29,11 +29,12 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    public String generateToken(String userId, String email, String role) {
+    public String generateToken(String userId, String email, String role, String branchId) {
         return Jwts.builder()
                 .subject(userId)
                 .claim("email", email)
                 .claim("role", role)
+                .claim("branchId", branchId)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getSigningKey())
