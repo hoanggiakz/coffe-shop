@@ -44,6 +44,7 @@ public class SchemaMigrationRunner {
                 "CREATE TABLE IF NOT EXISTS branches (" +
                         "id VARCHAR(255) PRIMARY KEY, " +
                         "name VARCHAR(255) NOT NULL, " +
+                        "code VARCHAR(20), " +
                         "address VARCHAR(255), " +
                         "phone VARCHAR(255), " +
                         "manager_id VARCHAR(255), " +
@@ -52,7 +53,11 @@ public class SchemaMigrationRunner {
                         "updated_at TIMESTAMP DEFAULT NOW()" +
                         ")"
         );
+        jdbcTemplate.execute("ALTER TABLE branches ADD COLUMN IF NOT EXISTS code VARCHAR(20)");
+        jdbcTemplate.execute("UPDATE branches SET code = CONCAT('BR', UPPER(SUBSTRING(REPLACE(id, '-', ''), 1, 6))) WHERE code IS NULL OR TRIM(code) = ''");
+        jdbcTemplate.execute("ALTER TABLE branches ALTER COLUMN code SET NOT NULL");
         jdbcTemplate.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_branches_name_lower ON branches (LOWER(name))");
+        jdbcTemplate.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_branches_code_lower ON branches (LOWER(code))");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_branches_manager_id ON branches(manager_id)");
     }
 }

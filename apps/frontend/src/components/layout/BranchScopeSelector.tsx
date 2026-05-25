@@ -17,7 +17,7 @@ export default function BranchScopeSelector() {
   const setSelectedBranchId = useBranchScopeStore((state) => state.setSelectedBranchId)
   const [branches, setBranches] = useState<BranchItem[]>([])
 
-  const isVisible = role === 'ADMIN' || role === 'MANAGER'
+  const isVisible = role === 'ADMIN'
 
   useEffect(() => {
     if (!isVisible) return
@@ -25,7 +25,7 @@ export default function BranchScopeSelector() {
 
     const run = async () => {
       try {
-        const { data } = await api.get('/users/admin/branches', { params: { includeInactive: false } })
+        const { data } = await api.get('/branches', { params: { includeInactive: false } })
         if (cancelled) return
         const list = Array.isArray(data) ? (data as BranchItem[]) : []
         setBranches(list)

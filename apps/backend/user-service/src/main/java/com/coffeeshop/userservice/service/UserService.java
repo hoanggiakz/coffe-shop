@@ -1,5 +1,7 @@
 package com.coffeeshop.userservice.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.coffeeshop.userservice.config.JwtUtil;
 import com.coffeeshop.userservice.dto.AttendanceCheckRequest;
 import com.coffeeshop.userservice.dto.AttendanceResponse;
@@ -39,11 +41,18 @@ import com.coffeeshop.userservice.repository.BranchRepository;
 import com.coffeeshop.userservice.repository.StaffShiftRepository;
 import com.coffeeshop.userservice.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -83,6 +92,20 @@ public class UserService {
     private final AttendanceRecordRepository attendanceRecordRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Value("${app.table-service-url:http://table-service:3003}")
+    private String tableServiceUrl;
+
+    @Value("${app.order-service-url:http://order-service:3001}")
+    private String orderServiceUrl;
+
+    @Value("${app.inventory-service-url:http://inventory-service:3005}")
+    private String inventoryServiceUrl;
+
+    @Value("${app.internal-service-token:dev-internal-token}")
+    private String internalServiceToken;
     private final Map<String, OtpEntry> otpStore = new ConcurrentHashMap<>();
 
     public StaffResponse register(String token, RegisterRequest req) {
@@ -113,7 +136,7 @@ public class UserService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Tai khoan da bi vo hieu hoa");
         }
 
-        String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name());
+        String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
         return new AuthResponse(token, UserProfile.from(user));
     }
 
@@ -154,7 +177,7 @@ public class UserService {
                 .build();
 
         user = userRepository.save(user);
-        String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name());
+        String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
         return new AuthResponse(token, UserProfile.from(user));
     }
 
@@ -167,7 +190,7 @@ public class UserService {
         if (Boolean.FALSE.equals(user.getIsActive())) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Tai khoan da bi vo hieu hoa");
         }
-        String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name());
+        String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
         return new AuthResponse(token, UserProfile.from(user));
     }
 
@@ -195,7 +218,7 @@ public class UserService {
                 .build();
 
         user = userRepository.save(user);
-        String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name());
+        String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
         return new AuthResponse(token, UserProfile.from(user));
     }
 
@@ -207,7 +230,7 @@ public class UserService {
         if (Boolean.FALSE.equals(user.getIsActive())) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Tai khoan da bi vo hieu hoa");
         }
-        String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name());
+        String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
         return new AuthResponse(token, UserProfile.from(user));
     }
 
@@ -257,7 +280,7 @@ public class UserService {
 
     // M-24/M-25: Quan ly chi nhanh
     public List<BranchResponse> listBranches(String token, Boolean includeInactive) {
-        requireManagerOrAdmin(token);
+        requireAdmin(token);
         boolean showInactive = Boolean.TRUE.equals(includeInactive);
         List<Branch> branches = showInactive
                 ? branchRepository.findAllByOrderByCreatedAtDesc()
@@ -266,20 +289,28 @@ public class UserService {
     }
 
     public BranchResponse getBranch(String token, String branchId) {
-        requireManagerOrAdmin(token);
+        User actor = requireManagerOrAdmin(token);
         Branch branch = requireBranchById(branchId);
+        assertCanAccessBranch(actor, branch.getId());
         return toBranchResponse(branch);
     }
 
     public BranchResponse createBranch(String token, BranchCreateRequest req) {
         requireAdmin(token);
         String name = String.valueOf(req.getName() == null ? "" : req.getName()).trim();
+        String code = normalizeBranchCode(req.getCode());
         if (name.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ten chi nhanh khong duoc de trong");
+        }
+        if (code == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ma chi nhanh khong hop le");
         }
 
         if (branchRepository.existsByNameIgnoreCase(name)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Ten chi nhanh da ton tai");
+        }
+        if (branchRepository.existsByCodeIgnoreCase(code)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Ma chi nhanh da ton tai");
         }
 
         String managerId = normalizeBranchId(req.getManagerId());
@@ -287,6 +318,7 @@ public class UserService {
 
         Branch branch = Branch.builder()
                 .name(name)
+                .code(code)
                 .address(normalizeNullableText(req.getAddress()))
                 .phone(normalizePhone(req.getPhone()))
                 .managerId(manager != null ? manager.getId() : null)
@@ -317,6 +349,16 @@ public class UserService {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Ten chi nhanh da ton tai");
             }
             branch.setName(name);
+        }
+        if (req.getCode() != null) {
+            String code = normalizeBranchCode(req.getCode());
+            if (code == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ma chi nhanh khong hop le");
+            }
+            if (!code.equalsIgnoreCase(branch.getCode()) && branchRepository.existsByCodeIgnoreCase(code)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Ma chi nhanh da ton tai");
+            }
+            branch.setCode(code);
         }
 
         if (req.getAddress() != null) {
@@ -366,9 +408,134 @@ public class UserService {
     public BranchResponse deleteBranch(String token, String branchId) {
         requireAdmin(token);
         Branch branch = requireBranchById(branchId);
-        branch.setIsActive(false);
-        branch = branchRepository.save(branch);
+        ensureBranchHasNoCrossServiceData(branch.getId());
+        long activeStaffCount = userRepository.countByBranchIdAndRoleIn(branch.getId(), STAFF_ROLES);
+        if (activeStaffCount > 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khong the xoa chi nhanh khi con nhan su duoc gan");
+        }
+        branchRepository.delete(branch);
         return toBranchResponse(branch);
+    }
+
+    private void ensureBranchHasNoCrossServiceData(String branchId) {
+        int tableCount = fetchArrayCount(
+                tableServiceUrl + "/api/tables?branchId=" + URLEncoder.encode(branchId, StandardCharsets.UTF_8),
+                false
+        );
+        if (tableCount > 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khong the xoa chi nhanh khi con du lieu ban");
+        }
+
+        int orderCount = fetchArrayCount(
+                orderServiceUrl + "/api/orders?branchId=" + URLEncoder.encode(branchId, StandardCharsets.UTF_8),
+                false
+        );
+        if (orderCount > 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khong the xoa chi nhanh khi con don hang");
+        }
+
+        int inventoryCount = fetchArrayCount(
+                inventoryServiceUrl + "/api/v1/ingredients?branchId=" + URLEncoder.encode(branchId, StandardCharsets.UTF_8),
+                true
+        );
+        if (inventoryCount > 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khong the xoa chi nhanh khi con ton kho/nguyen lieu");
+        }
+    }
+
+    private int fetchArrayCount(String url, boolean useInternalToken) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Accept", "application/json")
+                .GET();
+
+        if (useInternalToken) {
+            String token = String.valueOf(internalServiceToken == null ? "" : internalServiceToken).trim();
+            if (token.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Thieu internal token de kiem tra du lieu lien service");
+            }
+            builder.header("Authorization", "Bearer " + token);
+        }
+
+        try {
+            HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 400) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Kiem tra du lieu lien service that bai");
+            }
+            JsonNode node = objectMapper.readTree(response.body());
+            if (!node.isArray()) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Du lieu lien service tra ve khong dung dinh dang");
+            }
+            return node.size();
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong ket noi duoc service de kiem tra du lieu");
+        }
+    }
+
+    public List<StaffResponse> listBranchStaff(String token, String branchId, Boolean includeInactive) {
+        User actor = requireManagerOrAdmin(token);
+        Branch branch = requireBranchById(branchId);
+        assertCanAccessBranch(actor, branch.getId());
+        return listStaff(token, null, null, branch.getId(), includeInactive);
+    }
+
+    public StaffResponse createBranchStaff(String token, String branchId, StaffCreateRequest request) {
+        User actor = requireManagerOrAdmin(token);
+        Branch branch = requireBranchById(branchId);
+        assertCanAccessBranch(actor, branch.getId());
+        StaffCreateRequest effectiveRequest = new StaffCreateRequest();
+        effectiveRequest.setName(request.getName());
+        effectiveRequest.setEmail(request.getEmail());
+        effectiveRequest.setPassword(request.getPassword());
+        effectiveRequest.setPhone(request.getPhone());
+        effectiveRequest.setRole(request.getRole());
+        effectiveRequest.setEmployeeCode(request.getEmployeeCode());
+        effectiveRequest.setPersonalQrCode(request.getPersonalQrCode());
+        effectiveRequest.setPreferredShift(request.getPreferredShift());
+        effectiveRequest.setBranchId(branch.getId());
+        return createStaff(actor, effectiveRequest);
+    }
+
+    public String getBranchSalesReport(String token, String branchId, String dateFrom, String dateTo) {
+        User actor = requireManagerOrAdmin(token);
+        Branch branch = requireBranchById(branchId);
+        assertCanAccessBranch(actor, branch.getId());
+
+        String reportServiceUrl = String.valueOf(System.getenv("REPORT_SERVICE_URL"));
+        if (reportServiceUrl == null || reportServiceUrl.isBlank() || "null".equalsIgnoreCase(reportServiceUrl)) {
+            reportServiceUrl = "http://report-service:3006";
+        }
+
+        StringBuilder url = new StringBuilder(reportServiceUrl)
+                .append("/api/reports/revenue-summary?branchId=")
+                .append(URLEncoder.encode(branch.getId(), StandardCharsets.UTF_8));
+        String normalizedFrom = normalizeNullableText(dateFrom);
+        String normalizedTo = normalizeNullableText(dateTo);
+        if (normalizedFrom != null) {
+            url.append("&dateFrom=").append(URLEncoder.encode(normalizedFrom, StandardCharsets.UTF_8));
+        }
+        if (normalizedTo != null) {
+            url.append("&dateTo=").append(URLEncoder.encode(normalizedTo, StandardCharsets.UTF_8));
+        }
+
+        HttpRequest httpRequest = HttpRequest.newBuilder()
+                .uri(URI.create(url.toString()))
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+        try {
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 400) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong lay duoc bao cao doanh thu chi nhanh");
+            }
+            return response.body();
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong ket noi duoc report-service");
+        }
     }
 
     // M-01: Them / sua / xoa nhan vien
@@ -378,6 +545,14 @@ public class UserService {
 
         String normalizedKeyword = String.valueOf(keyword == null ? "" : keyword).trim().toLowerCase(Locale.ROOT);
         String normalizedBranchId = normalizeBranchId(branchId);
+        if (actor.getRole() != User.Role.ADMIN) {
+            String actorBranchId = normalizeBranchId(actor.getBranchId());
+            if (actorBranchId == null) {
+                normalizedBranchId = "__none__";
+            } else if (normalizedBranchId == null || !Objects.equals(normalizedBranchId, actorBranchId)) {
+                normalizedBranchId = actorBranchId;
+            }
+        }
         boolean showInactive = canViewSensitiveData && Boolean.TRUE.equals(includeInactive);
 
         List<User> users = normalizedBranchId == null
@@ -433,6 +608,17 @@ public class UserService {
         }
 
         String normalizedBranchId = resolveBranchAssignment(req.getBranchId());
+        if (actor.getRole() == User.Role.MANAGER) {
+            if (actor.getBranchId() == null || actor.getBranchId().isBlank()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "MANAGER chua duoc gan chi nhanh");
+            }
+            if (normalizedBranchId == null) {
+                normalizedBranchId = actor.getBranchId();
+            }
+            if (!Objects.equals(actor.getBranchId(), normalizedBranchId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "MANAGER chi duoc them nhan vien trong chi nhanh cua minh");
+            }
+        }
         String employeeCode = resolveEmployeeCode(req.getEmployeeCode(), null);
         // Always auto-generate personal QR code when creating a new staff account.
         String personalQrCode = resolvePersonalQrCode(null, employeeCode, null);
@@ -951,6 +1137,9 @@ public class UserService {
         if (actor.getRole() == User.Role.ADMIN) {
             return;
         }
+        if (!Objects.equals(actor.getBranchId(), target.getBranchId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "MANAGER chi duoc quan ly nhan vien trong chi nhanh cua minh");
+        }
         if (target.getRole() == User.Role.ADMIN || target.getRole() == User.Role.MANAGER) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "MANAGER khong duoc sua hoac xoa tai khoan quan tri");
         }
@@ -962,6 +1151,15 @@ public class UserService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chi nhan vien moi duoc truy cap");
         }
         return actor;
+    }
+
+    private void assertCanAccessBranch(User actor, String branchId) {
+        if (actor.getRole() == User.Role.ADMIN) {
+            return;
+        }
+        if (!Objects.equals(actor.getBranchId(), branchId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chi duoc truy cap du lieu chi nhanh cua minh");
+        }
     }
 
     private User requireCustomerFromToken(String token) {
@@ -1093,6 +1291,14 @@ public class UserService {
         }
         String normalized = code.replaceAll("\\s+", "").trim().toUpperCase(Locale.ROOT);
         return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String normalizeBranchCode(String code) {
+        String normalized = normalizeCode(code);
+        if (normalized == null || normalized.length() > 20) {
+            return null;
+        }
+        return normalized;
     }
 
     private String normalizeRequiredPhone(String phone) {

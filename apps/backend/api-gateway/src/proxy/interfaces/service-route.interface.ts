@@ -8,6 +8,8 @@ export interface ServiceRoute {
 export const SERVICE_ROUTES: ServiceRoute[] = [
   // User Service (Spring Boot) – login/register are public
   { path: '/api/users', public: true },
+  // Branch API alias mapped to user-service
+  { path: '/api/branches', public: true },
   // Table Service (Spring Boot)
   { path: '/api/tables', public: true },
   // Order Service (NestJS) – menu + orders

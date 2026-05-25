@@ -18,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HashMap;
@@ -25,6 +26,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 
 @Service
 @RequiredArgsConstructor
@@ -189,6 +194,44 @@ public class TableService {
         return payload;
     }
 
+    public byte[] exportQrBatchZip(List<String> tableIds, String baseUrlOverride) {
+        List<Map<String, String>> rows = getQrBatch(tableIds, baseUrlOverride);
+        if (rows.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Không có bàn để xuất QR");
+        }
+
+        try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
+             ZipOutputStream zos = new ZipOutputStream(bos, StandardCharsets.UTF_8)) {
+            StringBuilder csv = new StringBuilder("tableId,tableNumber,fileName\n");
+
+            for (Map<String, String> row : rows) {
+                String id = String.valueOf(row.getOrDefault("id", "")).trim();
+                String number = String.valueOf(row.getOrDefault("number", "")).trim();
+                String fileName = "table-" + (number.isEmpty() ? id : number) + ".png";
+                String qrData = String.valueOf(row.getOrDefault("qrCode", ""));
+                byte[] pngBytes = decodeBase64Png(qrData);
+
+                ZipEntry qrEntry = new ZipEntry(fileName);
+                zos.putNextEntry(qrEntry);
+                zos.write(pngBytes);
+                zos.closeEntry();
+
+                csv.append(csvEscape(id)).append(",")
+                        .append(csvEscape(number)).append(",")
+                        .append(csvEscape(fileName)).append("\n");
+            }
+
+            ZipEntry csvEntry = new ZipEntry("mapping.csv");
+            zos.putNextEntry(csvEntry);
+            zos.write(csv.toString().getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+            zos.finish();
+            return bos.toByteArray();
+        } catch (IOException ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Không thể tạo file ZIP QR");
+        }
+    }
+
     public Map<String, String> callStaff(String id, CallStaffRequest req) {
         CoffeeTable table = findById(id);
         String reason = normalizeReason(req);
@@ -311,5 +354,26 @@ public class TableService {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Retry bi gian doan", ex);
         }
+    }
+
+    private byte[] decodeBase64Png(String dataUrl) {
+        String normalized = String.valueOf(dataUrl == null ? "" : dataUrl).trim();
+        if (normalized.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "QR data trống");
+        }
+
+        int commaIndex = normalized.indexOf(',');
+        String base64 = commaIndex >= 0 ? normalized.substring(commaIndex + 1) : normalized;
+        try {
+            return Base64.getDecoder().decode(base64);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "QR data không hợp lệ");
+        }
+    }
+
+    private String csvEscape(String value) {
+        String source = value == null ? "" : value;
+        String escaped = source.replace("\"", "\"\"");
+        return "\"" + escaped + "\"";
     }
 }

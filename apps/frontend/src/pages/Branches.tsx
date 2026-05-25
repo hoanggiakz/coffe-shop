@@ -10,6 +10,7 @@ import { trangThaiHoatDong, vaiTroNhanVien } from '@/utils/display'
 type BranchItem = {
   id: string
   name: string
+  code: string
   address?: string | null
   phone?: string | null
   managerId?: string | null
@@ -28,6 +29,7 @@ type StaffItem = {
 
 const defaultForm = {
   name: '',
+  code: '',
   address: '',
   phone: '',
   managerId: '',
@@ -47,8 +49,7 @@ export default function Branches() {
   const [form, setForm] = useState(defaultForm)
 
   const managerOptions = useMemo(
-    () =>
-      staffs.filter((staff) => staff.isActive && (staff.role === 'ADMIN' || staff.role === 'MANAGER')),
+    () => staffs.filter((staff) => staff.isActive && staff.role === 'MANAGER'),
     [staffs],
   )
 
@@ -69,7 +70,7 @@ export default function Branches() {
     setLoading(true)
     try {
       const [branchesRes, staffsRes] = await Promise.all([
-        api.get('/users/admin/branches', { params: { includeInactive } }),
+        api.get('/branches', { params: { includeInactive } }),
         api.get('/users/staff', { params: { includeInactive: 'false' } }),
       ])
       setBranches(Array.isArray(branchesRes.data) ? branchesRes.data : [])
@@ -94,6 +95,7 @@ export default function Branches() {
     setEditingBranchId(branch.id)
     setForm({
       name: branch.name || '',
+      code: branch.code || '',
       address: branch.address || '',
       phone: branch.phone || '',
       managerId: branch.managerId || '',
@@ -107,11 +109,16 @@ export default function Branches() {
       toast.error('Tên chi nhánh không được để trống')
       return
     }
+    if (!form.code.trim()) {
+      toast.error('Mã chi nhánh không được để trống')
+      return
+    }
 
     setSaving(true)
     try {
       const payload = {
         name: form.name.trim(),
+        code: form.code.trim(),
         address: form.address.trim() || null,
         phone: form.phone.trim() || null,
         managerId: form.managerId,
@@ -119,10 +126,10 @@ export default function Branches() {
       }
 
       if (editingBranchId) {
-        await api.patch(`/users/admin/branches/${editingBranchId}`, payload)
+        await api.patch(`/branches/${editingBranchId}`, payload)
         toast.success('Đã cập nhật chi nhánh')
       } else {
-        await api.post('/users/admin/branches', payload)
+        await api.post('/branches', payload)
         toast.success('Đã tạo chi nhánh')
       }
 
@@ -138,7 +145,7 @@ export default function Branches() {
   const deactivateBranch = async (branch: BranchItem) => {
     if (!window.confirm(`Vô hiệu hóa chi nhánh "${branch.name}"?`)) return
     try {
-      await api.delete(`/users/admin/branches/${branch.id}`)
+      await api.delete(`/branches/${branch.id}`)
       toast.success('Đã vô hiệu hóa chi nhánh')
       if (editingBranchId === branch.id) {
         resetForm()
@@ -181,6 +188,12 @@ export default function Branches() {
             placeholder="Tên chi nhánh"
             value={form.name}
             onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+          />
+          <Input
+            required
+            placeholder="Mã chi nhánh (VD: HN01)"
+            value={form.code}
+            onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value }))}
           />
           <Input
             placeholder="Địa chỉ"
@@ -232,6 +245,7 @@ export default function Branches() {
               <thead>
                 <tr className="border-b text-left">
                   <th className="py-2 pr-3">Tên chi nhánh</th>
+                  <th className="py-2 pr-3">Mã</th>
                   <th className="py-2 pr-3">Địa chỉ</th>
                   <th className="py-2 pr-3">Số điện thoại</th>
                   <th className="py-2 pr-3">Quản lý</th>
@@ -244,6 +258,7 @@ export default function Branches() {
                 {visibleBranches.map((branch) => (
                   <tr key={branch.id} className="border-b">
                     <td className="py-2 pr-3">{branch.name}</td>
+                    <td className="py-2 pr-3">{branch.code || '-'}</td>
                     <td className="py-2 pr-3">{branch.address || '-'}</td>
                     <td className="py-2 pr-3">{branch.phone || '-'}</td>
                     <td className="py-2 pr-3">{branch.managerName || branch.managerId || '-'}</td>

@@ -44,6 +44,9 @@ type EnrichedOrder = {
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
+  private readonly tableOrderRateWindowMs = Math.max(Number(process.env.ORDER_TABLE_RATE_LIMIT_WINDOW_MS || 30000), 1000);
+  private readonly tableOrderRateMax = Math.max(Number(process.env.ORDER_TABLE_RATE_LIMIT_MAX || 10), 1);
+  private readonly tableOrderRateHits = new Map<string, number[]>();
 
   constructor(
     private prisma: PrismaService,
@@ -108,6 +111,36 @@ export class OrderService {
 
   private async sleep(ms: number) {
     await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private enforceTableOrderRateLimit(tableId: string) {
+    const normalizedTableId = String(tableId || '').trim();
+    if (!normalizedTableId) {
+      return;
+    }
+
+    const now = Date.now();
+    const windowStart = now - this.tableOrderRateWindowMs;
+    const currentHits = this.tableOrderRateHits.get(normalizedTableId) || [];
+    const activeHits = currentHits.filter((ts) => ts > windowStart);
+
+    if (activeHits.length >= this.tableOrderRateMax) {
+      throw new BadRequestException('Ban dang gui yeu cau dat mon qua nhanh, vui long thu lai sau');
+    }
+
+    activeHits.push(now);
+    this.tableOrderRateHits.set(normalizedTableId, activeHits);
+
+    if (this.tableOrderRateHits.size > 5000) {
+      for (const [key, timestamps] of this.tableOrderRateHits.entries()) {
+        const recent = timestamps.filter((ts) => ts > windowStart);
+        if (recent.length === 0) {
+          this.tableOrderRateHits.delete(key);
+        } else {
+          this.tableOrderRateHits.set(key, recent);
+        }
+      }
+    }
   }
 
   private normalizeIncomingItemStatus(status: string) {
@@ -1492,6 +1525,8 @@ export class OrderService {
 
   // ── Orders ──────────────────────────────────────────────
   async create(dto: CreateOrderDto) {
+    this.enforceTableOrderRateLimit(dto.tableId);
+
     const branchIdFromPayload = this.normalizeBranchId(dto.branchId);
     const branchIdFromTable = await this.resolveBranchIdFromTable(dto.tableId);
     const resolvedBranchId = branchIdFromTable || branchIdFromPayload || null;

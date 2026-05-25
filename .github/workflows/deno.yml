@@ -1,10 +1,11 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
-    branches: ["main", "develop"]
+    branches: ["main", "develop", "f3"]
   push:
-    branches: ["main", "develop"]
+    branches: ["main", "develop", "f3"]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -46,7 +47,7 @@ jobs:
       - name: Lint (if script exists)
         working-directory: ${{ matrix.service }}
         run: |
-          if npm run | grep -qE "^[[:space:]]+lint"; then
+          if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.lint ? 0 : 1)"; then
             npm run lint
           else
             echo "No lint script for ${{ matrix.service }}, skipping."
@@ -55,7 +56,7 @@ jobs:
       - name: Type check (if script exists)
         working-directory: ${{ matrix.service }}
         run: |
-          if npm run | grep -qE "^[[:space:]]+typecheck"; then
+          if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.typecheck ? 0 : 1)"; then
             npm run typecheck
           else
             echo "No typecheck script for ${{ matrix.service }}, skipping."
@@ -68,8 +69,8 @@ jobs:
       - name: Unit test
         working-directory: ${{ matrix.service }}
         run: |
-          if npm run | grep -qE "^[[:space:]]+test"; then
-            npm test -- --runInBand --passWithNoTests
+          if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.test ? 0 : 1)"; then
+            npm test -- --passWithNoTests
           else
             echo "No test script for ${{ matrix.service }}, skipping."
           fi
