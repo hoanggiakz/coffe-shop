@@ -14,7 +14,6 @@ model MenuItem {
   description String?
   price       Int      // VND – ví dụ 45000
   image       String?
-  branchId    String?
   categoryId  String?
   category    String   @default("coffee")
   customizations Json?
@@ -24,11 +23,29 @@ model MenuItem {
   categoryRef MenuCategory?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   optionGroups MenuItemOptionGroup[]
   ingredients MenuItemIngredient[]
+  branchMenuItems BranchMenuItem[]
 
   @@map("menu_items")
-  @@index([branchId])
   @@index([categoryId])
   @@index([available])
+}
+
+model BranchMenuItem {
+  id           String   @id @default(cuid())
+  branchId     String
+  menuItemId   String
+  price        Int
+  isAvailable  Boolean  @default(true)
+  displayOrder Int      @default(0)
+  customOptions Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  menuItem     MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@map("branch_menu_items")
+  @@unique([branchId, menuItemId])
+  @@index([branchId, isAvailable])
+  @@index([menuItemId])
 }
 
 model MenuCategory {

@@ -2,11 +2,12 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { KafkaModule } from '../../kafka/kafka.module';
 import { OrderController } from './order.controller';
+import { BranchMenuController } from './branch-menu.controller';
 import { OrderService } from './order.service';
 
 @Module({
   imports: [PrismaModule, KafkaModule],
-  controllers: [OrderController],
+  controllers: [OrderController, BranchMenuController],
   providers: [OrderService],
   exports: [OrderService],
 })

@@ -10,6 +10,8 @@ import { trangThaiHoatDong } from '@/utils/display'
 import { disconnectSocket, getSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
+import { normalizeRole } from '@/utils/rbac'
+import { useAuthStore } from '@/stores/authStore'
 
 type Ingredient = {
   id: string
@@ -97,6 +99,8 @@ function toDateInputValue(date: Date) {
 
 export default function Inventory() {
   const { tv } = useI18n()
+  const currentUser = useAuthStore((state) => state.user)
+  const currentRole = normalizeRole(currentUser?.role)
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
@@ -199,10 +203,19 @@ export default function Inventory() {
 
   const loadBranches = async () => {
     try {
-      const { data } = await api.get('/users/admin/branches', {
-        params: { includeInactive: 'true' },
-      })
-      setBranches(Array.isArray(data) ? data : [])
+      if (currentRole === 'ADMIN') {
+        const { data } = await api.get('/branches', {
+          params: { includeInactive: 'true' },
+        })
+        setBranches(Array.isArray(data) ? data : [])
+        return
+      }
+      if (currentRole === 'MANAGER' && currentUser?.branchId) {
+        const { data } = await api.get(`/branches/${currentUser.branchId}`)
+        setBranches(data ? [data] : [])
+        return
+      }
+      setBranches([])
     } catch (error: any) {
       setBranches([])
       const status = Number(error?.response?.status || 0)
@@ -226,6 +239,10 @@ export default function Inventory() {
   useEffect(() => {
     void loadAll()
   }, [])
+
+  useEffect(() => {
+    void loadBranches()
+  }, [currentRole, currentUser?.branchId])
 
   useEffect(() => {
     setBranchId(selectedBranchId)

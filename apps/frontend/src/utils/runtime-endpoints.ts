@@ -44,6 +44,11 @@ export function resolveWebsocketBaseUrl(): string {
     return ''
   }
 
+  // Local compose default: frontend :8088, chat-service :13007
+  if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+    return `${window.location.protocol}//${window.location.hostname}:13007`
+  }
+
   if (!isCodespacesHost(window.location.hostname)) {
     return window.location.origin
   }

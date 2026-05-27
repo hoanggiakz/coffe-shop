@@ -3,6 +3,10 @@ import { OrderController } from './order.controller';
 describe('OrderController', () => {
   const orderService = {
     getMenu: jest.fn(),
+    getBranchMenu: jest.fn(),
+    activateBranchMenuItem: jest.fn(),
+    updateBranchMenuItem: jest.fn(),
+    removeBranchMenuItem: jest.fn(),
     listMenuCategories: jest.fn(),
     createMenuCategory: jest.fn(),
     updateMenuCategory: jest.fn(),
@@ -53,6 +57,18 @@ describe('OrderController', () => {
     expect(orderService.getMenu).toHaveBeenCalledWith({ branchId: 'b1', tableId: 't1' });
   });
 
+  it('forwards branch menu management requests', () => {
+    controller.getBranchMenu('b1', 't1');
+    controller.activateBranchMenuItem('b1', 'm1', { price: 32000 } as any, 'MANAGER', 'b1');
+    controller.updateBranchMenuItem('b1', 'm1', { is_available: false } as any, 'MANAGER', 'b1');
+    controller.removeBranchMenuItem('b1', 'm1', 'MANAGER', 'b1');
+
+    expect(orderService.getBranchMenu).toHaveBeenCalledWith('b1', 't1');
+    expect(orderService.activateBranchMenuItem).toHaveBeenCalledWith('b1', 'm1', { price: 32000 }, { role: 'MANAGER', branchId: 'b1' });
+    expect(orderService.updateBranchMenuItem).toHaveBeenCalledWith('b1', 'm1', { is_available: false }, { role: 'MANAGER', branchId: 'b1' });
+    expect(orderService.removeBranchMenuItem).toHaveBeenCalledWith('b1', 'm1', { role: 'MANAGER', branchId: 'b1' });
+  });
+
   it('forwards category management requests', () => {
     const createDto = { name: 'Coffee' };
     const updateDto = { name: 'Tea' };
@@ -95,20 +111,20 @@ describe('OrderController', () => {
     const createDto = { name: 'Latte' };
     const updateDto = { name: 'Iced Latte' };
 
-    controller.listMenuItems('latte', 'cat1', 'true', 'branch1');
-    controller.createMenuItem(createDto as any);
-    controller.updateMenuItem('m1', updateDto as any);
-    controller.deleteMenuItem('m1');
+    controller.listMenuItems('latte', 'cat1', 'true', 'branch1', 'MANAGER', 'branch1');
+    controller.createMenuItem(createDto as any, 'MANAGER', 'branch1');
+    controller.updateMenuItem('m1', updateDto as any, 'MANAGER', 'branch1');
+    controller.deleteMenuItem('m1', 'MANAGER', 'branch1');
 
     expect(orderService.listMenuItemsForAdmin).toHaveBeenCalledWith({
       keyword: 'latte',
       categoryId: 'cat1',
       includeInactive: true,
       branchId: 'branch1',
-    });
-    expect(orderService.createMenuItemForAdmin).toHaveBeenCalledWith(createDto);
-    expect(orderService.updateMenuItemForAdmin).toHaveBeenCalledWith('m1', updateDto);
-    expect(orderService.deleteMenuItemForAdmin).toHaveBeenCalledWith('m1');
+    }, { role: 'MANAGER', branchId: 'branch1' });
+    expect(orderService.createMenuItemForAdmin).toHaveBeenCalledWith(createDto, { role: 'MANAGER', branchId: 'branch1' });
+    expect(orderService.updateMenuItemForAdmin).toHaveBeenCalledWith('m1', updateDto, { role: 'MANAGER', branchId: 'branch1' });
+    expect(orderService.deleteMenuItemForAdmin).toHaveBeenCalledWith('m1', { role: 'MANAGER', branchId: 'branch1' });
   });
 
   it('forwards promotion management requests', () => {

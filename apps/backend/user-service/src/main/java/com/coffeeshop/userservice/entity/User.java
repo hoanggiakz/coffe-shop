@@ -15,6 +15,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.math.BigDecimal;
 
 @Entity
 @Table(name = "users")
@@ -70,6 +72,16 @@ public class User {
     @Builder.Default
     private Boolean isActive = true;
 
+    @Column(name = "hire_date")
+    private LocalDate hireDate;
+
+    @Column(name = "base_salary", precision = 10, scale = 2)
+    private BigDecimal baseSalary;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "salary_type")
+    private SalaryType salaryType;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -80,5 +92,9 @@ public class User {
 
     public enum MemberTier {
         STANDARD, SILVER, GOLD
+    }
+
+    public enum SalaryType {
+        MONTHLY, HOURLY
     }
 }

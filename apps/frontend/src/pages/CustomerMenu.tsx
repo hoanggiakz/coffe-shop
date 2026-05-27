@@ -99,7 +99,7 @@ function formatSystemChatContent(content: string): string {
 
     const itemCount = Number(meta.items || 0)
     const total = Number(meta.total || 0)
-    return `${tableText} | ${itemCount > 0 ? `${itemCount} món` : 'Chưa có món'} | Tổng tiền ${total.toLocaleString('vi-VN')}đ`
+    return `${tableText} | ${itemCount > 0 ? `${itemCount} món` : 'Chưa có món'} | Tổng tiền ${formatVnd(total)}`
   }
 
   if (raw.startsWith('[CALL_STAFF]')) {
@@ -290,6 +290,34 @@ const fieldClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60'
 
 const panelClass = 'rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm'
+const subtleActionButtonClass =
+  'inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100'
+
+function normalizeVndAmount(value: unknown): number {
+  const amount = Number(value || 0)
+  if (!Number.isFinite(amount)) return 0
+  if (amount > 0 && amount < 1000 && Number.isInteger(amount)) return amount * 1000
+  return amount
+}
+
+function formatVnd(value: unknown): string {
+  return `${normalizeVndAmount(value).toLocaleString('vi-VN')}đ`
+}
+
+function normalizeVietnameseText(input: unknown): string {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+  const lower = raw.toLowerCase()
+  const map: Record<string, string> = {
+    'bac xiu': 'Bạc xỉu',
+    'ca phe den': 'Cà phê đen',
+    'ca phe sua': 'Cà phê sữa',
+    'ca phe sua da': 'Cà phê sữa đá',
+    'ca phe sua nhieu sua': 'Cà phê sữa nhiều sữa',
+    'ca phe den truyen thong': 'Cà phê đen truyền thống',
+  }
+  return map[lower] || raw
+}
 
 function trangThaiMonTrongDon(status?: string | null): string {
   switch (status) {
@@ -455,16 +483,37 @@ export default function CustomerMenu() {
 
   useEffect(() => {
     const loadMenu = async () => {
+      if (resolvingTable) {
+        return
+      }
+
+      if (!tableId) {
+        setMenuItems([])
+        setLoadingMenu(false)
+        return
+      }
+
+      setLoadingMenu(true)
       try {
-        const { data } = await api.get('/orders/menu', {
-          params: {
-            tableId: tableId || undefined,
-            branchId: qrBranchId || undefined,
-          },
-        })
+        const request = qrBranchId
+          ? api.get(`/orders/branches/${encodeURIComponent(qrBranchId)}/menu`, {
+              params: { tableId: tableId || undefined },
+            })
+          : api.get('/orders/menu', {
+              params: {
+                tableId,
+                branchId: qrBranchId || undefined,
+              },
+            })
+        const { data } = await request
         const normalized = (Array.isArray(data) ? data : []).map((item: any) => ({
           ...item,
-          customizations: normalizeCustomizations(item.customizations),
+          id: item.id || item.menu_item_id,
+          name: normalizeVietnameseText(item.name),
+          description: normalizeVietnameseText(item.description),
+          price: normalizeVndAmount(item.price),
+          available: item.available ?? item.is_available,
+          customizations: normalizeCustomizations(item.customizations ?? item.custom_options),
         }))
         setMenuItems(normalized)
       } catch (error: any) {
@@ -474,7 +523,7 @@ export default function CustomerMenu() {
       }
     }
     loadMenu()
-  }, [tableId, qrBranchId])
+  }, [tableId, qrBranchId, resolvingTable])
 
   const cartStorageKey = useMemo(() => (tableId ? `customer-cart:${tableId}` : ''), [tableId])
   const orderStorageKey = useMemo(() => (tableId ? `customer-last-order:${tableId}` : ''), [tableId])
@@ -658,6 +707,9 @@ export default function CustomerMenu() {
       const { data } = await api.get('/orders/recommendations', { params })
       const normalized = (Array.isArray(data) ? data : []).map((item: any) => ({
         ...item,
+        name: normalizeVietnameseText(item.name),
+        description: normalizeVietnameseText(item.description),
+        price: normalizeVndAmount(item.price),
         customizations: normalizeCustomizations(item.customizations),
       }))
       setCustomerRecommendations(normalized)
@@ -1376,9 +1428,9 @@ export default function CustomerMenu() {
           <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-800">
             {cartItemCount} món trong giỏ
           </span>
-          <span className="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
-            Tạm tính {payableCartTotal.toLocaleString()}đ
-          </span>
+            <span className="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
+              Tạm tính {formatVnd(payableCartTotal)}
+            </span>
           {currentOrder && (
             <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-700">
               Đơn hiện tại: {trangThaiDonHang(currentOrder.status)}
@@ -1400,7 +1452,7 @@ export default function CustomerMenu() {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-sky-100 bg-white/92 p-3 shadow-sm sm:grid-cols-3 sm:p-4">
+      <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-sky-100 bg-white/92 p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-4 sm:p-4">
         <input
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
@@ -1418,7 +1470,8 @@ export default function CustomerMenu() {
             </option>
           ))}
         </select>
-        <div className="flex items-center justify-start text-sm text-slate-500 sm:justify-end">{filteredItems.length} món hiển thị</div>
+        <div className="flex items-center justify-start text-sm text-slate-500">{filteredItems.length} món hiển thị</div>
+        <div className="hidden items-center justify-end text-xs text-slate-500 lg:flex">Chọn danh mục để lọc nhanh</div>
       </div>
       <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
         {categories.map((category) => (
@@ -1441,44 +1494,44 @@ export default function CustomerMenu() {
         <div className="lg:col-span-2">
           {loadingMenu && <p>Đang tải menu...</p>}
           {!loadingMenu && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
               {filteredItems.map((item) => {
                 const draft = getDraftForMenuItem(item.id)
                 const selectedCount = cartCountByMenuItem.get(item.id) || 0
                 return (
-                  <div key={item.id} className="rounded-2xl border border-sky-100 bg-white/92 p-3 shadow-sm">
+                  <div key={item.id} className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-md shadow-slate-100">
                     <img
                       src={item.image || `https://placehold.co/400x280?text=${encodeURIComponent(item.name)}`}
                       alt={item.name}
-                      className="h-36 w-full rounded-xl object-cover sm:h-28"
+                      className="h-36 w-full rounded-xl object-cover sm:h-32"
                     />
                     <div className="mt-2 flex items-start justify-between gap-2">
                       <p className="line-clamp-2 text-sm font-semibold text-slate-900">{item.name}</p>
-                      <span className="shrink-0 text-sm font-bold text-sky-700">{item.price.toLocaleString()}đ</span>
+                      <span className="shrink-0 text-sm font-bold text-sky-700">{formatVnd(item.price)}</span>
                     </div>
                     <p className="mt-1 line-clamp-2 text-xs text-slate-500">{item.description || '---'}</p>
-                    <div className="mt-3 flex items-center justify-between gap-2">
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => increase(item.id)}
-                        className="inline-flex min-h-11 items-center rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                        className={`${subtleActionButtonClass} min-w-20 px-3 py-2 text-xs disabled:opacity-60`}
                         disabled={!item.available}
                       >
                         Thêm
                       </button>
-                      <div className="flex items-center gap-2">
+                      <div className="ml-auto flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => decrease(item.id)}
-                          className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-sky-200 text-base"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-base text-slate-700"
                         >
-                          -
+                          <MinusIcon className="h-4 w-4" />
                         </button>
-                        <span className="w-6 text-center text-sm font-semibold">{selectedCount}</span>
+                        <span className="w-7 text-center text-sm font-semibold">{selectedCount}</span>
                         <button
                           type="button"
                           onClick={() => increase(item.id)}
-                          className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-sky-200 text-base"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-base text-slate-700"
                           disabled={!item.available}
                         >
                           +
@@ -1487,8 +1540,11 @@ export default function CustomerMenu() {
                     </div>
 
                     {(item.customizations || []).length > 0 && (
-                      <details className="mt-2 rounded-xl border border-sky-100 bg-sky-50/40 p-2">
-                        <summary className="cursor-pointer text-xs font-semibold text-sky-700">Tùy chọn</summary>
+                      <details className="group mt-2 rounded-xl border border-sky-100 bg-sky-50/40 p-2">
+                        <summary className="cursor-pointer list-none text-xs font-semibold text-sky-700">
+                          <span className="group-open:hidden">▶ Chọn size / topping</span>
+                          <span className="hidden group-open:inline">▼ Ẩn tùy chọn</span>
+                        </summary>
                         <div className="mt-2 space-y-2">
                           {(item.customizations || []).map((group) => (
                             <div key={`${item.id}-${group.id}`}>
@@ -1547,9 +1603,9 @@ export default function CustomerMenu() {
                     <textarea
                       value={draft.note}
                       onChange={(e) => updateNote(item.id, e.target.value)}
-                      className={`${fieldClass} mt-2`}
-                      rows={2}
-                      placeholder="Ghi chú"
+                      className={`${fieldClass} mt-2 min-h-0 py-1.5 text-xs`}
+                      rows={1}
+                      placeholder="Ghi chú ngắn (tùy chọn)"
                     />
                   </div>
                 )
@@ -1620,7 +1676,7 @@ export default function CustomerMenu() {
                   </div>
                   <div className="rounded bg-emerald-50 p-2">
                     <p className="text-gray-500">Chi tieu</p>
-                    <p className="font-semibold text-emerald-700">{customerSession.totalSpent.toLocaleString()}đ</p>
+                    <p className="font-semibold text-emerald-700">{formatVnd(customerSession.totalSpent)}</p>
                   </div>
                 </div>
                 {loadingCustomerData && <p className="text-xs text-gray-500">Dang tai du lieu thanh vien...</p>}
@@ -1651,7 +1707,7 @@ export default function CustomerMenu() {
                         <div key={historyOrder.id} className="rounded bg-gray-50 px-2 py-1">
                           <div className="flex items-center justify-between gap-2">
                             <span>{maDonHangNgan(historyOrder.id)}</span>
-                            <span>{historyOrder.totalAmount.toLocaleString()}đ</span>
+                            <span>{formatVnd(historyOrder.totalAmount)}</span>
                             <span className="font-semibold">{trangThaiDonHang(historyOrder.status)}</span>
                           </div>
                           <p className="mt-1 text-[11px] text-gray-500">
@@ -1726,7 +1782,7 @@ export default function CustomerMenu() {
                       <span>
                         {entry.quantity}x {item.name}
                       </span>
-                      <span>{((item.price + delta) * entry.quantity).toLocaleString()}đ</span>
+                      <span>{formatVnd((item.price + delta) * entry.quantity)}</span>
                     </div>
                     {detailLines.length > 0 && (
                       <p className="mt-1 text-xs text-gray-500">Chi tiết: {detailLines.join(' | ')}</p>
@@ -1794,7 +1850,7 @@ export default function CustomerMenu() {
               </div>
               {promoPreview && (
                 <p className="mt-2 text-xs text-emerald-700">
-                  Đã áp dụng {promoPreview.code}: -{promoPreview.discountAmount.toLocaleString()}đ
+                  Đã áp dụng {promoPreview.code}: -{formatVnd(promoPreview.discountAmount)}
                 </p>
               )}
             </div>
@@ -1802,15 +1858,15 @@ export default function CustomerMenu() {
             <div className="mt-3 space-y-1 border-t pt-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-gray-600">Tạm tính</span>
-                <span>{cartTotal.toLocaleString()}đ</span>
+                <span>{formatVnd(cartTotal)}</span>
               </div>
               <div className="flex items-center justify-between text-emerald-700">
                 <span>Khuyến mãi</span>
-                <span>-{previewDiscount.toLocaleString()}đ</span>
+                <span>-{formatVnd(previewDiscount)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="font-semibold">Tong</span>
-                <span className="font-bold text-amber-700">{payableCartTotal.toLocaleString()}đ</span>
+                <span className="font-bold text-amber-700">{formatVnd(payableCartTotal)}</span>
               </div>
             </div>
             <button
@@ -1894,23 +1950,23 @@ export default function CustomerMenu() {
                 </div>
                 {typeof currentOrder.subtotalAmount === 'number' && (
                   <p>
-                    Tạm tính: <span className="font-semibold">{currentOrder.subtotalAmount.toLocaleString()}đ</span>
+                    Tạm tính: <span className="font-semibold">{formatVnd(currentOrder.subtotalAmount)}</span>
                   </p>
                 )}
                 {!!currentOrder.discountAmount && currentOrder.discountAmount > 0 && (
                   <p className="text-emerald-700">
                     Giảm giá {currentOrder.promotionCode ? `(${currentOrder.promotionCode})` : ''}:{' '}
-                    <span className="font-semibold">-{currentOrder.discountAmount.toLocaleString()}đ</span>
+                    <span className="font-semibold">-{formatVnd(currentOrder.discountAmount)}</span>
                   </p>
                 )}
                 <p>
-                  Tổng thanh toán: <span className="font-semibold">{currentOrder.totalAmount.toLocaleString()}đ</span>
+                  Tổng thanh toán: <span className="font-semibold">{formatVnd(currentOrder.totalAmount)}</span>
                 </p>
                 {currentOrder.status === 'PENDING' && !currentPayment && !loadingPaymentStatus && (
                   <button
                     type="button"
                     onClick={populateCartFromCurrentOrder}
-                    className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
+                    className="mt-2 rounded border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700"
                   >
                     Sửa món trong đơn
                   </button>
@@ -2040,7 +2096,7 @@ export default function CustomerMenu() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-xs text-slate-500">{cartItemCount} món trong giỏ</p>
-            <p className="truncate text-sm font-bold text-slate-900">Tạm tính {payableCartTotal.toLocaleString()}đ</p>
+            <p className="truncate text-sm font-bold text-slate-900">Tạm tính {formatVnd(payableCartTotal)}</p>
           </div>
           <button
             type="button"
@@ -2111,7 +2167,7 @@ export default function CustomerMenu() {
                           <p className="text-xs text-gray-500">{dinhDangThoiGianDon(historyOrder.createdAt)}</p>
                         </div>
                         <div className="text-right">
-                          <p className="font-semibold text-amber-700">{historyOrder.totalAmount.toLocaleString()}đ</p>
+                          <p className="font-semibold text-amber-700">{formatVnd(historyOrder.totalAmount)}</p>
                           <p className="text-xs font-medium text-slate-700">{trangThaiDonHang(historyOrder.status)}</p>
                         </div>
                       </div>
