@@ -276,7 +276,7 @@ Base URL khi chạy compose mặc định: `http://127.0.0.1:18080/api`
 | `M-26` Chuyển đổi chi nhánh | ✅ | Bộ lọc chi nhánh ở header chỉ dành cho `ADMIN`; `MANAGER` bị khóa theo `branchId` trong token |
 | `M-27` Cấu hình hệ thống (Admin) | ✅ (UI mức cơ bản) | Màn `Settings` có khối cấu hình SePay/webhook (`APP_BASE_URL`, `SEPAY_ENV`, `SEPAY_QUERY_URL`, `SEPAY_MERCHANT_ID`, `SEPAY_IPN_AUTH_TYPE`) và URL `POST /api/payment/webhook/sepay`. Lưu cấu hình ở localStorage; cấu hình runtime thực tế vẫn qua `.env`/deploy. |
 
-### 5.12 Phân quyền chi nhánh (theo tài liệu)
+### 5.8 Phân quyền chi nhánh (theo tài liệu)
 
 ```mermaid
 flowchart TD
@@ -289,7 +289,7 @@ flowchart TD
     E --> H[/tables, /orders, /chat theo chi nhánh làm việc/]
 ```
 
-### 5.13 Pre-check xóa chi nhánh liên service
+### 5.9 Pre-check xóa chi nhánh liên service
 
 ```mermaid
 sequenceDiagram
@@ -313,7 +313,7 @@ sequenceDiagram
     end
 ```
 
-### 5.8 Tích hợp ngoài (I-01..I-04)
+### 5.10 Tích hợp ngoài (I-01..I-04)
 
 | ID | Trạng thái | Ghi chú triển khai hiện tại |
 |---|---|---|
@@ -322,7 +322,7 @@ sequenceDiagram
 | `I-03` Webhook SePay | ✅ | Ho tro endpoint tuong thich `POST /payment/webhook/sepay` (qua gateway: `/api/payment/webhook/sepay`) va relay co dinh `POST /v1/payments/webhook/relay`; local pull qua `GET /v1/payments/webhook/relay/events`. |
 | `I-04` Email thông báo (tùy chọn) | ✅ (mức kho) | `inventory-service` gửi email cảnh báo tồn kho thấp qua SMTP (`LOW_STOCK_ALERT_EMAILS`). |
 
-### 5.9 Luồng Đặt Món Qua QR (Chuẩn Sequence)
+### 5.11 Luồng Đặt Món Qua QR (Chuẩn Sequence)
 
 ```mermaid
 sequenceDiagram
@@ -355,7 +355,7 @@ sequenceDiagram
 
 Ghi chú runtime: nếu `KAFKA_BROKERS` chưa cấu hình, hệ thống fallback sang thông báo realtime trực tiếp từ `order-service` qua `chat-service` để không gián đoạn luồng đang chạy.
 
-### 5.10 Luồng Tạo Bàn Và Sinh QR
+### 5.12 Luồng Tạo Bàn Và Sinh QR
 
 ```mermaid
 sequenceDiagram
@@ -383,7 +383,7 @@ Ghi chú bám code:
 - QR tạo bằng ZXing và lưu trường `qrCode` dạng `data:image/png;base64,...`.
 - FE hỗ trợ `GET /api/tables/{id}/qr`, `POST /api/tables/qr/batch` để tải/in dán.
 
-### 5.11 Luồng Chat Hỗ Trợ
+### 5.13 Luồng Chat Hỗ Trợ
 
 ```mermaid
 sequenceDiagram
@@ -409,6 +409,101 @@ sequenceDiagram
 Ghi chú bám code:
 - Room chuẩn đang dùng là `{tableId}`.
 - Service vẫn join thêm room legacy `table:{tableId}` để tương thích ngược.
+
+### 5.14 Use case mới đã triển khai (đợt gần nhất)
+
+#### UC-01: Khách mở menu QR theo bàn/chi nhánh (gateway pre-check)
+
+```mermaid
+sequenceDiagram
+    participant Customer as Khách
+    participant FE as Frontend
+    participant GW as API Gateway
+    participant Table as table-service
+    participant Order as order-service
+
+    Customer->>FE: Quét QR (/menu?tableId&branchId)
+    FE->>GW: GET /api/orders/menu?tableId&branchId
+    GW->>Table: GET /api/tables/{tableId}
+    Table-->>GW: Table hợp lệ + status
+    alt Table invalid / unavailable
+        GW-->>FE: 400/403
+    else Hợp lệ
+        GW->>Order: Proxy GET /api/orders/menu
+        Order-->>GW: Menu theo branch
+        GW-->>FE: 200 + danh sách món
+    end
+```
+
+#### UC-02: Quản lý chi nhánh + lọc dữ liệu theo role/branch
+
+```mermaid
+sequenceDiagram
+    participant Admin as Admin/Manager
+    participant FE as Frontend
+    participant GW as API Gateway
+    participant User as user-service
+    participant Order as order-service
+    participant Inv as inventory-service
+
+    Admin->>FE: Chọn branch scope
+    FE->>GW: GET /api/branches, /api/branches/{id}/staff, /api/branches/{id}/orders
+    GW->>GW: Check JWT role + branchId
+    alt Role không hợp lệ
+        GW-->>FE: 403 Forbidden
+    else Hợp lệ
+        GW->>User: Proxy branch/staff APIs
+        GW->>Order: Proxy branch orders APIs
+        GW->>Inv: Proxy branch inventory APIs
+        User-->>GW: Dữ liệu branch
+        Order-->>GW: Dữ liệu order branch
+        Inv-->>GW: Dữ liệu kho branch
+        GW-->>FE: Response hợp nhất theo màn hình
+    end
+```
+
+#### UC-03: HRM (phân ca, chấm công, payroll)
+
+```mermaid
+sequenceDiagram
+    participant Manager as Manager/Admin
+    participant FE as StaffManagement UI
+    participant GW as API Gateway
+    participant User as user-service (HR module)
+    participant DB as PostgreSQL
+
+    Manager->>FE: Tạo ca + phân lịch + chấm công
+    FE->>GW: /api/users/staff/* và /api/users/hr/*
+    GW->>GW: Authorize role ADMIN/MANAGER
+    GW->>User: Proxy request
+    User->>DB: Lưu shift/schedule/attendance/payroll
+    DB-->>User: Persisted
+    User-->>GW: Kết quả nghiệp vụ
+    GW-->>FE: 200/201 + payload
+```
+
+#### UC-04: CI/CD kiểm tra hạ tầng trước deploy
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant GH as GitHub Actions
+    participant CI as CI Jobs
+    participant Infra as Compose/Prometheus/ELK
+
+    Dev->>GH: Push develop/main
+    GH->>CI: Trigger workflow CI
+    CI->>CI: Node build/test matrix
+    CI->>CI: Java clean assemble matrix
+    CI->>Infra: docker compose config -q
+    CI->>Infra: docker compose -f logging/elk-stack.yml config -q
+    CI->>Infra: promtool check config monitoring/prometheus.yml
+    alt Tất cả pass
+        CI-->>GH: Success
+    else Có lỗi
+        CI-->>GH: Failed + log chi tiết
+    end
+```
 
 ## 6. Tài khoản mặc định test
 
