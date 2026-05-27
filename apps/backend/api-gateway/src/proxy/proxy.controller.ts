@@ -11,6 +11,7 @@ type StaffRole = 'ADMIN' | 'MANAGER' | 'WAITER' | 'BARISTA' | 'STAFF';
 export class ProxyController {
   private logger = new Logger('ProxyController');
   private proxies = new Map<string, RequestHandler>();
+  private inventoryCompatProxy: RequestHandler;
   private readonly staffRoles = new Set<StaffRole>(['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
   private readonly jwtSecretKey: Buffer;
 
@@ -19,6 +20,12 @@ export class ProxyController {
     private readonly jwtService: JwtService,
   ) {
     this.jwtSecretKey = this.buildJwtSecretKey(this.configService.get<string>('JWT_SECRET') || '');
+    const inventoryTarget = this.configService.get<string>('INVENTORY_SERVICE_URL') || 'http://inventory-service:3005';
+    this.inventoryCompatProxy = createProxyMiddleware({
+      target: inventoryTarget,
+      changeOrigin: true,
+      pathRewrite: (path) => (path.startsWith('/api/v1/') ? path : path.replace(/^\/api/, '/api/v1')),
+    });
 
     // Tạo proxy middleware cho mỗi service route
     for (const route of SERVICE_ROUTES) {
@@ -50,14 +57,21 @@ export class ProxyController {
 
   @All('api/*path')
   async handleProxy(@Req() req: Request, @Res() res: Response) {
-    const route = SERVICE_ROUTES.find((r) => req.originalUrl.startsWith(r.path));
+    const isBranchOrdersPath = /^\/api\/branches\/[^/]+\/orders(\/|$)/.test(req.path);
+    const inventoryCompatPath = this.isInventoryCompatPath(req.path);
+    const route = inventoryCompatPath
+      ? ({ path: '__inventory_compat__' } as any)
+      : isBranchOrdersPath
+        ? ({ path: '/api/orders' } as any)
+      : SERVICE_ROUTES.find((r) => req.originalUrl.startsWith(r.path));
     if (!route) {
       return res.status(404).json({ message: 'Route not found' });
     }
     this.authorizeRequest(req);
+    this.attachActorContextHeaders(req);
     await this.validateQrOrderMenuRequest(req);
 
-    const proxy = this.proxies.get(route.path);
+    const proxy = inventoryCompatPath ? this.inventoryCompatProxy : this.proxies.get(route.path);
     if (!proxy) {
       return res.status(500).json({ message: 'Proxy not configured' });
     }
@@ -128,6 +142,10 @@ export class ProxyController {
       this.requireRoles(req, ['ADMIN', 'MANAGER'])
       return
     }
+    if (method === 'GET' && /^\/api\/branches\/[^/]+\/orders(\/|$)/.test(path)) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
+      return;
+    }
     if (method === 'GET' && path.startsWith('/api/branches')) {
       this.requireRoles(req, ['ADMIN', 'MANAGER'])
       return
@@ -197,6 +215,14 @@ export class ProxyController {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
       return;
     }
+    if (method === 'POST' && /^\/api\/orders\/[^/]+\/items$/.test(path)) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
+    if ((method === 'PATCH' || method === 'DELETE') && /^\/api\/orders\/[^/]+\/items\/[^/]+$/.test(path)) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
 
     // Waiter/manager/admin can transfer/merge tables
     if (path === '/api/orders/table-actions/transfer') {
@@ -209,6 +235,22 @@ export class ProxyController {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'BARISTA']);
       return;
     }
+    if (method === 'PATCH' && /^\/api\/orders\/[^/]+\/items\/batch-status$/.test(path)) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'BARISTA']);
+      return;
+    }
+    if (method === 'PATCH' && /^\/api\/orders\/[^/]+\/cancel$/.test(path)) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER']);
+      return;
+    }
+    if (method === 'POST' && /^\/api\/orders\/[^/]+\/payment$/.test(path)) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
+    if (method === 'POST' && /^\/api\/orders\/[^/]+\/discount$/.test(path)) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER']);
+      return;
+    }
 
     // Chat staff module (S-16..S-18)
     if (path.startsWith('/api/chats')) {
@@ -217,7 +259,10 @@ export class ProxyController {
     }
 
     // Inventory endpoints: manager/admin only
-    if (path.startsWith('/api/v1/ingredients')) {
+    if (
+      path.startsWith('/api/v1/ingredients') ||
+      this.isInventoryCompatPath(path)
+    ) {
       this.requireRoles(req, ['ADMIN', 'MANAGER']);
       return;
     }
@@ -239,6 +284,38 @@ export class ProxyController {
   }
 
   private parseRolesFromToken(req: Request): StaffRole[] {
+    const payload = this.parseTokenPayload(req);
+    const rawRoles = Array.isArray(payload?.roles)
+      ? payload.roles
+      : payload?.role
+        ? [payload.role]
+        : [];
+
+    const normalized = rawRoles
+      .map((role) => String(role).toUpperCase())
+      .filter((role): role is StaffRole => this.staffRoles.has(role as StaffRole));
+
+    if (!normalized.length) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
+
+    return normalized;
+  }
+
+  private isInventoryCompatPath(path: string): boolean {
+    return (
+      /^\/api\/branches\/[^/]+\/inventory(\/|$)/.test(path) ||
+      /^\/api\/branches\/[^/]+\/purchase-orders(\/|$)/.test(path) ||
+      /^\/api\/branches\/[^/]+\/menu-items\/[^/]+\/recipe(\/|$)/.test(path) ||
+      /^\/api\/branches\/[^/]+\/recipes(\/|$)/.test(path) ||
+      /^\/api\/ingredients(\/|$)/.test(path) ||
+      /^\/api\/menu-items\/[^/]+\/recipe(\/|$)/.test(path) ||
+      /^\/api\/recipes\/[^/]+(\/|$)/.test(path) ||
+      /^\/api\/purchase-orders(\/|$)/.test(path)
+    );
+  }
+
+  private parseTokenPayload(req: Request): Record<string, any> {
     const authHeader = String(req.headers.authorization || '');
     if (!authHeader.startsWith('Bearer ')) {
       throw new UnauthorizedException('Missing bearer token');
@@ -250,30 +327,29 @@ export class ProxyController {
     }
 
     try {
-      const payload = this.jwtService.verify<Record<string, any>>(token, {
+      return this.jwtService.verify<Record<string, any>>(token, {
         secret: this.jwtSecretKey,
       });
-
-      const rawRoles = Array.isArray(payload?.roles)
-        ? payload.roles
-        : payload?.role
-          ? [payload.role]
-          : [];
-
-      const normalized = rawRoles
-        .map((role) => String(role).toUpperCase())
-        .filter((role): role is StaffRole => this.staffRoles.has(role as StaffRole));
-
-      if (!normalized.length) {
-        throw new ForbiddenException('Insufficient permissions');
-      }
-
-      return normalized;
     } catch (error) {
-      if (error instanceof ForbiddenException) {
-        throw error;
-      }
       throw new UnauthorizedException('Invalid token');
+    }
+  }
+
+  private attachActorContextHeaders(req: Request) {
+    const authHeader = String(req.headers.authorization || '');
+    if (!authHeader.startsWith('Bearer ')) {
+      return;
+    }
+
+    try {
+      const payload = this.parseTokenPayload(req);
+      const roles = this.parseRolesFromToken(req);
+      const primaryRole = roles[0] || '';
+      const branchId = String(payload?.branchId || '').trim();
+      req.headers['x-actor-role'] = primaryRole;
+      req.headers['x-actor-branch-id'] = branchId;
+    } catch {
+      // ignore: auth errors are handled by authorizeRequest
     }
   }
 

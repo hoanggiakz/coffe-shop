@@ -25,6 +25,10 @@ type MenuAdminListQuery = {
   includeInactive?: boolean;
   branchId?: string;
 };
+type ActorScope = {
+  role?: string | null;
+  branchId?: string | null;
+};
 
 type PromotionOrderItemInput = {
   menuItemId: string;
@@ -159,36 +163,255 @@ export class OrderService {
     const tableId = String(query.tableId || '').trim();
     const resolvedBranchId = requestedBranchId || (tableId ? await this.resolveBranchIdFromTable(tableId) : null);
 
-    const items = await this.prisma.menuItem.findMany({
-      where: {
-        available: true,
-        ingredients: { some: {} },
-        ...(resolvedBranchId
-          ? {
-              OR: [{ branchId: resolvedBranchId }, { branchId: null }],
-            }
-          : {}),
-      },
-      include: {
-        categoryRef: true,
-        optionGroups: {
-          include: {
-            group: {
-              include: {
-                values: {
-                  where: { isActive: true },
-                  orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+    if (!resolvedBranchId) {
+      const items = await this.prisma.menuItem.findMany({
+        where: {
+          available: true,
+          ingredients: { some: {} },
+        },
+        include: {
+          categoryRef: true,
+          optionGroups: {
+            include: {
+              group: {
+                include: {
+                  values: {
+                    where: { isActive: true },
+                    orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+                  },
                 },
               },
             },
+            orderBy: { sortOrder: 'asc' },
           },
-          orderBy: { sortOrder: 'asc' },
+        },
+        orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      });
+      return items.map((item) => this.mapMenuItemForCustomer(item));
+    }
+
+    const branchItems = await this.prisma.branchMenuItem.findMany({
+      where: {
+        branchId: resolvedBranchId,
+        isAvailable: true,
+        menuItem: {
+          available: true,
+          ingredients: { some: {} },
         },
       },
-      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      include: {
+        menuItem: {
+          include: {
+            categoryRef: true,
+            optionGroups: {
+              include: {
+                group: {
+                  include: {
+                    values: {
+                      where: { isActive: true },
+                      orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+                    },
+                  },
+                },
+              },
+              orderBy: { sortOrder: 'asc' },
+            },
+          },
+        },
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
     });
 
-    return items.map((item) => this.mapMenuItemForCustomer(item));
+    return branchItems.map((entry) => this.mapMenuItemForCustomer(entry.menuItem, entry));
+  }
+
+  async getBranchMenu(branchId: string, tableId?: string) {
+    const requestedBranchId = this.normalizeBranchId(branchId);
+    if (!requestedBranchId) {
+      throw new BadRequestException('branchId khong hop le');
+    }
+    const tableIdNormalized = String(tableId || '').trim();
+    const resolvedBranchId =
+      requestedBranchId || (tableIdNormalized ? await this.resolveBranchIdFromTable(tableIdNormalized) : null);
+    if (!resolvedBranchId) {
+      throw new BadRequestException('Khong xac dinh duoc chi nhanh');
+    }
+
+    const entries = await this.prisma.branchMenuItem.findMany({
+      where: {
+        branchId: resolvedBranchId,
+        isAvailable: true,
+        menuItem: { available: true },
+      },
+      include: {
+        menuItem: {
+          include: {
+            categoryRef: true,
+            optionGroups: {
+              include: {
+                group: {
+                  include: {
+                    values: {
+                      where: { isActive: true },
+                      orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+                    },
+                  },
+                },
+              },
+              orderBy: [{ sortOrder: 'asc' }],
+            },
+          },
+        },
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    return entries.map((entry) => this.mapBranchMenuItemResponse(entry.menuItem, entry));
+  }
+
+  async activateBranchMenuItem(
+    branchId: string,
+    itemId: string,
+    payload: { price?: number; is_available?: boolean; display_order?: number; custom_options?: any },
+    actor?: ActorScope,
+  ) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) {
+      throw new BadRequestException('branchId khong hop le');
+    }
+    this.assertManagerCanManageBranch(normalizedBranchId, actor);
+
+    const normalizedItemId = String(itemId || '').trim();
+    if (!normalizedItemId) {
+      throw new BadRequestException('itemId khong hop le');
+    }
+
+    const existingBranchItem = await this.prisma.branchMenuItem.findUnique({
+      where: { branchId_menuItemId: { branchId: normalizedBranchId, menuItemId: normalizedItemId } },
+      include: {
+        menuItem: { include: { categoryRef: true, optionGroups: { include: { group: { include: { values: true } } } } } },
+      },
+    });
+    if (existingBranchItem) {
+      const updated = await this.prisma.branchMenuItem.update({
+        where: { id: existingBranchItem.id },
+        data: {
+          isAvailable: payload.is_available ?? true,
+          ...(payload.price !== undefined ? { price: Number(payload.price) } : {}),
+          ...(payload.custom_options !== undefined ? { customOptions: payload.custom_options } : {}),
+          ...(payload.display_order !== undefined ? { displayOrder: Number(payload.display_order) } : {}),
+        },
+        include: {
+          menuItem: { include: { categoryRef: true, optionGroups: { include: { group: { include: { values: true } } } } } },
+        },
+      });
+      return this.mapBranchMenuItemResponse(updated.menuItem, updated);
+    }
+
+    const source = await this.prisma.menuItem.findUnique({
+      where: { id: normalizedItemId },
+      select: { id: true, price: true, available: true },
+    });
+    if (!source) {
+      throw new NotFoundException(`Khong tim thay mon ${normalizedItemId}`);
+    }
+
+    const created = await this.prisma.branchMenuItem.create({
+      data: {
+        branchId: normalizedBranchId,
+        menuItemId: source.id,
+        price: payload.price !== undefined ? Number(payload.price) : Number(source.price || 0),
+        isAvailable: payload.is_available ?? true,
+        displayOrder: Number.isFinite(payload.display_order) ? Number(payload.display_order) : 0,
+        customOptions: payload.custom_options,
+      },
+      include: {
+        menuItem: {
+          include: {
+            categoryRef: true,
+            optionGroups: { include: { group: { include: { values: true } } } },
+          },
+        },
+      },
+    });
+    return this.mapBranchMenuItemResponse(created.menuItem, created);
+  }
+
+  async updateBranchMenuItem(
+    branchId: string,
+    itemId: string,
+    payload: { price?: number; is_available?: boolean; display_order?: number; custom_options?: any },
+    actor?: ActorScope,
+  ) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) {
+      throw new BadRequestException('branchId khong hop le');
+    }
+    this.assertManagerCanManageBranch(normalizedBranchId, actor);
+
+    const normalizedItemId = String(itemId || '').trim();
+    const existing = await this.prisma.branchMenuItem.findUnique({
+      where: { branchId_menuItemId: { branchId: normalizedBranchId, menuItemId: normalizedItemId } },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Khong tim thay mon ${normalizedItemId} trong chi nhanh`);
+    }
+
+    const updated = await this.prisma.branchMenuItem.update({
+      where: { id: existing.id },
+      data: {
+        ...(payload.price !== undefined ? { price: Number(payload.price) } : {}),
+        ...(payload.is_available !== undefined ? { isAvailable: payload.is_available } : {}),
+        ...(payload.custom_options !== undefined ? { customOptions: payload.custom_options } : {}),
+        ...(payload.display_order !== undefined ? { displayOrder: Number(payload.display_order) } : {}),
+      },
+      include: {
+        menuItem: {
+          include: {
+            categoryRef: true,
+            optionGroups: {
+              include: {
+                group: {
+                  include: {
+                    values: {
+                      where: { isActive: true },
+                      orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+                    },
+                  },
+                },
+              },
+              orderBy: [{ sortOrder: 'asc' }],
+            },
+          },
+        },
+      },
+    });
+
+    return this.mapBranchMenuItemResponse(updated.menuItem, updated);
+  }
+
+  async removeBranchMenuItem(branchId: string, itemId: string, actor?: ActorScope) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) {
+      throw new BadRequestException('branchId khong hop le');
+    }
+    this.assertManagerCanManageBranch(normalizedBranchId, actor);
+
+    const normalizedItemId = String(itemId || '').trim();
+    const existing = await this.prisma.branchMenuItem.findUnique({
+      where: { branchId_menuItemId: { branchId: normalizedBranchId, menuItemId: normalizedItemId } },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Khong tim thay mon ${normalizedItemId} trong chi nhanh`);
+    }
+
+    await this.prisma.branchMenuItem.update({
+      where: { id: existing.id },
+      data: { isAvailable: false },
+    });
+    return { id: existing.id, deleted: true };
   }
 
   async listMenuCategories(query: { includeInactive?: boolean; branchId?: string }) {
@@ -451,16 +674,11 @@ export class OrderService {
     return { id, deleted: true };
   }
 
-  async listMenuItemsForAdmin(query: MenuAdminListQuery) {
+  async listMenuItemsForAdmin(query: MenuAdminListQuery, actor?: ActorScope) {
     const keyword = String(query.keyword || '').trim();
     const categoryId = String(query.categoryId || '').trim();
-    const branchId = this.normalizeBranchId(query.branchId);
+    const branchId = this.resolveAdminMenuBranchScope(this.normalizeBranchId(query.branchId), actor);
     const andConditions: Prisma.MenuItemWhereInput[] = [];
-    if (branchId) {
-      andConditions.push({
-        OR: [{ branchId }, { branchId: null }],
-      });
-    }
     if (keyword) {
       andConditions.push({
         OR: [
@@ -496,21 +714,52 @@ export class OrderService {
         ingredients: {
           orderBy: [{ createdAt: 'asc' }],
         },
+        ...(branchId
+          ? {
+              branchMenuItems: {
+                where: { branchId },
+                take: 1,
+                orderBy: [{ updatedAt: 'desc' }],
+              },
+            }
+          : {}),
       },
       orderBy: [{ category: 'asc' }, { name: 'asc' }],
     });
 
-    return items.map((item) => this.mapMenuItemForAdmin(item));
+    return items
+      .map((item) => {
+        const mapped = this.mapMenuItemForAdmin(item);
+        const override = Array.isArray((item as any).branchMenuItems) ? (item as any).branchMenuItems[0] : null;
+        if (override) {
+          return {
+            ...mapped,
+            branchId,
+            price: Number(override.price || 0),
+            available: Boolean(override.isAvailable),
+            customizations: override.customOptions ?? mapped.customizations,
+            displayOrder: Number(override.displayOrder || 0),
+          };
+        }
+        if (branchId) {
+          return {
+            ...mapped,
+            branchId,
+            available: false,
+          };
+        }
+        return mapped;
+      });
   }
 
-  async createMenuItemForAdmin(dto: CreateMenuItemManagementDto) {
+  async createMenuItemForAdmin(dto: CreateMenuItemManagementDto, actor?: ActorScope) {
     const normalizedName = String(dto.name || '').trim();
     if (!normalizedName) {
       throw new BadRequestException('Ten mon khong duoc de trong');
     }
-    const branchId = this.normalizeBranchId(dto.branchId);
+    const branchId = this.resolveAdminMenuBranchScope(this.normalizeBranchId(dto.branchId), actor);
 
-    const category = await this.resolveCategory(dto.categoryId, branchId);
+    const category = await this.resolveCategory(dto.categoryId, undefined);
     const optionBindings = this.normalizeOptionBindings(dto.optionGroups);
     const recipe = await this.hydrateRecipeWithInventory(this.normalizeRecipe(dto.recipe), branchId);
     const nextAvailable = dto.available ?? true;
@@ -527,13 +776,31 @@ export class OrderService {
           description: dto.description ? String(dto.description).trim() : null,
           price: Number(dto.price),
           image: dto.image ? String(dto.image).trim() : null,
-          branchId,
           available: dto.available ?? true,
           categoryId: category?.id ?? null,
           category: category?.name || 'Khac',
           customizations,
         },
       });
+
+      if (branchId) {
+        await tx.branchMenuItem.upsert({
+          where: { branchId_menuItemId: { branchId, menuItemId: menuItem.id } },
+          update: {
+            price: Number(dto.price),
+            isAvailable: dto.available ?? true,
+            customOptions: customizations,
+          },
+          create: {
+            branchId,
+            menuItemId: menuItem.id,
+            price: Number(dto.price),
+            isAvailable: dto.available ?? true,
+            displayOrder: 0,
+            customOptions: customizations,
+          },
+        });
+      }
 
       if (optionBindings.length) {
         await tx.menuItemOptionGroup.createMany({
@@ -564,12 +831,11 @@ export class OrderService {
     return this.getMenuItemForAdmin(created.id);
   }
 
-  async updateMenuItemForAdmin(id: string, dto: UpdateMenuItemManagementDto) {
+  async updateMenuItemForAdmin(id: string, dto: UpdateMenuItemManagementDto, actor?: ActorScope) {
     const existing = await this.prisma.menuItem.findUnique({
       where: { id },
       select: {
         id: true,
-        branchId: true,
         categoryId: true,
         available: true,
         _count: {
@@ -582,11 +848,14 @@ export class OrderService {
     if (!existing) {
       throw new NotFoundException(`Khong tim thay mon ${id}`);
     }
+    if (dto.branchId) {
+      this.assertManagerCanManageBranch(dto.branchId, actor);
+    }
 
     const nextBranchId =
       dto.branchId !== undefined
-        ? this.normalizeBranchId(dto.branchId)
-        : existing.branchId;
+        ? this.resolveAdminMenuBranchScope(this.normalizeBranchId(dto.branchId), actor)
+        : this.resolveAdminMenuBranchScope(this.normalizeBranchId(actor?.branchId), actor);
 
     const shouldUpdateOptionBindings = Array.isArray(dto.optionGroups);
     const shouldUpdateRecipe = Array.isArray(dto.recipe);
@@ -606,18 +875,13 @@ export class OrderService {
     }
 
     const hasCategoryField = dto.categoryId !== undefined;
-    const category = hasCategoryField ? await this.resolveCategory(dto.categoryId, nextBranchId) : undefined;
-
-    if (!hasCategoryField && dto.branchId !== undefined && existing.categoryId) {
-      await this.resolveCategory(existing.categoryId, nextBranchId);
-    }
+    const category = hasCategoryField ? await this.resolveCategory(dto.categoryId, undefined) : undefined;
 
     const data: Prisma.MenuItemUpdateInput = {
       ...(dto.name !== undefined ? { name: String(dto.name || '').trim() } : {}),
       ...(dto.description !== undefined ? { description: String(dto.description || '').trim() || null } : {}),
       ...(dto.price !== undefined ? { price: Number(dto.price) } : {}),
       ...(dto.image !== undefined ? { image: String(dto.image || '').trim() || null } : {}),
-      ...(dto.branchId !== undefined ? { branchId: this.normalizeBranchId(dto.branchId) } : {}),
       ...(dto.available !== undefined ? { available: dto.available } : {}),
       ...(hasCategoryField ? { categoryId: category?.id || null } : {}),
       ...(hasCategoryField ? { category: category?.name || 'Khac' } : {}),
@@ -629,6 +893,28 @@ export class OrderService {
         where: { id },
         data,
       });
+
+      if (nextBranchId) {
+        const nextPrice = dto.price !== undefined ? Number(dto.price) : undefined;
+        const nextAvailable = dto.available !== undefined ? dto.available : undefined;
+        const nextCustomOptions = shouldUpdateOptionBindings ? this.buildCustomizations(optionGroups, optionBindings) : undefined;
+        await tx.branchMenuItem.upsert({
+          where: { branchId_menuItemId: { branchId: nextBranchId, menuItemId: id } },
+          update: {
+            ...(nextPrice !== undefined ? { price: nextPrice } : {}),
+            ...(nextAvailable !== undefined ? { isAvailable: nextAvailable } : {}),
+            ...(nextCustomOptions !== undefined ? { customOptions: nextCustomOptions } : {}),
+          },
+          create: {
+            branchId: nextBranchId,
+            menuItemId: id,
+            price: nextPrice ?? Number(dto.price ?? 0),
+            isAvailable: nextAvailable ?? true,
+            displayOrder: 0,
+            customOptions: nextCustomOptions,
+          },
+        });
+      }
 
       if (shouldUpdateOptionBindings) {
         await tx.menuItemOptionGroup.deleteMany({ where: { menuItemId: id } });
@@ -663,7 +949,7 @@ export class OrderService {
     return this.getMenuItemForAdmin(id);
   }
 
-  async deleteMenuItemForAdmin(id: string) {
+  async deleteMenuItemForAdmin(id: string, actor?: ActorScope) {
     const existing = await this.prisma.menuItem.findUnique({
       where: { id },
       select: { id: true, available: true },
@@ -671,11 +957,22 @@ export class OrderService {
     if (!existing) {
       throw new NotFoundException(`Khong tim thay mon ${id}`);
     }
-
-    await this.prisma.menuItem.update({
-      where: { id },
-      data: { available: false },
-    });
+    const actorBranchId = this.normalizeBranchId(actor?.branchId);
+    if (String(actor?.role || '').trim().toUpperCase() === 'MANAGER' && actorBranchId) {
+      await this.prisma.branchMenuItem.updateMany({
+        where: { menuItemId: id, branchId: actorBranchId },
+        data: { isAvailable: false },
+      });
+    } else {
+      await this.prisma.menuItem.update({
+        where: { id },
+        data: { available: false },
+      });
+      await this.prisma.branchMenuItem.updateMany({
+        where: { menuItemId: id },
+        data: { isAvailable: false },
+      });
+    }
 
     return { id, deleted: true };
   }
@@ -710,25 +1007,25 @@ export class OrderService {
     return this.mapMenuItemForAdmin(item);
   }
 
-  private mapMenuItemForCustomer(item: any) {
+  private mapMenuItemForCustomer(item: any, branchItem?: any) {
     return {
       id: item.id,
-      branchId: item.branchId || null,
+      branchId: branchItem?.branchId || null,
       name: item.name,
       description: item.description,
-      price: Number(item.price),
+      price: Number(branchItem?.price ?? item.price),
       image: item.image,
       categoryId: item.categoryId || null,
       category: item.categoryRef?.name || item.category || 'Khac',
-      available: Boolean(item.available),
-      customizations: this.resolveCustomizations(item),
+      available: Boolean(branchItem?.isAvailable ?? item.available),
+      customizations: branchItem?.customOptions ?? this.resolveCustomizations(item),
     };
   }
 
   private mapMenuItemForAdmin(item: any) {
     return {
       id: item.id,
-      branchId: item.branchId || null,
+      branchId: null,
       name: item.name,
       description: item.description,
       price: Number(item.price),
@@ -1229,16 +1526,23 @@ export class OrderService {
     const existed = await this.prisma.menuItem.findMany({
       where: {
         id: { in: menuItemIds },
-        ...(branchId
-          ? {
-              OR: [{ branchId }, { branchId: null }],
-            }
-          : {}),
       },
       select: { id: true },
     });
     if (existed.length !== menuItemIds.length) {
       throw new BadRequestException('Mot hoac nhieu mon ap dung khong ton tai');
+    }
+    if (branchId) {
+      const branchMapped = await this.prisma.branchMenuItem.count({
+        where: {
+          branchId,
+          menuItemId: { in: menuItemIds },
+          isAvailable: true,
+        },
+      });
+      if (branchMapped !== menuItemIds.length) {
+        throw new BadRequestException('Mot hoac nhieu mon ap dung chua bat tai chi nhanh');
+      }
     }
   }
 
@@ -1550,20 +1854,27 @@ export class OrderService {
       where: {
         id: { in: menuItemIds },
         available: true,
-        ...(resolvedBranchId
-          ? {
-              OR: [{ branchId: resolvedBranchId }, { branchId: null }],
-            }
-          : {}),
       },
     });
 
     if (menuItems.length !== menuItemIds.length) {
       throw new BadRequestException('Một hoặc nhiều món không hợp lệ hoặc đã hết');
     }
+    if (resolvedBranchId) {
+      const branchMappings = await this.prisma.branchMenuItem.count({
+        where: {
+          branchId: resolvedBranchId,
+          menuItemId: { in: menuItemIds },
+          isAvailable: true,
+        },
+      });
+      if (branchMappings !== menuItemIds.length) {
+        throw new BadRequestException('Một hoặc nhiều món chưa được bật tại chi nhánh');
+      }
+    }
     this.ensureSellableMenuItemsHaveRecipe(menuItems);
 
-    const priceMap = new Map(menuItems.map((m) => [m.id, m.price]));
+    const priceMap = await this.buildMenuPriceMap(menuItemIds, resolvedBranchId, menuItems);
     const normalizedItems = dto.items.map((item) => {
       const basePrice = priceMap.get(item.menuItemId) || 0;
       const extraAmount = this.extractExtraAmount(item.options);
@@ -1851,6 +2162,59 @@ export class OrderService {
     return this.enrichOrders(orders);
   }
 
+  private mapBranchMenuItemResponse(item: any, branchItem?: any) {
+    if (!item) return null;
+    return {
+      id: branchItem?.id || item.id,
+      branch_id: branchItem?.branchId || null,
+      menu_item_id: item.id,
+      name: item.name,
+      description: item.description || null,
+      image_url: item.image || null,
+      category_id: item.categoryId || null,
+      category_name: item.categoryRef?.name || item.category || 'Khac',
+      price: Number(branchItem?.price ?? item.price ?? 0),
+      is_available: Boolean(branchItem?.isAvailable ?? item.available),
+      display_order: Number(branchItem?.displayOrder ?? 0),
+      custom_options: branchItem?.customOptions ?? this.resolveCustomizations(item),
+    };
+  }
+
+  private resolveAdminMenuBranchScope(requestedBranchId?: string | null, actor?: ActorScope) {
+    const role = String(actor?.role || '').trim().toUpperCase();
+    const actorBranchId = this.normalizeBranchId(actor?.branchId);
+    const requested = this.normalizeBranchId(requestedBranchId);
+
+    if (role !== 'MANAGER') {
+      return requested;
+    }
+
+    if (!actorBranchId) {
+      throw new BadRequestException('Tai khoan MANAGER thieu branchId');
+    }
+
+    if (requested && requested !== actorBranchId) {
+      throw new BadRequestException('MANAGER chi duoc thao tac menu trong chi nhanh cua minh');
+    }
+
+    return actorBranchId;
+  }
+
+  private assertManagerCanManageBranch(targetBranchId?: string | null, actor?: ActorScope) {
+    const role = String(actor?.role || '').trim().toUpperCase();
+    if (role !== 'MANAGER') return;
+
+    const actorBranchId = this.normalizeBranchId(actor?.branchId);
+    if (!actorBranchId) {
+      throw new BadRequestException('Tai khoan MANAGER thieu branchId');
+    }
+
+    const target = this.normalizeBranchId(targetBranchId);
+    if (!target || target !== actorBranchId) {
+      throw new BadRequestException('MANAGER khong duoc sua/xoa mon ngoai chi nhanh cua minh');
+    }
+  }
+
   async getCustomerRecommendations(params: {
     customerId?: string;
     email?: string;
@@ -1984,12 +2348,25 @@ export class OrderService {
     const order = await this.prisma.order.findUnique({ where: { id } });
     if (!order) throw new NotFoundException(`Không tìm thấy đơn ${id}`);
 
+    const allowedTransitions: Record<string, string[]> = {
+      PENDING: ['CONFIRMED', 'CANCELLED'],
+      CONFIRMED: ['PREPARING', 'CANCELLED'],
+      PREPARING: ['READY'],
+      READY: ['PREPARING', 'COMPLETED'],
+      COMPLETED: [],
+      CANCELLED: [],
+    };
+    const nextStatus = String(dto.status || '').trim().toUpperCase();
+    if (!allowedTransitions[String(order.status)]?.includes(nextStatus)) {
+      throw new BadRequestException(`INVALID_STATUS_TRANSITION: ${order.status} -> ${nextStatus}`);
+    }
+
     await this.prisma.order.update({
       where: { id },
-      data: { status: dto.status as any },
+      data: { status: nextStatus as any },
     });
 
-    if (order.status !== 'COMPLETED' && dto.status === 'COMPLETED' && order.customerId) {
+    if (order.status !== 'COMPLETED' && nextStatus === 'COMPLETED' && order.customerId) {
       const points = await this.awardCustomerPoints(order.customerId, order.id, order.totalAmount);
       if (points > 0) {
         await this.prisma.order.update({
@@ -2006,8 +2383,87 @@ export class OrderService {
 
     if (!updated) throw new NotFoundException(`Không tìm thấy đơn ${id}`);
 
-    this.logger.log(`Cập nhật đơn ${id} → ${dto.status}`);
+    if (nextStatus === 'COMPLETED') {
+      await this.updateTableStatus(order.tableId, 'AVAILABLE');
+    }
+
+    this.logger.log(`Cập nhật đơn ${id} → ${nextStatus}`);
     return this.enrichOrder(updated);
+  }
+
+  async findByBranch(branchId: string, params: { status?: string; dateFrom?: string; dateTo?: string; tableId?: string }) {
+    return this.findAll({
+      ...params,
+      branchId,
+    });
+  }
+
+  async findOneByBranch(branchId: string, orderId: string) {
+    const order = await this.findOne(orderId);
+    if (String((order as any).branchId || '') !== String(branchId || '').trim()) {
+      throw new BadRequestException('ORDER_NOT_IN_BRANCH');
+    }
+    return order;
+  }
+
+  async cancelOrder(orderId: string, reason?: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException(`Không tìm thấy đơn ${orderId}`);
+    if (!['PENDING', 'CONFIRMED'].includes(String(order.status))) {
+      throw new BadRequestException('Chi duoc huy don o trang thai PENDING/CONFIRMED');
+    }
+    const cancelled = await this.updateStatus(orderId, { status: 'CANCELLED' });
+    return { ...cancelled, cancelReason: reason || null };
+  }
+
+  async getOrderBill(orderId: string) {
+    const order = await this.findOne(orderId);
+    return {
+      orderId: (order as any).id,
+      items: (order as any).orderItems || [],
+      total: Number((order as any).subtotalAmount || 0),
+      discount: Number((order as any).discountAmount || 0),
+      final_amount: Number((order as any).totalAmount || 0),
+    };
+  }
+
+  async confirmOrderPayment(orderId: string, payload?: { method?: string; amount?: number }) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException(`Không tìm thấy đơn ${orderId}`);
+    if (String(order.status) === 'COMPLETED') {
+      throw new BadRequestException('ORDER_ALREADY_PAID');
+    }
+    const completed = await this.updateStatus(orderId, { status: 'COMPLETED' });
+    return {
+      ...completed,
+      payment_status: 'PAID',
+      payment_method: String(payload?.method || '').trim().toUpperCase() || null,
+      paid_amount: Number(payload?.amount || 0) || Number(order.totalAmount || 0),
+    };
+  }
+
+  async applyOrderDiscount(orderId: string, payload?: { discount?: number; reason?: string }) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException(`Không tìm thấy đơn ${orderId}`);
+    if (['COMPLETED', 'CANCELLED'].includes(String(order.status))) {
+      throw new BadRequestException('Khong the giam gia don da hoan tat/huy');
+    }
+    const discount = Math.max(0, Math.floor(Number(payload?.discount || 0)));
+    const subtotal = Number(order.subtotalAmount || 0);
+    const total = Math.max(subtotal - discount, 0);
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        discountAmount: discount,
+        totalAmount: total,
+      },
+    });
+    return {
+      orderId,
+      discount,
+      reason: String(payload?.reason || '').trim() || null,
+      final_amount: total,
+    };
   }
 
   async updateOrderItems(orderId: string, dto: StaffUpdateOrderItemsDto) {
@@ -2052,20 +2508,27 @@ export class OrderService {
       where: {
         id: { in: uniqueMenuIds },
         available: true,
-        ...(order.branchId
-          ? {
-              OR: [{ branchId: order.branchId }, { branchId: null }],
-            }
-          : {}),
       },
     });
 
     if (menuItems.length !== uniqueMenuIds.length) {
       throw new BadRequestException('Mot hoac nhieu mon khong hop le');
     }
+    if (order.branchId) {
+      const branchMappings = await this.prisma.branchMenuItem.count({
+        where: {
+          branchId: order.branchId,
+          menuItemId: { in: uniqueMenuIds },
+          isAvailable: true,
+        },
+      });
+      if (branchMappings !== uniqueMenuIds.length) {
+        throw new BadRequestException('Mot hoac nhieu mon chua duoc bat tai chi nhanh');
+      }
+    }
     this.ensureSellableMenuItemsHaveRecipe(menuItems);
 
-    const priceMap = new Map(menuItems.map((item) => [item.id, item.price]));
+    const priceMap = await this.buildMenuPriceMap(uniqueMenuIds, order.branchId || null, menuItems);
     const normalizedItems = items.map((item) => {
       const basePrice = priceMap.get(item.menuItemId) || 0;
       const extraAmount = this.extractExtraAmount(item.options);
@@ -2431,6 +2894,37 @@ export class OrderService {
       );
       return 0;
     }
+  }
+
+  private async buildMenuPriceMap(
+    menuItemIds: string[],
+    branchId: string | null,
+    baseItems: Array<{ id: string; price: number }>,
+  ) {
+    const fallback = new Map(baseItems.map((item) => [item.id, Number(item.price || 0)]));
+    if (!branchId || !menuItemIds.length) {
+      return fallback;
+    }
+
+    const branchItems = await this.prisma.branchMenuItem.findMany({
+      where: {
+        branchId,
+        menuItemId: { in: menuItemIds },
+        isAvailable: true,
+      },
+      select: {
+        menuItemId: true,
+        price: true,
+      },
+    });
+
+    const branchMap = new Map(branchItems.map((item) => [item.menuItemId, Number(item.price || 0)]));
+    for (const menuItemId of menuItemIds) {
+      if (branchMap.has(menuItemId)) {
+        fallback.set(menuItemId, Number(branchMap.get(menuItemId) || 0));
+      }
+    }
+    return fallback;
   }
 
   private buildCustomerIdentityOrConditions(identity: { customerId?: string; email?: string; phone?: string }) {

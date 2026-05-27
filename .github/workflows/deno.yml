@@ -99,9 +99,9 @@ jobs:
         working-directory: ${{ matrix.service }}
         run: chmod +x ./gradlew
 
-      - name: Run Gradle checks
+      - name: Compile and package
         working-directory: ${{ matrix.service }}
-        run: ./gradlew --no-daemon clean build
+        run: ./gradlew --no-daemon clean assemble
 
   compose-validate:
     name: Compose Validate
@@ -112,6 +112,12 @@ jobs:
 
       - name: Validate docker compose
         run: docker compose config -q
+
+      - name: Validate ELK compose
+        run: docker compose -f logging/elk-stack.yml config -q
+
+      - name: Validate Prometheus config
+        run: docker run --rm --entrypoint promtool -v "$PWD/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro" prom/prometheus:v2.53.0 check config /etc/prometheus/prometheus.yml
 
   deploy:
     name: Deploy (main only)

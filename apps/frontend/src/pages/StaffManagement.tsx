@@ -9,15 +9,13 @@ import api from '@/utils/api'
 import { TableSkeleton } from '@/components/ui/PageSkeleton'
 import {
   caLamViec,
-  phuongThucChamCong,
   trangThaiHoatDong,
   vaiTroNhanVien,
 } from '@/utils/display'
 import { normalizeRole } from '@/utils/rbac'
 
 type StaffRole = 'ADMIN' | 'MANAGER' | 'WAITER' | 'BARISTA' | 'STAFF'
-type ShiftType = 'MORNING' | 'AFTERNOON' | 'EVENING'
-type AttendanceMethod = 'EMPLOYEE_CODE' | 'QR'
+type ShiftType = string
 
 interface StaffItem {
   id: string
@@ -42,24 +40,23 @@ interface BranchItem {
 
 interface StaffShiftItem {
   id: string
-  staffId: string
-  staffName: string
-  shiftDate: string
-  shiftType: ShiftType
-  note?: string | null
+  userId: string
+  userName: string
+  shiftId: string
+  shiftName: string
+  date: string
+  notes?: string | null
 }
 
 interface AttendanceItem {
   id: string
-  staffId: string
-  staffName: string
-  workDate: string
-  scheduledShift?: ShiftType | null
-  checkInAt: string
-  checkOutAt?: string | null
-  checkInMethod: AttendanceMethod
-  checkOutMethod?: AttendanceMethod | null
-  workingMinutes?: number | null
+  userId: string
+  userName: string
+  date: string
+  checkInTime?: string | null
+  checkOutTime?: string | null
+  workedMinutes?: number | null
+  status?: string | null
 }
 
 interface ShiftCoworkerItem {
@@ -89,22 +86,26 @@ interface PayrollItem {
   role: StaffRole
   branchId?: string | null
   branchName?: string | null
-  hourlyRate: number
-  totalWorkingMinutes: number
   totalWorkingHours: number
-  attendanceDays: number
-  completedShifts: number
-  estimatedPay: number
+  workedDays: number
+  baseSalaryEarned: number
+  totalAllowances: number
+  totalBonus: number
+  totalDeductions: number
+  netSalary: number
+  status: string
 }
 
 interface PayrollSummary {
-  dateFrom: string
-  dateTo: string
-  totalWorkingMinutes: number
+  month: string
   totalWorkingHours: number
-  completedShifts: number
-  totalEstimatedPay: number
+  totalNetSalary: number
   items: PayrollItem[]
+}
+
+interface ShiftOption {
+  id: string
+  name: string
 }
 
 function getMondayDateString(date = new Date()): string {
@@ -157,14 +158,14 @@ export default function StaffManagement() {
   const [weekStart, setWeekStart] = useState(getMondayDateString())
   const [scheduleStaffId, setScheduleStaffId] = useState('')
   const [scheduleDate, setScheduleDate] = useState(new Date().toISOString().split('T')[0])
-  const [scheduleShiftType, setScheduleShiftType] = useState<ShiftType>('MORNING')
+  const [scheduleShiftId, setScheduleShiftId] = useState('')
   const [scheduleNote, setScheduleNote] = useState('')
+  const [shiftOptions, setShiftOptions] = useState<ShiftOption[]>([])
   const [schedules, setSchedules] = useState<StaffShiftItem[]>([])
   const [loadingSchedule, setLoadingSchedule] = useState(true)
   const [savingSchedule, setSavingSchedule] = useState(false)
 
   const [attendanceIdentifier, setAttendanceIdentifier] = useState('')
-  const [attendanceMethod, setAttendanceMethod] = useState<AttendanceMethod>('EMPLOYEE_CODE')
   const [processingAttendance, setProcessingAttendance] = useState(false)
   const [attendanceStaffId, setAttendanceStaffId] = useState('ALL')
   const [attendanceDateFrom, setAttendanceDateFrom] = useState(new Date().toISOString().split('T')[0])
@@ -188,6 +189,11 @@ export default function StaffManagement() {
   const [payrollSummary, setPayrollSummary] = useState<PayrollSummary | null>(null)
   const [loadingPayroll, setLoadingPayroll] = useState(true)
   const [staffQrImages, setStaffQrImages] = useState<Record<string, string>>({})
+  const activeBranchId = useMemo(() => {
+    if (currentRole === 'MANAGER') return currentUser?.branchId || ''
+    if (staffBranchFilter) return staffBranchFilter
+    return branches[0]?.id || ''
+  }, [branches, currentRole, currentUser?.branchId, staffBranchFilter])
 
   const activeStaffs = useMemo(
     () => staffs.filter((item) => item.isActive),
@@ -209,17 +215,24 @@ export default function StaffManagement() {
   )
 
   const loadStaffs = async () => {
+    if (!activeBranchId) {
+      setStaffs([])
+      setLoadingStaff(false)
+      return
+    }
     setLoadingStaff(true)
     try {
-      const params: Record<string, string> = {
-        includeInactive: String(includeInactive),
+      const { data } = await api.get(`/branches/${activeBranchId}/staff`)
+      let next = Array.isArray(data) ? data : []
+      if (!includeInactive) next = next.filter((item) => item?.isActive !== false)
+      if (staffKeyword.trim()) {
+        const keyword = staffKeyword.trim().toLowerCase()
+        next = next.filter((item) =>
+          [item.name, item.email, item.employeeCode].some((v) => String(v || '').toLowerCase().includes(keyword)),
+        )
       }
-      if (staffKeyword.trim()) params.keyword = staffKeyword.trim()
-      if (staffRoleFilter !== 'ALL') params.role = staffRoleFilter
-      if (staffBranchFilter.trim()) params.branchId = staffBranchFilter.trim()
-
-      const { data } = await api.get('/users/staff', { params })
-      setStaffs(Array.isArray(data) ? data : [])
+      if (staffRoleFilter !== 'ALL') next = next.filter((item) => item.role === staffRoleFilter)
+      setStaffs(next)
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Không tải được danh sách nhân viên')
     } finally {
@@ -228,20 +241,38 @@ export default function StaffManagement() {
   }
 
   const loadSchedules = async () => {
-    if (!canManageAccounts) {
+    if (!canManageAccounts || !activeBranchId) {
       setSchedules([])
       setLoadingSchedule(false)
       return
     }
     setLoadingSchedule(true)
     try {
-      const params: Record<string, string> = { weekStart }
-      const { data } = await api.get('/users/staff/schedules', { params })
-      setSchedules(Array.isArray(data?.shifts) ? data.shifts : [])
+      const from = weekStart
+      const to = new Date(new Date(weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      const { data } = await api.get(`/branches/${activeBranchId}/schedule`, { params: { from, to } })
+      setSchedules(Array.isArray(data) ? data : [])
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Không tải được lịch phân ca')
     } finally {
       setLoadingSchedule(false)
+    }
+  }
+
+  const loadShiftOptions = async () => {
+    if (!canManageAccounts || !activeBranchId) {
+      setShiftOptions([])
+      return
+    }
+    try {
+      const { data } = await api.get(`/branches/${activeBranchId}/shifts`)
+      const next = (Array.isArray(data) ? data : [])
+        .filter((item) => item?.isActive !== false)
+        .map((item) => ({ id: item.id as string, name: item.name as string }))
+      setShiftOptions(next)
+      if (!scheduleShiftId && next[0]?.id) setScheduleShiftId(next[0].id)
+    } catch {
+      setShiftOptions([])
     }
   }
 
@@ -252,10 +283,19 @@ export default function StaffManagement() {
     }
 
     try {
-      const { data } = await api.get('/users/admin/branches', {
-        params: { includeInactive: 'true' },
-      })
-      setBranches(Array.isArray(data) ? data : [])
+      if (currentRole === 'ADMIN') {
+        const { data } = await api.get('/branches', {
+          params: { includeInactive: 'true' },
+        })
+        setBranches(Array.isArray(data) ? data : [])
+        return
+      }
+      if (currentRole === 'MANAGER' && currentUser?.branchId) {
+        const { data } = await api.get(`/branches/${currentUser.branchId}`)
+        setBranches(data ? [data] : [])
+        return
+      }
+      setBranches([])
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Không tải được danh sách chi nhánh')
     }
@@ -264,15 +304,19 @@ export default function StaffManagement() {
   const loadAttendance = async () => {
     setLoadingAttendance(true)
     try {
-      const params: Record<string, string> = {
-        dateFrom: attendanceDateFrom,
-        dateTo: attendanceDateTo,
+      if (canManageAccounts && activeBranchId) {
+        const { data } = await api.get(`/branches/${activeBranchId}/attendance`, {
+          params: { from: attendanceDateFrom, to: attendanceDateTo },
+        })
+        let next = Array.isArray(data) ? data : []
+        if (attendanceStaffId !== 'ALL') next = next.filter((item) => item.userId === attendanceStaffId)
+        setAttendanceLogs(next)
+      } else {
+        const { data } = await api.get('/attendance/me', {
+          params: { from: attendanceDateFrom, to: attendanceDateTo },
+        })
+        setAttendanceLogs(Array.isArray(data) ? data : [])
       }
-      if (attendanceStaffId !== 'ALL') {
-        params.staffId = attendanceStaffId
-      }
-      const { data } = await api.get('/users/staff/attendance', { params })
-      setAttendanceLogs(Array.isArray(data) ? data : [])
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Không tải được dữ liệu chấm công')
     } finally {
@@ -292,8 +336,39 @@ export default function StaffManagement() {
         params.staffId = currentUser.id
       }
 
-      const { data } = await api.get('/users/staff/shift-overview', { params })
-      setShiftOverview(data || null)
+      const targetStaffId = canManageAccounts ? shiftOverviewStaffId : currentUser?.id
+      if (!targetStaffId) {
+        setShiftOverview(null)
+        return
+      }
+      const assignedShifts = schedules.filter((item) => item.userId === targetStaffId && item.date === shiftOverviewDate)
+      const selectedShiftName = assignedShifts[0]?.shiftName || null
+      const sameShiftStaffs = selectedShiftName
+        ? schedules
+            .filter((item) => item.date === shiftOverviewDate && item.shiftName === selectedShiftName)
+            .map((item) => {
+              const staff = staffs.find((s) => s.id === item.userId)
+              return {
+                staffId: item.userId,
+                staffName: item.userName,
+                role: (staff?.role || 'STAFF') as StaffRole,
+                employeeCode: staff?.employeeCode || null,
+                branchId: staff?.branchId || null,
+                branchName: staff?.branchName || null,
+              }
+            })
+        : []
+      const staff = staffs.find((item) => item.id === targetStaffId)
+      setShiftOverview({
+        date: shiftOverviewDate,
+        staffId: targetStaffId,
+        staffName: staff?.name || currentUser?.name || '-',
+        branchId: staff?.branchId || null,
+        branchName: staff?.branchName || null,
+        selectedShiftType: selectedShiftName,
+        assignedShifts,
+        sameShiftStaffs,
+      })
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Không tải được ca làm hiện tại')
     } finally {
@@ -304,18 +379,61 @@ export default function StaffManagement() {
   const loadPayroll = async () => {
     setLoadingPayroll(true)
     try {
-      const params: Record<string, string> = {
-        dateFrom: payrollDateFrom,
-        dateTo: payrollDateTo,
-      }
-      if (canManageAccounts) {
-        if (payrollStaffId !== 'ALL') params.staffId = payrollStaffId
+      const month = payrollDateFrom
+      if (canManageAccounts && activeBranchId) {
+        const { data } = await api.get(`/branches/${activeBranchId}/payroll`, { params: { month } })
+        const list = (Array.isArray(data) ? data : []).filter((item) => (payrollStaffId === 'ALL' ? true : item.userId === payrollStaffId))
+        const items: PayrollItem[] = list.map((item) => {
+          const staff = staffs.find((s) => s.id === item.userId)
+          return {
+            staffId: item.userId,
+            staffName: staff?.name || item.userId,
+            employeeCode: staff?.employeeCode || null,
+            role: (staff?.role || 'STAFF') as StaffRole,
+            branchId: staff?.branchId || null,
+            branchName: staff?.branchName || null,
+            totalWorkingHours: Number(item.totalWorkedHours || 0),
+            workedDays: Number(item.totalWorkedDays || 0),
+            baseSalaryEarned: Number(item.baseSalaryEarned || 0),
+            totalAllowances: Number(item.totalAllowances || 0),
+            totalBonus: Number(item.totalBonus || 0),
+            totalDeductions: Number(item.totalDeductions || 0),
+            netSalary: Number(item.netSalary || 0),
+            status: String(item.status || 'DRAFT'),
+          }
+        })
+        setPayrollSummary({
+          month,
+          totalWorkingHours: items.reduce((sum, item) => sum + item.totalWorkingHours, 0),
+          totalNetSalary: items.reduce((sum, item) => sum + item.netSalary, 0),
+          items,
+        })
       } else if (currentUser?.id) {
-        params.staffId = currentUser.id
+        const { data } = await api.get(`/payroll/${currentUser.id}`)
+        const list = (Array.isArray(data) ? data : []).filter((item) => String(item.month || '').startsWith(month.slice(0, 7)))
+        const items: PayrollItem[] = list.map((item) => ({
+          staffId: currentUser.id,
+          staffName: currentUser.name || currentUser.id,
+          employeeCode: currentStaffEntry?.employeeCode || null,
+          role: (currentRole || 'STAFF') as StaffRole,
+          branchId: currentUser.branchId || null,
+          branchName: currentStaffEntry?.branchName || null,
+          totalWorkingHours: Number(item.totalWorkedHours || 0),
+          workedDays: Number(item.totalWorkedDays || 0),
+          baseSalaryEarned: Number(item.baseSalaryEarned || 0),
+          totalAllowances: Number(item.totalAllowances || 0),
+          totalBonus: Number(item.totalBonus || 0),
+          totalDeductions: Number(item.totalDeductions || 0),
+          netSalary: Number(item.netSalary || 0),
+          status: String(item.status || 'DRAFT'),
+        }))
+        setPayrollSummary({
+          month,
+          totalWorkingHours: items.reduce((sum, item) => sum + item.totalWorkingHours, 0),
+          totalNetSalary: items.reduce((sum, item) => sum + item.netSalary, 0),
+          items,
+        })
       }
-
-      const { data } = await api.get('/users/staff/payroll', { params })
-      setPayrollSummary(data || null)
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Không tải được bảng lương')
     } finally {
@@ -325,11 +443,11 @@ export default function StaffManagement() {
 
   useEffect(() => {
     loadStaffs()
-  }, [staffKeyword, staffRoleFilter, staffBranchFilter, includeInactive])
+  }, [staffKeyword, staffRoleFilter, includeInactive, activeBranchId])
 
   useEffect(() => {
     loadSchedules()
-  }, [weekStart, canManageAccounts])
+  }, [weekStart, canManageAccounts, activeBranchId])
 
   useEffect(() => {
     loadAttendance()
@@ -337,15 +455,19 @@ export default function StaffManagement() {
 
   useEffect(() => {
     loadShiftOverview()
-  }, [shiftOverviewDate, shiftOverviewStaffId, canManageAccounts, currentUser?.id])
+  }, [shiftOverviewDate, shiftOverviewStaffId, canManageAccounts, currentUser?.id, schedules, staffs])
 
   useEffect(() => {
     loadPayroll()
-  }, [payrollStaffId, payrollDateFrom, payrollDateTo, canManageAccounts, currentUser?.id])
+  }, [payrollStaffId, payrollDateFrom, payrollDateTo, canManageAccounts, currentUser?.id, activeBranchId, staffs])
 
   useEffect(() => {
     void loadBranches()
-  }, [canManageAccounts])
+  }, [canManageAccounts, currentRole, currentUser?.branchId])
+
+  useEffect(() => {
+    void loadShiftOptions()
+  }, [canManageAccounts, activeBranchId])
 
   useEffect(() => {
     let cancelled = false
@@ -447,10 +569,11 @@ export default function StaffManagement() {
         if (staffForm.password.trim()) {
           payload.password = staffForm.password
         }
-        await api.patch(`/users/staff/${editingStaffId}`, payload)
+        await api.put(`/staff/${editingStaffId}`, payload)
         toast.success('Đã cập nhật nhân viên')
       } else {
-        await api.post('/users/staff', {
+        const targetBranchId = staffForm.branchId || activeBranchId
+        await api.post(`/branches/${targetBranchId}/staff`, {
           name: staffForm.name,
           email: staffForm.email,
           password: staffForm.password,
@@ -458,7 +581,6 @@ export default function StaffManagement() {
           role: staffForm.role,
           employeeCode: staffForm.employeeCode || null,
           personalQrCode: null,
-          preferredShift: staffForm.preferredShift,
           branchId: staffForm.branchId || null,
         })
         toast.success('Đã thêm nhân viên')
@@ -479,10 +601,10 @@ export default function StaffManagement() {
       toast.error('Ban khong duoc xoa tai khoan nay')
       return
     }
-    if (!window.confirm(`Xóa nhân viên ${staff.name}?`)) return
+    if (!window.confirm(`Vô hiệu hóa nhân viên ${staff.name}?`)) return
     try {
-      await api.delete(`/users/staff/${staff.id}`)
-      toast.success('Đã xóa nhân viên')
+      await api.patch(`/staff/${staff.id}/deactivate`)
+      toast.success('Đã vô hiệu hóa nhân viên')
       if (editingStaffId === staff.id) {
         resetStaffForm()
       }
@@ -490,7 +612,7 @@ export default function StaffManagement() {
       await loadSchedules()
       await loadAttendance()
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Xóa nhân viên thất bại')
+      toast.error(error.response?.data?.message || 'Vô hiệu hóa nhân viên thất bại')
     }
   }
 
@@ -500,14 +622,18 @@ export default function StaffManagement() {
       toast.error('Chọn nhân viên trước khi phân ca')
       return
     }
+    if (!scheduleShiftId) {
+      toast.error('Chọn ca làm trước khi phân ca')
+      return
+    }
 
     setSavingSchedule(true)
     try {
-      await api.post('/users/staff/schedules', {
-        staffId: scheduleStaffId,
-        shiftDate: scheduleDate,
-        shiftType: scheduleShiftType,
-        note: scheduleNote || null,
+      await api.post('/schedule', {
+        userId: scheduleStaffId,
+        shiftId: scheduleShiftId,
+        date: scheduleDate,
+        notes: scheduleNote || null,
       })
       toast.success('Đã lưu phân ca')
       setScheduleNote('')
@@ -519,10 +645,10 @@ export default function StaffManagement() {
     }
   }
 
-  const removeSchedule = async (shiftId: string) => {
+  const removeSchedule = async (scheduleId: string) => {
     if (!window.confirm('Xóa ca làm này?')) return
     try {
-      await api.delete(`/users/staff/schedules/${shiftId}`)
+      await api.delete(`/schedule/${scheduleId}`)
       toast.success('Đã xóa ca làm')
       await loadSchedules()
     } catch (error: any) {
@@ -532,10 +658,9 @@ export default function StaffManagement() {
 
   const handleAttendanceAction = async (
     action: 'check-in' | 'check-out',
-    payload?: { identifier: string; method: AttendanceMethod },
+    payload?: { identifier: string },
   ) => {
     const identifier = (payload?.identifier ?? attendanceIdentifier).trim()
-    const method = payload?.method ?? attendanceMethod
 
     if (!identifier) {
       toast.error('Nhập mã nhân viên hoặc mã QR')
@@ -544,9 +669,8 @@ export default function StaffManagement() {
 
     setProcessingAttendance(true)
     try {
-      await api.post(`/users/staff/attendance/${action}`, {
-        identifier,
-        method,
+      await api.post(action === 'check-in' ? '/attendance/checkin' : '/attendance/checkout', {
+        employeeCode: identifier,
       })
       toast.success(action === 'check-in' ? 'Chấm công vào ca thành công' : 'Chấm công ra ca thành công')
       await loadAttendance()
@@ -649,9 +773,8 @@ export default function StaffManagement() {
             if (!scannedText) return
 
             scannerLockRef.current = true
-            setAttendanceMethod('QR')
             setAttendanceIdentifier(scannedText)
-            await handleAttendanceAction(scannerAction, { identifier: scannedText, method: 'QR' })
+            await handleAttendanceAction(scannerAction, { identifier: scannedText })
             closeQrScanner()
           } catch {
             // Ignore per-frame detect errors and keep scanning.
@@ -1020,14 +1143,13 @@ export default function StaffManagement() {
               </option>
             ))}
           </select>
-          <select
-            className={selectClass}
-            value={scheduleShiftType}
-            onChange={(e) => setScheduleShiftType(e.target.value as ShiftType)}
-          >
-            <option value="MORNING">Ca sáng</option>
-            <option value="AFTERNOON">Ca chiều</option>
-            <option value="EVENING">Ca tối</option>
+          <select className={selectClass} value={scheduleShiftId} onChange={(e) => setScheduleShiftId(e.target.value)}>
+            <option value="">-- Chọn ca làm --</option>
+            {shiftOptions.map((shift) => (
+              <option key={shift.id} value={shift.id}>
+                {shift.name}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -1058,10 +1180,10 @@ export default function StaffManagement() {
               <tbody>
                 {schedules.map((shift) => (
                   <tr key={shift.id} className="border-b">
-                    <td className="py-2 pr-3">{shift.shiftDate}</td>
-                    <td className="py-2 pr-3">{shift.staffName}</td>
-                    <td className="py-2 pr-3">{caLamViec(shift.shiftType)}</td>
-                    <td className="py-2 pr-3">{shift.note || '-'}</td>
+                    <td className="py-2 pr-3">{shift.date}</td>
+                    <td className="py-2 pr-3">{shift.userName}</td>
+                    <td className="py-2 pr-3">{shift.shiftName}</td>
+                    <td className="py-2 pr-3">{shift.notes || '-'}</td>
                     <td className="py-2">
                       <Button size="sm" variant="danger" onClick={() => removeSchedule(shift.id)}>
                         Xóa
@@ -1091,14 +1213,9 @@ export default function StaffManagement() {
             value={attendanceIdentifier}
             onChange={(e) => setAttendanceIdentifier(e.target.value)}
           />
-          <select
-            className={selectClass}
-            value={attendanceMethod}
-            onChange={(e) => setAttendanceMethod(e.target.value as AttendanceMethod)}
-          >
-            <option value="EMPLOYEE_CODE">Mã nhân viên</option>
-            <option value="QR">Mã QR</option>
-          </select>
+          <div className="rounded-xl border border-amber-100 bg-white/90 px-3 py-2 text-sm text-slate-600">
+            Check-in/out theo mã nhân viên hoặc QR cá nhân
+          </div>
           <Button loading={processingAttendance} onClick={() => handleAttendanceAction('check-in')}>
             Vào ca
           </Button>
@@ -1172,14 +1289,13 @@ export default function StaffManagement() {
             {!loadingAttendance && attendanceLogs.map((log) => (
               <div key={`mobile-att-${log.id}`} className="rounded-xl border border-amber-100 bg-white/90 p-3 text-xs">
                 <div className="flex items-center justify-between">
-                  <p className="font-semibold text-slate-900">{log.staffName}</p>
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">{log.workDate}</span>
+                  <p className="font-semibold text-slate-900">{log.userName}</p>
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">{log.date}</span>
                 </div>
-                <p className="mt-1 text-slate-600">Mã NV: {employeeCodeByStaffId[log.staffId] || '-'}</p>
-                <p className="text-slate-600">Ca: {caLamViec(log.scheduledShift)}</p>
-                <p className="text-slate-600">Vào: {new Date(log.checkInAt).toLocaleString()}</p>
-                <p className="text-slate-600">Ra: {log.checkOutAt ? new Date(log.checkOutAt).toLocaleString() : '-'}</p>
-                <p className="text-slate-600">Giờ công: {log.workingMinutes ?? '-'} phút</p>
+                <p className="mt-1 text-slate-600">Mã NV: {employeeCodeByStaffId[log.userId] || '-'}</p>
+                <p className="text-slate-600">Vào: {log.checkInTime ? new Date(log.checkInTime).toLocaleString() : '-'}</p>
+                <p className="text-slate-600">Ra: {log.checkOutTime ? new Date(log.checkOutTime).toLocaleString() : '-'}</p>
+                <p className="text-slate-600">Giờ công: {log.workedMinutes ?? '-'} phút</p>
               </div>
             ))}
         </div>
@@ -1203,17 +1319,14 @@ export default function StaffManagement() {
               <tbody>
                   {attendanceLogs.map((log) => (
                     <tr key={log.id} className="border-b">
-                      <td className="py-2 pr-3">{log.workDate}</td>
-                      <td className="py-2 pr-3">{log.staffName}</td>
-                      <td className="py-2 pr-3">{employeeCodeByStaffId[log.staffId] || '-'}</td>
-                      <td className="py-2 pr-3">{caLamViec(log.scheduledShift)}</td>
-                      <td className="py-2 pr-3">{new Date(log.checkInAt).toLocaleString()}</td>
-                      <td className="py-2 pr-3">{log.checkOutAt ? new Date(log.checkOutAt).toLocaleString() : '-'}</td>
-                      <td className="py-2 pr-3">{log.workingMinutes ?? '-'}</td>
-                    <td className="py-2 pr-3">
-                      {phuongThucChamCong(log.checkInMethod)}
-                      {log.checkOutMethod ? ` / ${phuongThucChamCong(log.checkOutMethod)}` : ''}
-                    </td>
+                      <td className="py-2 pr-3">{log.date}</td>
+                      <td className="py-2 pr-3">{log.userName}</td>
+                      <td className="py-2 pr-3">{employeeCodeByStaffId[log.userId] || '-'}</td>
+                      <td className="py-2 pr-3">{log.status || '-'}</td>
+                      <td className="py-2 pr-3">{log.checkInTime ? new Date(log.checkInTime).toLocaleString() : '-'}</td>
+                      <td className="py-2 pr-3">{log.checkOutTime ? new Date(log.checkOutTime).toLocaleString() : '-'}</td>
+                      <td className="py-2 pr-3">{log.workedMinutes ?? '-'}</td>
+                    <td className="py-2 pr-3">App/QR</td>
                   </tr>
                 ))}
               </tbody>
@@ -1266,7 +1379,7 @@ export default function StaffManagement() {
               {shiftOverview?.assignedShifts?.length ? (
                 shiftOverview.assignedShifts.map((shift) => (
                   <span key={shift.id} className="rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-amber-200">
-                    {caLamViec(shift.shiftType)}
+                    {shift.shiftName}
                   </span>
                 ))
               ) : (
@@ -1345,7 +1458,7 @@ export default function StaffManagement() {
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-4">
           <div className={softPanelClass}>
             <p className="text-xs font-semibold uppercase text-slate-500">Tổng tiền lương</p>
-            <p className="mt-2 text-xl font-bold text-slate-900">{Number(payrollSummary?.totalEstimatedPay || 0).toLocaleString()}đ</p>
+            <p className="mt-2 text-xl font-bold text-slate-900">{Number(payrollSummary?.totalNetSalary || 0).toLocaleString()}đ</p>
           </div>
           <div className={softPanelClass}>
             <p className="text-xs font-semibold uppercase text-slate-500">Tổng giờ công</p>
@@ -1353,11 +1466,11 @@ export default function StaffManagement() {
           </div>
           <div className={softPanelClass}>
             <p className="text-xs font-semibold uppercase text-slate-500">Tổng phút công</p>
-            <p className="mt-2 text-xl font-bold text-slate-900">{payrollSummary?.totalWorkingMinutes ?? 0} phút</p>
+            <p className="mt-2 text-xl font-bold text-slate-900">{payrollSummary?.month || '-'}</p>
           </div>
           <div className={softPanelClass}>
             <p className="text-xs font-semibold uppercase text-slate-500">Ca hoàn tất</p>
-            <p className="mt-2 text-xl font-bold text-slate-900">{payrollSummary?.completedShifts ?? 0}</p>
+            <p className="mt-2 text-xl font-bold text-slate-900">{payrollSummary?.items?.length ?? 0}</p>
           </div>
         </div>
 
@@ -1369,14 +1482,14 @@ export default function StaffManagement() {
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-semibold text-slate-900">{item.staffName}</p>
                   <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700">
-                    {Number(item.estimatedPay || 0).toLocaleString()}đ
+                    {Number(item.netSalary || 0).toLocaleString()}đ
                   </span>
                 </div>
                 <p className="mt-1 text-slate-600">Mã NV: {item.employeeCode || employeeCodeByStaffId[item.staffId] || '-'}</p>
                 <p className="text-slate-600">Vai trò: {vaiTroNhanVien(item.role)}</p>
                 <p className="text-slate-600">Giờ công: {item.totalWorkingHours} giờ</p>
-                <p className="text-slate-600">Ngày chấm công: {item.attendanceDays}</p>
-                <p className="text-slate-600">Ca hoàn tất: {item.completedShifts}</p>
+                <p className="text-slate-600">Ngày công: {item.workedDays}</p>
+                <p className="text-slate-600">Trạng thái: {item.status}</p>
               </div>
             ))}
         </div>
@@ -1405,11 +1518,11 @@ export default function StaffManagement() {
                     <td className="py-2 pr-3">{item.employeeCode || employeeCodeByStaffId[item.staffId] || '-'}</td>
                     <td className="py-2 pr-3">{vaiTroNhanVien(item.role)}</td>
                     <td className="py-2 pr-3">{item.branchName || item.branchId || '-'}</td>
-                    <td className="py-2 pr-3">{Number(item.hourlyRate || 0).toLocaleString()}đ</td>
+                    <td className="py-2 pr-3">{Number(item.baseSalaryEarned || 0).toLocaleString()}đ</td>
                     <td className="py-2 pr-3">{item.totalWorkingHours} giờ</td>
-                    <td className="py-2 pr-3">{item.attendanceDays}</td>
-                    <td className="py-2 pr-3">{item.completedShifts}</td>
-                    <td className="py-2 pr-3 font-semibold text-emerald-700">{Number(item.estimatedPay || 0).toLocaleString()}đ</td>
+                    <td className="py-2 pr-3">{item.workedDays}</td>
+                    <td className="py-2 pr-3">{item.status}</td>
+                    <td className="py-2 pr-3 font-semibold text-emerald-700">{Number(item.netSalary || 0).toLocaleString()}đ</td>
                   </tr>
                 ))}
                 {!payrollSummary?.items?.length && (

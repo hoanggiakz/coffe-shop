@@ -9,6 +9,13 @@ import { CreateStockReceiptDto } from './dto/create-stock-receipt.dto';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { QueryIngredientDto, QueryMovementDto } from './dto/query-movements.dto';
 import { BulkExportStockDto } from './dto/bulk-export-stock.dto';
+import {
+  CreatePurchaseOrderDto,
+  InventoryAdjustDto,
+  QueryPurchaseOrderDto,
+  UpdatePurchaseOrderDto,
+  UpsertBranchRecipeDto,
+} from './dto/spec-inventory.dto';
 import nodemailer, { Transporter } from 'nodemailer';
 
 type ApplyMovementInput = {
@@ -390,6 +397,246 @@ export class InventoryService {
       ...this.mapMovement(movement),
       ingredient: movement.ingredient ? this.mapIngredient(movement.ingredient) : null,
     }));
+  }
+
+  async getIngredientById(id: string) {
+    const ingredient = await this.ensureIngredientExists(id);
+    return this.mapIngredient(ingredient);
+  }
+
+  async listLowStock(branchId: string) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    return this.findAllIngredients({
+      branchId: normalizedBranchId || undefined,
+      lowOnly: 'true',
+      includeInactive: 'false',
+    });
+  }
+
+  async upsertBranchRecipe(branchId: string, dto: UpsertBranchRecipeDto) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) throw new BadRequestException('branchId khong hop le');
+    return this.prisma.branchRecipe.upsert({
+      where: {
+        branchId_menuItemId_ingredientId: {
+          branchId: normalizedBranchId,
+          menuItemId: String(dto.menuItemId).trim(),
+          ingredientId: String(dto.ingredientId).trim(),
+        },
+      },
+      update: {
+        quantity: Number(dto.quantity),
+        wastageRate: Number(dto.wastageRate || 0),
+      },
+      create: {
+        branchId: normalizedBranchId,
+        menuItemId: String(dto.menuItemId).trim(),
+        ingredientId: String(dto.ingredientId).trim(),
+        quantity: Number(dto.quantity),
+        wastageRate: Number(dto.wastageRate || 0),
+      },
+    });
+  }
+
+  async updateDefaultRecipe(id: string, dto: UpsertBranchRecipeDto) {
+    const exists = await this.prisma.recipe.findUnique({ where: { id } });
+    if (!exists) throw new NotFoundException('Khong tim thay recipe');
+    return this.prisma.recipe.update({
+      where: { id },
+      data: {
+        menuItemId: String(dto.menuItemId).trim(),
+        ingredientId: String(dto.ingredientId).trim(),
+        quantity: Number(dto.quantity),
+        wastageRate: Number(dto.wastageRate || 0),
+      },
+    });
+  }
+
+  async getMergedRecipe(branchId: string, menuItemId: string) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    const normalizedMenuItemId = String(menuItemId || '').trim();
+    const branchRows = await this.prisma.branchRecipe.findMany({
+      where: { branchId: normalizedBranchId || undefined, menuItemId: normalizedMenuItemId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (branchRows.length) return branchRows;
+    return this.prisma.recipe.findMany({
+      where: { menuItemId: normalizedMenuItemId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async getDefaultRecipe(menuItemId: string) {
+    return this.prisma.recipe.findMany({
+      where: { menuItemId: String(menuItemId || '').trim() },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async deleteBranchRecipe(branchId: string, menuItemId: string) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    const normalizedMenuItemId = String(menuItemId || '').trim();
+    await this.prisma.branchRecipe.deleteMany({
+      where: {
+        branchId: normalizedBranchId || undefined,
+        menuItemId: normalizedMenuItemId,
+      },
+    });
+    return { branchId: normalizedBranchId, menuItemId: normalizedMenuItemId, deleted: true };
+  }
+
+  async listPurchaseOrders(branchId: string, query: QueryPurchaseOrderDto = {}) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    return this.prisma.purchaseOrder.findMany({
+      where: {
+        branchId: normalizedBranchId || undefined,
+        ...(query.status ? { status: query.status } : {}),
+      },
+      include: { items: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createPurchaseOrder(branchId: string, dto: CreatePurchaseOrderDto, createdBy?: string) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) throw new BadRequestException('branchId khong hop le');
+    if (!Array.isArray(dto.items) || !dto.items.length) {
+      throw new BadRequestException('Don nhap phai co it nhat 1 dong');
+    }
+    const supplierName = String(dto.supplierName || '').trim();
+    if (!supplierName) throw new BadRequestException('supplierName khong hop le');
+    const totalAmount = dto.items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice), 0);
+
+    return this.prisma.purchaseOrder.create({
+      data: {
+        branchId: normalizedBranchId,
+        supplierName,
+        notes: String(dto.notes || '').trim() || null,
+        status: 'DRAFT',
+        totalAmount,
+        createdBy: createdBy || null,
+        items: {
+          create: dto.items.map((item) => ({
+            ingredientId: String(item.ingredientId).trim(),
+            quantity: Number(item.quantity),
+            unitPrice: Number(item.unitPrice),
+            ...(item.expiryDate ? { expiryDate: new Date(item.expiryDate) } : {}),
+          })),
+        },
+      },
+      include: { items: true },
+    });
+  }
+
+  async getPurchaseOrderById(id: string) {
+    const found = await this.prisma.purchaseOrder.findUnique({ where: { id }, include: { items: true } });
+    if (!found) throw new NotFoundException('Khong tim thay purchase order');
+    return found;
+  }
+
+  async updatePurchaseOrder(id: string, dto: UpdatePurchaseOrderDto) {
+    const found = await this.getPurchaseOrderById(id);
+    if (found.status !== 'DRAFT') throw new BadRequestException('Chi cho phep sua don o trang thai DRAFT');
+    const totalAmount = dto.items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice), 0);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: id } });
+      return tx.purchaseOrder.update({
+        where: { id },
+        data: {
+          supplierName: String(dto.supplierName || '').trim(),
+          notes: String(dto.notes || '').trim() || null,
+          totalAmount,
+          items: {
+            create: dto.items.map((item) => ({
+              ingredientId: String(item.ingredientId).trim(),
+              quantity: Number(item.quantity),
+              unitPrice: Number(item.unitPrice),
+              ...(item.expiryDate ? { expiryDate: new Date(item.expiryDate) } : {}),
+            })),
+          },
+        },
+        include: { items: true },
+      });
+    });
+  }
+
+  async submitPurchaseOrder(id: string) {
+    const found = await this.getPurchaseOrderById(id);
+    if (found.status !== 'DRAFT') throw new BadRequestException('Chi don DRAFT moi duoc submit');
+    return this.prisma.purchaseOrder.update({ where: { id }, data: { status: 'SUBMITTED' }, include: { items: true } });
+  }
+
+  async cancelPurchaseOrder(id: string) {
+    const found = await this.getPurchaseOrderById(id);
+    if (found.status === 'RECEIVED') throw new BadRequestException('Don RECEIVED khong duoc huy');
+    return this.prisma.purchaseOrder.update({ where: { id }, data: { status: 'CANCELLED' }, include: { items: true } });
+  }
+
+  async receivePurchaseOrder(id: string, actor?: string) {
+    const po = await this.getPurchaseOrderById(id);
+    if (po.status !== 'SUBMITTED' && po.status !== 'DRAFT') {
+      throw new BadRequestException('Chi don DRAFT/SUBMITTED moi duoc nhan hang');
+    }
+    const rows = await this.prisma.$transaction(async (tx) => {
+      const movements: any[] = [];
+      for (const item of po.items) {
+        const ingredient = await tx.ingredient.findUnique({ where: { id: item.ingredientId } });
+        if (!ingredient) throw new NotFoundException(`Ingredient not found: ${item.ingredientId}`);
+        const beforeStock = Number(ingredient.stock || 0);
+        const importQty = Number(item.quantity || 0);
+        const importPrice = Number(item.unitPrice || 0);
+        const nextStock = beforeStock + importQty;
+        const oldCost = Number(ingredient.importPrice || 0);
+        const nextCost = nextStock <= 0 ? oldCost : ((beforeStock * oldCost) + (importQty * importPrice)) / nextStock;
+
+        const movement = await tx.stockMovement.create({
+          data: {
+            ingredientId: ingredient.id,
+            branchId: po.branchId,
+            type: StockType.IMPORT,
+            source: StockSource.RECEIPT,
+            quantity: importQty,
+            unitPrice: importPrice,
+            totalPrice: importQty * importPrice,
+            reason: 'PURCHASE_ORDER_RECEIVED',
+            note: po.notes || null,
+            referenceCode: po.id,
+            beforeStock,
+            afterStock: nextStock,
+            createdBy: actor || po.createdBy || null,
+          },
+        });
+        const updatedIngredient = await tx.ingredient.update({
+          where: { id: ingredient.id },
+          data: {
+            stock: nextStock,
+            importPrice: nextCost,
+          },
+        });
+        movements.push({ movement, ingredient: updatedIngredient });
+      }
+      const updatedPo = await tx.purchaseOrder.update({
+        where: { id: po.id },
+        data: { status: 'RECEIVED', receivedAt: new Date() },
+        include: { items: true },
+      });
+      return { updatedPo, movements };
+    });
+
+    for (const row of rows.movements) {
+      await this.checkAndAlertLowStock(row.ingredient, 'RECEIPT');
+    }
+    return rows.updatedPo;
+  }
+
+  async adjustInventoryByBranch(branchId: string, dto: InventoryAdjustDto, actor?: string) {
+    return this.adjustStock({
+      branchId,
+      ingredientId: dto.ingredientId,
+      actualStock: dto.actualStock,
+      reason: dto.note,
+      createdBy: actor,
+    });
   }
 
   async syncMenuItems(items: { id: string; name: string; unit?: string }[], branchIdRaw?: string) {
