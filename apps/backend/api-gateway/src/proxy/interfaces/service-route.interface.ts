@@ -24,4 +24,6 @@ export const SERVICE_ROUTES: ServiceRoute[] = [
   { path: '/api/payment', public: true },
   // Report Service (NestJS)
   { path: '/api/reports', public: true },
+  // AI Service (FastAPI)
+  { path: '/api/ai', public: true },
 ];

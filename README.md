@@ -647,3 +647,73 @@ Kỳ vọng: cả 2 trả `200` và có danh sách món.
 - Pull event: `GET /api/v1/payments/webhook/relay/events`
 
 Chi tiết xem thêm: [docs/sepay-webhook-relay.md](docs/sepay-webhook-relay.md)
+
+## 11. AI Implementation Changelog
+
+### 11.1 Data Foundation
+- Da chuan hoa schema AI trong `report-service`:
+  - `sales_forecast`
+  - `item_recommendation`
+  - `anomaly_alert`
+  - `sentiment_analysis`
+  - `chatbot_query_log`
+  - `ai_audit_log`
+- Da them readiness check script:
+  - `apps/backend/report-service/scripts/ai-data-readiness-check.mjs`
+- Da bo sung seed script de dat nguong:
+  - `ops/scripts/seed-ai-readiness-orders.sql`
+  - `ops/scripts/seed-ai-readiness-payments.sql`
+- Ket qua readiness hien tai: pass `>=3 thang`, pass `>=1000 orders/branch`, pass `branchId consistency`, pass `timezone alignment`, pass `order/payment consistency`.
+
+### 11.2 AI Service + Gateway
+- Da tao `ai-service` (FastAPI): `apps/backend/ai-service`.
+- Da expose du contract `/api/ai/*` cho 5 nhom:
+  - Forecast
+  - Recommend
+  - Anomalies
+  - Sentiment
+  - Chatbot
+- Da map route qua gateway:
+  - Them prefix `/api/ai`
+  - Them `AI_SERVICE_URL`
+  - RBAC: `ADMIN|MANAGER` cho endpoint AI (health public GET).
+
+### 11.3 AI Infra Profile
+- Da them profile `ai` trong `docker-compose.yml` gom:
+  - Kafka + Zookeeper
+  - Kafka Connect (Debezium)
+  - Airflow
+  - MLflow
+  - Feast feature server
+  - TimescaleDB
+  - ClickHouse
+- Da them Feast config: `ops/feast/feature_store.yaml`.
+- Da them Airflow DAG + job skeleton cho chuoi:
+  - ingest CDC -> dbt transform -> materialize features -> inference/retrain -> register -> deploy -> rollback guard -> retention cleanup.
+
+### 11.4 Security, Governance, Monitoring
+- Da them anonymization script:
+  - `ops/scripts/anonymize-training-data.mjs`
+- Da them SQL guardrail chatbot (read-only + timeout + row limit) trong `ai-service`.
+- Da them audit log AI va chatbot query log.
+- Da them metrics `/metrics` cho `ai-service`.
+- Da them Prometheus alert rules AI:
+  - high error rate
+  - high p95 latency
+  - stale data freshness
+  - high prediction error.
+
+### 11.5 CI/CD + E2E
+- Da them CI Python cho `ai-service`:
+  - lint (`ruff`)
+  - type check (`mypy`)
+  - tests (`pytest`)
+- Da them migration checks (`prisma validate`) va image scan (`Trivy`).
+- Da them E2E contract test qua gateway:
+  - `ops/scripts/test-ai-contract.mjs`
+  - Job CI `e2e-ai-contract` tu dong chay tren `develop`.
+
+### 11.6 Frontend Adoption
+- Da them khoi `AI Insights` trong trang Reports:
+  - hien thi forecast/anomaly/sentiment tom tat
+  - fallback UX khi AI service khong kha dung.

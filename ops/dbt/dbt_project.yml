@@ -1,0 +1,15 @@
+name: "coffee_ai"
+version: "1.0.0"
+config-version: 2
+
+profile: "coffee_ai"
+
+model-paths: ["models"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  coffee_ai:
+    +materialized: table
+    staging:
+      +materialized: view

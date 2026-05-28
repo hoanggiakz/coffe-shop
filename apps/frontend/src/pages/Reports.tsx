@@ -104,6 +104,21 @@ interface DashboardResponse {
   staffPerformance: StaffPerformanceItem[]
 }
 
+interface AiRevenueForecast {
+  date: string
+  predictedRevenue: number
+  confidenceLow: number
+  confidenceHigh: number
+}
+
+interface AiInsightState {
+  available: boolean
+  forecasts: AiRevenueForecast[]
+  anomalies: Array<{ id: string; severity: string; description: string; isResolved: boolean }>
+  sentiment: { positive: number; neutral: number; negative: number } | null
+  fallbackReason?: string
+}
+
 function formatMoney(value: number): string {
   return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, value || 0))}đ`
 }
@@ -146,6 +161,12 @@ export default function Reports() {
   const [topItems, setTopItems] = useState<TopItem[]>([])
   const [inventory, setInventory] = useState<InventoryReportResponse | null>(null)
   const [staffItems, setStaffItems] = useState<StaffPerformanceItem[]>([])
+  const [aiInsight, setAiInsight] = useState<AiInsightState>({
+    available: false,
+    forecasts: [],
+    anomalies: [],
+    sentiment: null,
+  })
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
@@ -176,6 +197,34 @@ export default function Reports() {
       setTopItems(Array.isArray(topRes.data) ? (topRes.data as TopItem[]) : [])
       setInventory((inventoryRes.data || null) as InventoryReportResponse | null)
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
+
+      try {
+        const [forecastRes, anomalyRes, sentimentRes] = await Promise.all([
+          api.get('/ai/forecast/revenue', { params: { branchId: selectedBranchId || currentUserBranchId || 'branch-e2e', days: 7 } }),
+          api.get('/ai/anomalies', { params: { branchId: selectedBranchId || currentUserBranchId || 'branch-e2e' } }),
+          api.get('/ai/sentiment/summary', { params: { branchId: selectedBranchId || currentUserBranchId || 'branch-e2e' } }),
+        ])
+        setAiInsight({
+          available: true,
+          forecasts: Array.isArray(forecastRes.data?.forecasts) ? (forecastRes.data.forecasts as AiRevenueForecast[]) : [],
+          anomalies: Array.isArray(anomalyRes.data?.items) ? anomalyRes.data.items : [],
+          sentiment: sentimentRes.data
+            ? {
+                positive: Number(sentimentRes.data.positive || 0),
+                neutral: Number(sentimentRes.data.neutral || 0),
+                negative: Number(sentimentRes.data.negative || 0),
+              }
+            : null,
+        })
+      } catch (aiError: any) {
+        setAiInsight({
+          available: false,
+          forecasts: [],
+          anomalies: [],
+          sentiment: null,
+          fallbackReason: aiError?.response?.data?.message || 'AI service unavailable',
+        })
+      }
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Không tải được dữ liệu báo cáo', 'Unable to load report data'))
     } finally {
@@ -339,6 +388,36 @@ export default function Reports() {
           <p className="text-2xl font-bold text-red-600">{dashboard?.payments.summary.failedTransactions || 0}</p>
         </Card>
       </div>}
+
+      <Card title="AI Insights" subtitle={aiInsight.available ? 'Dự báo & cảnh báo thông minh' : 'Fallback rule-based'}>
+        {!aiInsight.available && (
+          <p className="text-sm text-amber-700">
+            AI tạm thời không khả dụng. Đang fallback về báo cáo truyền thống. {aiInsight.fallbackReason ? `(${aiInsight.fallbackReason})` : ''}
+          </p>
+        )}
+        {aiInsight.available && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-sky-100 bg-sky-50/70 p-3">
+              <p className="text-xs text-slate-600">Dự báo 7 ngày</p>
+              <p className="text-lg font-semibold text-slate-900">
+                {formatMoney(aiInsight.forecasts.reduce((acc, item) => acc + Number(item.predictedRevenue || 0), 0))}
+              </p>
+            </div>
+            <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-3">
+              <p className="text-xs text-slate-600">Anomaly đang mở</p>
+              <p className="text-lg font-semibold text-slate-900">
+                {aiInsight.anomalies.filter((item) => !item.isResolved).length}
+              </p>
+            </div>
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
+              <p className="text-xs text-slate-600">Sentiment tích cực</p>
+              <p className="text-lg font-semibold text-slate-900">
+                {aiInsight.sentiment ? `${Math.round(aiInsight.sentiment.positive * 100)}%` : '-'}
+              </p>
+            </div>
+          </div>
+        )}
+      </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card title="Doanh thu theo thời gian (M-19)" subtitle="Ngày / tuần / tháng / năm">
