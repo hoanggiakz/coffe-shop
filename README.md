@@ -513,6 +513,7 @@ sequenceDiagram
 | Manager | `manager.riverside@coffeeshop.local` | `Manager@123` |
 | Waiter | `waiter.test@coffeeshop.local` | `Waiter@123` |
 | Barista | `barista.test@coffeeshop.local` | `Barista@123` |
+| Barista Central | `barista.central@coffeeshop.local` | `Barista@123` |
 | Staff | `staff.test@coffeeshop.local` | `Staff@123` |
 | Customer | `customer.test@coffeeshop.local` | `Customer@123` |
 
