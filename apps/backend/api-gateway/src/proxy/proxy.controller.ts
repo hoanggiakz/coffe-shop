@@ -204,6 +204,16 @@ export class ProxyController {
       return;
     }
 
+    if (method === 'GET' && path === '/api/ai/health') {
+      return;
+    }
+
+    // AI analytics module (manager/admin)
+    if (path.startsWith('/api/ai')) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER']);
+      return;
+    }
+
     // Waiter/barista/manager/admin can move order lifecycle
     if (method === 'PATCH' && /^\/api\/orders\/[^/]+\/status$/.test(path)) {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
@@ -380,6 +390,8 @@ export class ProxyController {
         return this.configService.get<string>('PAYMENT_SERVICE_URL') || 'http://payment-service:3004';
       case '/api/reports':
         return this.configService.get<string>('REPORT_SERVICE_URL') || 'http://report-service:3006';
+      case '/api/ai':
+        return this.configService.get<string>('AI_SERVICE_URL') || 'http://ai-service:3010';
       default:
         throw new Error(`Unsupported route path: ${path}`);
     }
