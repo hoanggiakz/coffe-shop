@@ -104,6 +104,21 @@ interface DashboardResponse {
   staffPerformance: StaffPerformanceItem[]
 }
 
+interface AiRevenueForecast {
+  date: string
+  predictedRevenue: number
+  confidenceLow: number
+  confidenceHigh: number
+}
+
+interface AiInsightState {
+  available: boolean
+  forecasts: AiRevenueForecast[]
+  anomalies: Array<{ id: string; severity: string; description: string; isResolved: boolean }>
+  sentiment: { positive: number; neutral: number; negative: number } | null
+  fallbackReason?: string
+}
+
 function formatMoney(value: number): string {
   return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, value || 0))}đ`
 }
@@ -125,7 +140,7 @@ function formatHourLabel(value: string): string {
 }
 
 const selectClass =
-  'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-500/30'
+  'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
 
 export default function Reports() {
   const { tv } = useI18n()
@@ -146,6 +161,12 @@ export default function Reports() {
   const [topItems, setTopItems] = useState<TopItem[]>([])
   const [inventory, setInventory] = useState<InventoryReportResponse | null>(null)
   const [staffItems, setStaffItems] = useState<StaffPerformanceItem[]>([])
+  const [aiInsight, setAiInsight] = useState<AiInsightState>({
+    available: false,
+    forecasts: [],
+    anomalies: [],
+    sentiment: null,
+  })
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
@@ -176,6 +197,34 @@ export default function Reports() {
       setTopItems(Array.isArray(topRes.data) ? (topRes.data as TopItem[]) : [])
       setInventory((inventoryRes.data || null) as InventoryReportResponse | null)
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
+
+      try {
+        const [forecastRes, anomalyRes, sentimentRes] = await Promise.all([
+          api.get('/ai/forecast/revenue', { params: { branchId: selectedBranchId || currentUserBranchId || 'branch-e2e', days: 7 } }),
+          api.get('/ai/anomalies', { params: { branchId: selectedBranchId || currentUserBranchId || 'branch-e2e' } }),
+          api.get('/ai/sentiment/summary', { params: { branchId: selectedBranchId || currentUserBranchId || 'branch-e2e' } }),
+        ])
+        setAiInsight({
+          available: true,
+          forecasts: Array.isArray(forecastRes.data?.forecasts) ? (forecastRes.data.forecasts as AiRevenueForecast[]) : [],
+          anomalies: Array.isArray(anomalyRes.data?.items) ? anomalyRes.data.items : [],
+          sentiment: sentimentRes.data
+            ? {
+                positive: Number(sentimentRes.data.positive || 0),
+                neutral: Number(sentimentRes.data.neutral || 0),
+                negative: Number(sentimentRes.data.negative || 0),
+              }
+            : null,
+        })
+      } catch (aiError: any) {
+        setAiInsight({
+          available: false,
+          forecasts: [],
+          anomalies: [],
+          sentiment: null,
+          fallbackReason: aiError?.response?.data?.message || 'AI service unavailable',
+        })
+      }
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Không tải được dữ liệu báo cáo', 'Unable to load report data'))
     } finally {
@@ -279,7 +328,7 @@ export default function Reports() {
 
   return (
     <div className="space-y-5 sm:space-y-6">
-      <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-sky-100 bg-white/85 p-3 backdrop-blur sm:p-4">
+      <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-amber-100 bg-white/85 p-3 backdrop-blur sm:p-4">
         <h1 className="mr-auto text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Báo cáo và phân tích</h1>
         <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full sm:w-44" />
         <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full sm:w-44" />
@@ -339,6 +388,36 @@ export default function Reports() {
           <p className="text-2xl font-bold text-red-600">{dashboard?.payments.summary.failedTransactions || 0}</p>
         </Card>
       </div>}
+
+      <Card title="AI Insights" subtitle={aiInsight.available ? 'Dự báo & cảnh báo thông minh' : 'Fallback rule-based'}>
+        {!aiInsight.available && (
+          <p className="text-sm text-amber-700">
+            AI tạm thời không khả dụng. Đang fallback về báo cáo truyền thống. {aiInsight.fallbackReason ? `(${aiInsight.fallbackReason})` : ''}
+          </p>
+        )}
+        {aiInsight.available && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-sky-100 bg-sky-50/70 p-3">
+              <p className="text-xs text-slate-600">Dự báo 7 ngày</p>
+              <p className="text-lg font-semibold text-slate-900">
+                {formatMoney(aiInsight.forecasts.reduce((acc, item) => acc + Number(item.predictedRevenue || 0), 0))}
+              </p>
+            </div>
+            <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-3">
+              <p className="text-xs text-slate-600">Anomaly đang mở</p>
+              <p className="text-lg font-semibold text-slate-900">
+                {aiInsight.anomalies.filter((item) => !item.isResolved).length}
+              </p>
+            </div>
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
+              <p className="text-xs text-slate-600">Sentiment tích cực</p>
+              <p className="text-lg font-semibold text-slate-900">
+                {aiInsight.sentiment ? `${Math.round(aiInsight.sentiment.positive * 100)}%` : '-'}
+              </p>
+            </div>
+          </div>
+        )}
+      </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card title="Doanh thu theo thời gian (M-19)" subtitle="Ngày / tuần / tháng / năm">
@@ -409,7 +488,7 @@ export default function Reports() {
           <div className="space-y-2">
             {topItems.length === 0 && <p className="text-sm text-gray-500">Chưa có dữ liệu</p>}
             {topItems.map((item, index) => (
-              <div key={item.menuItemId} className="flex items-center justify-between rounded-xl border border-sky-100 bg-white/85 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+              <div key={item.menuItemId} className="flex items-center justify-between rounded-xl border border-amber-100 bg-white/85 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
                 <div>
                   <p className="font-medium text-slate-900 dark:text-slate-100">
                     #{index + 1} {item.menuItemName}
@@ -426,7 +505,7 @@ export default function Reports() {
           <div className="space-y-2">
             {staffItems.length === 0 && <p className="text-sm text-gray-500">Chưa có dữ liệu</p>}
             {staffItems.map((item) => (
-              <div key={item.staffId} className="flex items-center justify-between rounded-xl border border-sky-100 bg-white/85 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+              <div key={item.staffId} className="flex items-center justify-between rounded-xl border border-amber-100 bg-white/85 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
                 <div>
                   <p className="font-medium text-slate-900 dark:text-slate-100">{item.staffName}</p>
                   <p className="text-xs text-slate-500">{vaiTroNhanVien(item.role) || 'Chưa phân vai trò'} · {item.orderCount} đơn</p>
@@ -440,11 +519,11 @@ export default function Reports() {
 
       <Card title="Tồn kho hiện tại (M-21)" subtitle={`Cập nhật: ${dashboard?.updatedAt ? new Date(dashboard.updatedAt).toLocaleString('vi-VN') : '-'}`}>
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+          <div className="rounded-xl border border-amber-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
             <p className="text-slate-500">Tổng nguyên liệu</p>
             <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">{inventory?.summary.totalIngredients || 0}</p>
           </div>
-          <div className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+          <div className="rounded-xl border border-amber-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
             <p className="text-slate-500">Đang hoạt động</p>
             <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">{inventory?.summary.activeIngredients || 0}</p>
           </div>
@@ -456,7 +535,7 @@ export default function Reports() {
 
         <div className="space-y-3 sm:hidden">
           {(inventory?.stocks || []).slice(0, 15).map((item) => (
-            <div key={item.id} className="rounded-xl border border-sky-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+            <div key={item.id} className="rounded-xl border border-amber-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
               <div className="flex items-center justify-between gap-2">
                 <p className="font-semibold text-slate-900 dark:text-slate-100">{item.name}</p>
                 <span className={`rounded-full px-2 py-0.5 text-xs ${item.isLowStock ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>

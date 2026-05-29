@@ -7,7 +7,7 @@ import { showRealtimeNotification } from '@/utils/notifications'
 import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 import { ChatBubbleLeftRightIcon, ShoppingBagIcon, XMarkIcon, MinusIcon } from '@heroicons/react/24/outline'
 
-type PaymentMode = 'POSTPAY' | 'PREPAY'
+type PaymentMode = 'POST_PAY' | 'ONLINE_PAY'
 type PaymentProvider = 'SEPAY'
 
 interface CustomizationOption {
@@ -26,6 +26,7 @@ interface CustomizationGroup {
 
 interface MenuItem {
   id: string
+  branchMenuItemId?: string
   name: string
   description?: string
   price: number
@@ -99,7 +100,7 @@ function formatSystemChatContent(content: string): string {
 
     const itemCount = Number(meta.items || 0)
     const total = Number(meta.total || 0)
-    return `${tableText} | ${itemCount > 0 ? `${itemCount} món` : 'Chưa có món'} | Tổng tiền ${total.toLocaleString('vi-VN')}đ`
+    return `${tableText} | ${itemCount > 0 ? `${itemCount} món` : 'Chưa có món'} | Tổng tiền ${formatVnd(total)}`
   }
 
   if (raw.startsWith('[CALL_STAFF]')) {
@@ -182,6 +183,41 @@ interface CustomerOfferResponse {
   tier: string
   loyaltyPoints: number
   offers: string[]
+}
+
+interface SpecMenuCategory {
+  id: string
+  name: string
+  emoji?: string
+  sortOrder?: number
+  items: any[]
+}
+
+interface SpecMenuResponse {
+  branchId?: string
+  branchName?: string
+  tableId?: string
+  tableName?: string
+  categories?: SpecMenuCategory[]
+}
+
+interface PublicInvoiceLinkResponse {
+  invoiceId: string
+  invoiceNumber: string
+  url: string
+  token: string
+  expiresAt: string
+}
+
+interface PendingChatMessage {
+  content: string
+  senderName: string
+  createdAt: string
+}
+
+interface MenuRecommendation extends MenuItem {
+  recommendationReason?: string
+  recommendationScore?: number
 }
 
 function normalizeCustomizations(raw: unknown): CustomizationGroup[] {
@@ -285,6 +321,69 @@ const fieldClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60'
 
 const panelClass = 'rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm'
+const subtleActionButtonClass =
+  'inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100'
+
+function normalizeVndAmount(value: unknown): number {
+  const amount = Number(value || 0)
+  if (!Number.isFinite(amount)) return 0
+  if (amount > 0 && amount < 1000 && Number.isInteger(amount)) return amount * 1000
+  return amount
+}
+
+function formatVnd(value: unknown): string {
+  return `${normalizeVndAmount(value).toLocaleString('vi-VN')}đ`
+}
+
+function normalizeVietnameseText(input: unknown): string {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+  const lower = raw.toLowerCase()
+  const map: Record<string, string> = {
+    'bac xiu': 'Bạc xỉu',
+    'ca phe den': 'Cà phê đen',
+    'ca phe sua': 'Cà phê sữa',
+    'ca phe sua da': 'Cà phê sữa đá',
+    'ca phe sua nhieu sua': 'Cà phê sữa nhiều sữa',
+    'ca phe den truyen thong': 'Cà phê đen truyền thống',
+  }
+  return map[lower] || raw
+}
+
+function inferSelectedOptions(menuItem: MenuItem | undefined, selections: CartSelections, note: string) {
+  if (!menuItem) return { note: String(note || '').trim() || undefined }
+  let size: { name: string; priceModifier: number } | undefined
+  const toppings: Array<{ name: string; priceModifier: number }> = []
+
+  ;(menuItem.customizations || []).forEach((group) => {
+    const normalizedLabel = String(group.label || '').toLowerCase()
+    const isSizeGroup = group.type === 'single' && normalizedLabel.includes('size')
+    const isToppingGroup = group.type === 'multi' && normalizedLabel.includes('topping')
+    const selected = selections[group.id]
+
+    if (isSizeGroup && typeof selected === 'string' && selected) {
+      const match = group.options?.find((option) => option.value === selected)
+      if (match) {
+        size = { name: match.label, priceModifier: Number(match.priceDelta || 0) }
+      }
+    }
+
+    if (isToppingGroup && Array.isArray(selected)) {
+      selected.forEach((value) => {
+        const match = group.options?.find((option) => option.value === value)
+        if (match) {
+          toppings.push({ name: match.label, priceModifier: Number(match.priceDelta || 0) })
+        }
+      })
+    }
+  })
+
+  return {
+    ...(size ? { size } : {}),
+    toppings,
+    note: String(note || '').trim() || undefined,
+  }
+}
 
 function trangThaiMonTrongDon(status?: string | null): string {
   switch (status) {
@@ -330,7 +429,7 @@ export default function CustomerMenu() {
   const [cart, setCart] = useState<Record<string, CartItem>>({})
   const [cartDrafts, setCartDrafts] = useState<Record<string, CartDraft>>({})
   const [cartLoaded, setCartLoaded] = useState(false)
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('POSTPAY')
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('POST_PAY')
   const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('SEPAY')
   const [promoCode, setPromoCode] = useState('')
   const [promoPreview, setPromoPreview] = useState<PromotionPreview | null>(null)
@@ -344,6 +443,8 @@ export default function CustomerMenu() {
   const [loadingOrderStatus, setLoadingOrderStatus] = useState(false)
   const [currentPayment, setCurrentPayment] = useState<PaymentStatusResponse | null>(null)
   const [loadingPaymentStatus, setLoadingPaymentStatus] = useState(false)
+  const [publicInvoiceUrl, setPublicInvoiceUrl] = useState('')
+  const [loadingPublicInvoiceUrl, setLoadingPublicInvoiceUrl] = useState(false)
   const [requestingCashPayment, setRequestingCashPayment] = useState(false)
 
   const [staffReason, setStaffReason] = useState('Cần hỗ trợ')
@@ -358,12 +459,16 @@ export default function CustomerMenu() {
   const [chatConnecting, setChatConnecting] = useState(false)
   const [chatCustomerName, setChatCustomerName] = useState('')
   const [chatCustomerPhone, setChatCustomerPhone] = useState('')
+  const [chatSessionId, setChatSessionId] = useState('')
+  const [staffTyping, setStaffTyping] = useState(false)
   const [cartDrawerOpen, setCartDrawerOpen] = useState(false)
 
   const [customerToken, setCustomerToken] = useState('')
   const [customerSession, setCustomerSession] = useState<CustomerSession | null>(null)
   const [customerOffers, setCustomerOffers] = useState<string[]>([])
   const [customerOrderHistory, setCustomerOrderHistory] = useState<OrderStatusResponse[]>([])
+  const [customerRecommendations, setCustomerRecommendations] = useState<MenuRecommendation[]>([])
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false)
   const [customerHistoryOpen, setCustomerHistoryOpen] = useState(false)
   const [expandedHistoryOrderIds, setExpandedHistoryOrderIds] = useState<Record<string, boolean>>({})
   const [customerAuthOpen, setCustomerAuthOpen] = useState(false)
@@ -380,6 +485,9 @@ export default function CustomerMenu() {
   const cartPanelRef = useRef<HTMLDivElement | null>(null)
   const previousOrderStatusRef = useRef('')
   const syncedCompletedOrderIdRef = useRef('')
+  const staffTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingChatFlushRef = useRef(false)
+  const customerTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let ignore = false
@@ -446,19 +554,70 @@ export default function CustomerMenu() {
     }
   }, [qrTableId, qrBranchId, qrTableNumber])
 
+  const normalizeMenuPayload = (payload: any): MenuItem[] => {
+    const fromFlat = (rows: any[]) =>
+      rows.map((item: any) => ({
+        ...item,
+        id: item.menu_item_id || item.id,
+        branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || item.id,
+        name: normalizeVietnameseText(item.name),
+        description: normalizeVietnameseText(item.description),
+        image: item.image || item.image_url || null,
+        price: normalizeVndAmount(item.price),
+        available: item.available ?? item.is_available,
+        category: item.category || item.category_name || 'Khac',
+        customizations: normalizeCustomizations(item.customizations ?? item.custom_options),
+      }))
+
+    if (Array.isArray(payload)) return fromFlat(payload)
+
+    const spec = payload as SpecMenuResponse
+    if (Array.isArray(spec?.categories)) {
+      return spec.categories.flatMap((category) =>
+        (Array.isArray(category.items) ? category.items : []).map((item: any) => ({
+          ...item,
+          id: item.id || item.menu_item_id,
+          branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || item.id,
+          name: normalizeVietnameseText(item.name),
+          description: normalizeVietnameseText(item.description),
+          image: item.image || item.imageUrl || item.image_url || null,
+          price: normalizeVndAmount(item.price),
+          available: item.available ?? item.isAvailable ?? item.is_available,
+          category: category.name || 'Khac',
+          customizations: normalizeCustomizations(item.customizations ?? item.custom_options ?? item.options),
+        })),
+      )
+    }
+
+    return []
+  }
+
   useEffect(() => {
     const loadMenu = async () => {
+      if (resolvingTable) {
+        return
+      }
+
+      if (!tableId) {
+        setMenuItems([])
+        setLoadingMenu(false)
+        return
+      }
+
+      setLoadingMenu(true)
       try {
-        const { data } = await api.get('/orders/menu', {
-          params: {
-            tableId: tableId || undefined,
-            branchId: qrBranchId || undefined,
-          },
-        })
-        const normalized = (Array.isArray(data) ? data : []).map((item: any) => ({
-          ...item,
-          customizations: normalizeCustomizations(item.customizations),
-        }))
+        const request = qrBranchId
+          ? api.get(`/orders/branches/${encodeURIComponent(qrBranchId)}/menu`, {
+              params: { tableId: tableId || undefined },
+            })
+          : api.get('/orders/menu', {
+              params: {
+                tableId,
+                branchId: qrBranchId || undefined,
+              },
+            })
+        const { data } = await request
+        const normalized = normalizeMenuPayload(data)
         setMenuItems(normalized)
       } catch (error: any) {
         toast.error(error.response?.data?.message || 'Không tải được menu')
@@ -467,9 +626,13 @@ export default function CustomerMenu() {
       }
     }
     loadMenu()
-  }, [tableId, qrBranchId])
+  }, [tableId, qrBranchId, resolvingTable])
 
-  const cartStorageKey = useMemo(() => (tableId ? `customer-cart:${tableId}` : ''), [tableId])
+  const cartStorageKey = useMemo(() => {
+    if (!tableId) return ''
+    const branchPart = String(qrBranchId || 'unknown').trim() || 'unknown'
+    return `cart_${branchPart}_${tableId}`
+  }, [tableId, qrBranchId])
   const orderStorageKey = useMemo(() => (tableId ? `customer-last-order:${tableId}` : ''), [tableId])
   const chatProfileStorageKey = useMemo(() => (tableId ? `customer-chat-profile:${tableId}` : ''), [tableId])
   const customerAuthStorageKey = 'customer-auth-session'
@@ -575,6 +738,7 @@ export default function CustomerMenu() {
     setCustomerSession(null)
     setCustomerOffers([])
     setCustomerOrderHistory([])
+    setCustomerRecommendations([])
     setCustomerHistoryOpen(false)
     setExpandedHistoryOrderIds({})
     setCustomerAuthOpen(false)
@@ -632,6 +796,37 @@ export default function CustomerMenu() {
     }
   }
 
+  const loadRecommendations = async () => {
+    if (!tableId && !qrBranchId) {
+      setCustomerRecommendations([])
+      return
+    }
+
+    setLoadingRecommendations(true)
+    try {
+      const params: Record<string, string | number> = { limit: 6 }
+      if (tableId) params.tableId = tableId
+      if (qrBranchId) params.branchId = qrBranchId
+      if (customerSession?.id) params.customerId = customerSession.id
+      else if (customerSession?.phone) params.phone = customerSession.phone
+      else if (customerSession?.email) params.email = customerSession.email
+
+      const { data } = await api.get('/orders/recommendations', { params })
+      const normalized = (Array.isArray(data) ? data : []).map((item: any) => ({
+        ...item,
+        name: normalizeVietnameseText(item.name),
+        description: normalizeVietnameseText(item.description),
+        price: normalizeVndAmount(item.price),
+        customizations: normalizeCustomizations(item.customizations),
+      }))
+      setCustomerRecommendations(normalized)
+    } catch {
+      setCustomerRecommendations([])
+    } finally {
+      setLoadingRecommendations(false)
+    }
+  }
+
   const toggleHistoryOrderDetails = (orderId: string) => {
     setExpandedHistoryOrderIds((prev) => ({
       ...prev,
@@ -643,6 +838,10 @@ export default function CustomerMenu() {
     if (!customerToken || !customerSession?.id) return
     loadCustomerData(customerToken, customerSession)
   }, [customerToken])
+
+  useEffect(() => {
+    loadRecommendations()
+  }, [tableId, qrBranchId, customerSession?.id, customerSession?.phone, customerSession?.email])
 
   useEffect(() => {
     const orderId = String(currentOrder?.id || '')
@@ -744,11 +943,76 @@ export default function CustomerMenu() {
       socket.connect()
     }
     setChatConnecting(true)
-    socket.emit('join', {
+    socket.emit('join-chat', {
       tableId,
+      branchId: qrBranchId,
       customerName,
       customerPhone: customerPhone || undefined,
     })
+  }
+
+  const chatPendingStorageKey = useMemo(() => {
+    if (!tableId) return ''
+    return `customer-chat-pending:${tableId}`
+  }, [tableId])
+
+  const readPendingMessages = (): PendingChatMessage[] => {
+    if (!chatPendingStorageKey) return []
+    try {
+      const raw = localStorage.getItem(chatPendingStorageKey)
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed
+        .map((item) => ({
+          content: String(item?.content || '').trim(),
+          senderName: String(item?.senderName || chatCustomerName || 'Khách'),
+          createdAt: String(item?.createdAt || new Date().toISOString()),
+        }))
+        .filter((item) => item.content.length > 0)
+    } catch {
+      return []
+    }
+  }
+
+  const writePendingMessages = (items: PendingChatMessage[]) => {
+    if (!chatPendingStorageKey) return
+    if (!items.length) {
+      localStorage.removeItem(chatPendingStorageKey)
+      return
+    }
+    localStorage.setItem(chatPendingStorageKey, JSON.stringify(items.slice(-50)))
+  }
+
+  const enqueuePendingMessage = (item: PendingChatMessage) => {
+    const next = [...readPendingMessages(), item]
+    writePendingMessages(next)
+  }
+
+  const flushPendingMessages = () => {
+    if (pendingChatFlushRef.current) return
+    if (!chatSessionId) return
+    const socket = getSocket()
+    if (!socket.connected) return
+    const queue = readPendingMessages()
+    if (!queue.length) return
+    pendingChatFlushRef.current = true
+    queue.forEach((item) => {
+      socket.emit('send-message', {
+        sessionId: chatSessionId,
+        content: item.content,
+        senderType: 'CUSTOMER',
+        senderName: item.senderName,
+      })
+    })
+    writePendingMessages([])
+    pendingChatFlushRef.current = false
+  }
+
+  const onChatClosed = () => {
+    toast.error('Phiên chat đã kết thúc, vui lòng gọi nhân viên')
+    setChatSessionId('')
+    setStaffTyping(false)
   }
 
   useEffect(() => {
@@ -759,18 +1023,30 @@ export default function CustomerMenu() {
       socket.connect()
     }
 
-    const onJoined = (payload: { messages?: ChatMessage[] }) => {
+    const onJoined = (payload: { sessionId?: string; messages?: ChatMessage[] }) => {
+      if (payload?.sessionId) {
+        setChatSessionId(payload.sessionId)
+      }
       setMessages(payload.messages || [])
       setChatConnecting(false)
     }
-    const onNewMessage = (message: ChatMessage) => {
-      setMessages((prev) => [...prev, message])
+    const onNewMessage = (payload: ChatMessage | { message?: ChatMessage }) => {
+      const message = (payload as any)?.message ? (payload as any).message as ChatMessage : payload as ChatMessage
+      setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]))
       if (message.senderType === 'STAFF') {
         const isSystem = String(message.senderName || '').trim().toUpperCase() === 'SYSTEM'
         showRealtimeNotification(
           isSystem ? 'Hệ thống' : message.senderName || 'Nhân viên',
           isSystem ? formatSystemChatContent(message.content) : message.content,
         )
+      }
+    }
+    const onTyping = (payload: { senderType?: string; isTyping?: boolean }) => {
+      if (String(payload?.senderType || '').toUpperCase() !== 'STAFF') return
+      setStaffTyping(Boolean(payload?.isTyping))
+      if (staffTypingTimerRef.current) clearTimeout(staffTypingTimerRef.current)
+      if (payload?.isTyping) {
+        staffTypingTimerRef.current = setTimeout(() => setStaffTyping(false), 2000)
       }
     }
     const onSocketError = (payload: { message?: string }) => {
@@ -780,8 +1056,10 @@ export default function CustomerMenu() {
       }
     }
 
-    socket.on('joined', onJoined)
-    socket.on('new-message', onNewMessage)
+    socket.on('chat-joined', onJoined)
+    socket.on('message-received', onNewMessage)
+    socket.on('chat-closed', onChatClosed)
+    socket.on('chat-typing', onTyping)
     socket.on('error', onSocketError)
 
     if (chatCustomerName.trim()) {
@@ -793,15 +1071,37 @@ export default function CustomerMenu() {
     }
 
     return () => {
-      socket.off('joined', onJoined)
-      socket.off('new-message', onNewMessage)
+      socket.off('chat-joined', onJoined)
+      socket.off('message-received', onNewMessage)
+      socket.off('chat-closed', onChatClosed)
+      socket.off('chat-typing', onTyping)
       socket.off('error', onSocketError)
       disconnectSocket()
       setChatConnecting(false)
+      if (staffTypingTimerRef.current) clearTimeout(staffTypingTimerRef.current)
     }
-  }, [chatOpen, tableId])
+  }, [chatOpen, tableId, qrBranchId, chatCustomerName, chatCustomerPhone])
+
+  useEffect(() => {
+    flushPendingMessages()
+  }, [chatSessionId, chatOpen])
 
   const menuMap = useMemo(() => new Map(menuItems.map((item) => [item.id, item])), [menuItems])
+
+  useEffect(() => {
+    if (!cartLoaded) return
+    if (!menuMap.size) return
+    setCart((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([, line]) => menuMap.has(String(line?.menuItemId || ''))),
+      )
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next
+    })
+  }, [cartLoaded, menuMap])
+  const recommendationItems = useMemo(
+    () => customerRecommendations.filter((item) => menuMap.has(item.id)),
+    [customerRecommendations, menuMap],
+  )
   const categories = useMemo(() => ['ALL', ...new Set(menuItems.map((item) => item.category))], [menuItems])
 
   const filteredItems = useMemo(() => {
@@ -1065,9 +1365,25 @@ export default function CustomerMenu() {
         payment = verified as PaymentStatusResponse
       }
       setCurrentPayment(payment)
+      if (payment?.status === 'PAID') {
+        setLoadingPublicInvoiceUrl(true)
+        try {
+          const { data: invoiceLink } = await api.get<PublicInvoiceLinkResponse>(
+            `/public/orders/${orderId}/invoice-link`,
+          )
+          setPublicInvoiceUrl(String(invoiceLink?.url || '').trim())
+        } catch {
+          setPublicInvoiceUrl('')
+        } finally {
+          setLoadingPublicInvoiceUrl(false)
+        }
+      } else {
+        setPublicInvoiceUrl('')
+      }
     } catch (error: any) {
       if (error.response?.status === 404) {
         setCurrentPayment(null)
+        setPublicInvoiceUrl('')
       } else {
         toast.error(error.response?.data?.message || 'Khong tai duoc trang thai thanh toan')
       }
@@ -1097,15 +1413,16 @@ export default function CustomerMenu() {
         ),
       )
 
-      const { data } = await api.get('/orders/promotions/validate', {
-        params: {
-          code,
-          subtotal: cartTotal,
-          menuItemIds: selectedMenuItemIds.join(','),
-          tableId: tableId || undefined,
-          branchId: qrBranchId || undefined,
-        },
+      const { data } = await api.post('/discount/validate', {
+        code,
+        subtotal: cartTotal,
+        menuItemIds: selectedMenuItemIds,
+        tableId: tableId || undefined,
+        branchId: qrBranchId || undefined,
       })
+      if (!data?.valid) {
+        throw new Error(String(data?.message || 'Ma khuyen mai khong hop le'))
+      }
       setPromoPreview({
         code: String(data?.code || code).toUpperCase(),
         description: data?.description || undefined,
@@ -1151,6 +1468,7 @@ export default function CustomerMenu() {
     if (!currentOrderId) {
       setCurrentOrder(null)
       setCurrentPayment(null)
+      setPublicInvoiceUrl('')
       return
     }
     fetchOrderStatus(currentOrderId)
@@ -1172,10 +1490,13 @@ export default function CustomerMenu() {
       .filter((cartItem) => cartItem.quantity > 0)
       .map((cartItem) => {
         const menuItem = menuMap.get(cartItem.menuItemId)
+        const selectedOptions = inferSelectedOptions(menuItem, cartItem.selections, cartItem.note || '')
         return {
+          branchMenuItemId: menuItem?.branchMenuItemId || undefined,
           menuItemId: cartItem.menuItemId,
           quantity: cartItem.quantity,
           note: cartItem.note || undefined,
+          selectedOptions,
           options: JSON.stringify({
             selections: cartItem.selections,
             extraAmount: menuItem ? getCustomizationDelta(menuItem, cartItem.selections) : 0,
@@ -1201,33 +1522,53 @@ export default function CustomerMenu() {
         await fetchOrderStatus(currentOrderId)
         await fetchPaymentStatus(currentOrderId)
       } else {
-        const { data: order } = await api.post('/orders', {
-          tableId,
-          branchId: qrBranchId || undefined,
-          customerId: customerSession?.id || undefined,
-          customerEmail: customerSession?.email || undefined,
-          customerName: customerSession?.name || chatCustomerName || tableName,
-          customerPhone: customerSession?.phone || chatCustomerPhone || undefined,
-          promoCode: promoPreview?.code || promoCode.trim() || undefined,
-          items,
-        })
+        const idempotencyKey = `cart_${String(qrBranchId || 'unknown').trim() || 'unknown'}_${tableId}_${Date.now()}`
+        const { data: order } = await api.post(
+          '/orders',
+          {
+            tableId,
+            branchId: qrBranchId || undefined,
+            customerId: customerSession?.id || undefined,
+            customerEmail: customerSession?.email || undefined,
+            customerName: customerSession?.name || chatCustomerName || tableName,
+            customerPhone: customerSession?.phone || chatCustomerPhone || undefined,
+            paymentMethod: paymentMode,
+            discountCode: promoPreview?.code || promoCode.trim() || undefined,
+            promoCode: promoPreview?.code || promoCode.trim() || undefined,
+            items,
+          },
+          { headers: { 'Idempotency-Key': idempotencyKey } },
+        )
         const newOrderId = String(order.id)
         setCurrentOrderId(newOrderId)
         if (orderStorageKey) localStorage.setItem(orderStorageKey, newOrderId)
 
-        if (paymentMode === 'PREPAY') {
-          const { data: payment } = await api.post(
-            '/v1/payments',
-            {
+        if (paymentMode === 'ONLINE_PAY') {
+          let payment: any = null
+          try {
+            const paymentInit = await api.post('/payments/online/init', {
               orderId: newOrderId,
-              amount: Number(order.totalAmount),
               provider: paymentProvider,
-              tableId,
-              branchId: qrBranchId || undefined,
-              customerName: customerSession?.name || tableName,
-            },
-            customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
-          )
+            })
+            const redirectUrl = String(paymentInit.data?.redirectUrl || '').trim()
+            if (redirectUrl) {
+              window.location.href = redirectUrl
+            }
+          } catch {
+            const fallback = await api.post(
+              '/v1/payments',
+              {
+                orderId: newOrderId,
+                amount: Number(order.totalAmount),
+                provider: paymentProvider,
+                tableId,
+                branchId: qrBranchId || undefined,
+                customerName: customerSession?.name || tableName,
+              },
+              customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
+            )
+            payment = fallback.data
+          }
           setCurrentPayment(payment)
           toast.success('Da tao don va hien ma QR thanh toan')
         } else {
@@ -1264,13 +1605,46 @@ export default function CustomerMenu() {
       setChatNeedProfile(true)
       return
     }
+    const content = chatText.trim()
     const socket = getSocket()
+    if (!socket.connected || !chatSessionId) {
+      enqueuePendingMessage({
+        content,
+        senderName: chatCustomerName.trim(),
+        createdAt: new Date().toISOString(),
+      })
+      toast('Tin nhắn sẽ được gửi khi kết nối lại')
+      setChatText('')
+      return
+    }
     socket.emit('send-message', {
-      content: chatText,
+      sessionId: chatSessionId || undefined,
+      content,
       senderType: 'CUSTOMER',
       senderName: chatCustomerName.trim(),
     })
     setChatText('')
+  }
+
+  const emitCustomerTyping = (value: string) => {
+    setChatText(value)
+    const socket = getSocket()
+    if (!socket.connected || !chatSessionId) return
+    socket.emit('typing', {
+      sessionId: chatSessionId,
+      senderType: 'CUSTOMER',
+      senderName: chatCustomerName.trim() || 'Khách',
+      isTyping: value.trim().length > 0,
+    })
+    if (customerTypingTimerRef.current) clearTimeout(customerTypingTimerRef.current)
+    customerTypingTimerRef.current = setTimeout(() => {
+      socket.emit('typing', {
+        sessionId: chatSessionId,
+        senderType: 'CUSTOMER',
+        senderName: chatCustomerName.trim() || 'Khách',
+        isTyping: false,
+      })
+    }, 1200)
   }
 
   const toggleChatWidget = () => {
@@ -1322,7 +1696,7 @@ export default function CustomerMenu() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-3 pb-28 pt-4 sm:px-6 sm:pt-6">
+    <div className="mx-auto max-w-7xl px-3 pb-36 pt-4 sm:px-6 sm:pb-28 sm:pt-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{resolvingTable ? 'Đang xác định bàn...' : `Thực đơn ${tableName}`}</h1>
@@ -1332,9 +1706,9 @@ export default function CustomerMenu() {
           <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-800">
             {cartItemCount} món trong giỏ
           </span>
-          <span className="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
-            Tạm tính {payableCartTotal.toLocaleString()}đ
-          </span>
+            <span className="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
+              Tạm tính {formatVnd(payableCartTotal)}
+            </span>
           {currentOrder && (
             <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-700">
               Đơn hiện tại: {trangThaiDonHang(currentOrder.status)}
@@ -1343,7 +1717,7 @@ export default function CustomerMenu() {
           <button
             type="button"
             onClick={() => setCartDrawerOpen(true)}
-            className="fixed right-4 top-4 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-600 text-white shadow-md"
+            className="fixed right-4 top-4 z-40 hidden h-12 w-12 items-center justify-center rounded-full bg-amber-600 text-white shadow-md lg:inline-flex"
             aria-label="Mở giỏ hàng"
           >
             <ShoppingBagIcon className="h-5 w-5" />
@@ -1356,7 +1730,7 @@ export default function CustomerMenu() {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm sm:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-sky-100 bg-white/92 p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-4 sm:p-4">
         <input
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
@@ -1374,7 +1748,8 @@ export default function CustomerMenu() {
             </option>
           ))}
         </select>
-        <div className="flex items-center justify-end text-sm text-slate-500">{filteredItems.length} món hiển thị</div>
+        <div className="flex items-center justify-start text-sm text-slate-500">{filteredItems.length} món hiển thị</div>
+        <div className="hidden items-center justify-end text-xs text-slate-500 lg:flex">Chọn danh mục để lọc nhanh</div>
       </div>
       <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
         {categories.map((category) => (
@@ -1397,44 +1772,44 @@ export default function CustomerMenu() {
         <div className="lg:col-span-2">
           {loadingMenu && <p>Đang tải menu...</p>}
           {!loadingMenu && (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
               {filteredItems.map((item) => {
                 const draft = getDraftForMenuItem(item.id)
                 const selectedCount = cartCountByMenuItem.get(item.id) || 0
                 return (
-                  <div key={item.id} className="rounded-2xl border border-sky-100 bg-white/92 p-3 shadow-sm">
+                  <div key={item.id} className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-md shadow-slate-100">
                     <img
                       src={item.image || `https://placehold.co/400x280?text=${encodeURIComponent(item.name)}`}
                       alt={item.name}
-                      className="h-28 w-full rounded-xl object-cover"
+                      className="h-36 w-full rounded-xl object-cover sm:h-32"
                     />
                     <div className="mt-2 flex items-start justify-between gap-2">
                       <p className="line-clamp-2 text-sm font-semibold text-slate-900">{item.name}</p>
-                      <span className="shrink-0 text-sm font-bold text-sky-700">{item.price.toLocaleString()}đ</span>
+                      <span className="shrink-0 text-sm font-bold text-sky-700">{formatVnd(item.price)}</span>
                     </div>
                     <p className="mt-1 line-clamp-2 text-xs text-slate-500">{item.description || '---'}</p>
-                    <div className="mt-3 flex items-center justify-between gap-2">
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => increase(item.id)}
-                        className="inline-flex min-h-10 items-center rounded-xl bg-amber-600 px-3 text-sm font-semibold text-white disabled:opacity-60"
+                        className={`${subtleActionButtonClass} min-w-20 px-3 py-2 text-xs disabled:opacity-60`}
                         disabled={!item.available}
                       >
                         Thêm
                       </button>
-                      <div className="flex items-center gap-2">
+                      <div className="ml-auto flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => decrease(item.id)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sm"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-base text-slate-700"
                         >
-                          -
+                          <MinusIcon className="h-4 w-4" />
                         </button>
-                        <span className="w-6 text-center text-sm font-semibold">{selectedCount}</span>
+                        <span className="w-7 text-center text-sm font-semibold">{selectedCount}</span>
                         <button
                           type="button"
                           onClick={() => increase(item.id)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sm"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-base text-slate-700"
                           disabled={!item.available}
                         >
                           +
@@ -1443,8 +1818,11 @@ export default function CustomerMenu() {
                     </div>
 
                     {(item.customizations || []).length > 0 && (
-                      <details className="mt-2 rounded-xl border border-sky-100 bg-sky-50/40 p-2">
-                        <summary className="cursor-pointer text-xs font-semibold text-sky-700">Tùy chọn</summary>
+                      <details className="group mt-2 rounded-xl border border-sky-100 bg-sky-50/40 p-2">
+                        <summary className="cursor-pointer list-none text-xs font-semibold text-sky-700">
+                          <span className="group-open:hidden">▶ Chọn size / topping</span>
+                          <span className="hidden group-open:inline">▼ Ẩn tùy chọn</span>
+                        </summary>
                         <div className="mt-2 space-y-2">
                           {(item.customizations || []).map((group) => (
                             <div key={`${item.id}-${group.id}`}>
@@ -1503,9 +1881,9 @@ export default function CustomerMenu() {
                     <textarea
                       value={draft.note}
                       onChange={(e) => updateNote(item.id, e.target.value)}
-                      className={`${fieldClass} mt-2`}
-                      rows={2}
-                      placeholder="Ghi chú"
+                      className={`${fieldClass} mt-2 min-h-0 py-1.5 text-xs`}
+                      rows={1}
+                      placeholder="Ghi chú ngắn (tùy chọn)"
                     />
                   </div>
                 )
@@ -1576,7 +1954,7 @@ export default function CustomerMenu() {
                   </div>
                   <div className="rounded bg-emerald-50 p-2">
                     <p className="text-gray-500">Chi tieu</p>
-                    <p className="font-semibold text-emerald-700">{customerSession.totalSpent.toLocaleString()}đ</p>
+                    <p className="font-semibold text-emerald-700">{formatVnd(customerSession.totalSpent)}</p>
                   </div>
                 </div>
                 {loadingCustomerData && <p className="text-xs text-gray-500">Dang tai du lieu thanh vien...</p>}
@@ -1607,7 +1985,7 @@ export default function CustomerMenu() {
                         <div key={historyOrder.id} className="rounded bg-gray-50 px-2 py-1">
                           <div className="flex items-center justify-between gap-2">
                             <span>{maDonHangNgan(historyOrder.id)}</span>
-                            <span>{historyOrder.totalAmount.toLocaleString()}đ</span>
+                            <span>{formatVnd(historyOrder.totalAmount)}</span>
                             <span className="font-semibold">{trangThaiDonHang(historyOrder.status)}</span>
                           </div>
                           <p className="mt-1 text-[11px] text-gray-500">
@@ -1618,6 +1996,46 @@ export default function CustomerMenu() {
                     </div>
                   </div>
                 )}
+                <div className="rounded border border-gray-100 p-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-gray-700">Gợi ý cho bạn</p>
+                    <button
+                      type="button"
+                      onClick={loadRecommendations}
+                      disabled={loadingRecommendations}
+                      className="rounded border border-sky-200 px-2 py-1 text-[11px] font-medium text-sky-700 disabled:opacity-60"
+                    >
+                      {loadingRecommendations ? 'Đang tải...' : 'Làm mới'}
+                    </button>
+                  </div>
+                  {loadingRecommendations && <p className="mt-1 text-gray-500">Đang tải gợi ý...</p>}
+                  {!loadingRecommendations && recommendationItems.length === 0 && (
+                    <p className="mt-1 text-gray-500">
+                      Chưa có gợi ý phù hợp. Hãy đặt món để hệ thống học sở thích của bạn.
+                    </p>
+                  )}
+                  {!loadingRecommendations && recommendationItems.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {recommendationItems.slice(0, 4).map((item) => (
+                        <div key={`recommend-${item.id}`} className="flex items-center justify-between gap-2 rounded bg-sky-50/60 px-2 py-1.5">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-slate-800">{item.name}</p>
+                            <p className="text-[11px] text-slate-500">
+                              {item.recommendationReason === 'history_preference' ? 'Theo lịch sử mua hàng' : 'Đang phổ biến'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => increase(item.id)}
+                            className="shrink-0 rounded-lg border border-amber-200 bg-white px-2 py-1 text-[11px] font-semibold text-amber-700"
+                          >
+                            + Thêm
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1642,7 +2060,7 @@ export default function CustomerMenu() {
                       <span>
                         {entry.quantity}x {item.name}
                       </span>
-                      <span>{((item.price + delta) * entry.quantity).toLocaleString()}đ</span>
+                      <span>{formatVnd((item.price + delta) * entry.quantity)}</span>
                     </div>
                     {detailLines.length > 0 && (
                       <p className="mt-1 text-xs text-gray-500">Chi tiết: {detailLines.join(' | ')}</p>
@@ -1663,22 +2081,22 @@ export default function CustomerMenu() {
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setPaymentMode('POSTPAY')}
+                  onClick={() => setPaymentMode('POST_PAY')}
                   disabled={editingCurrentOrder}
-                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'POSTPAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
+                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'POST_PAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
                 >
                   Trả sau
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPaymentMode('PREPAY')}
+                  onClick={() => setPaymentMode('ONLINE_PAY')}
                   disabled={editingCurrentOrder}
-                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'PREPAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
+                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'ONLINE_PAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
                 >
                   Trả trước
                 </button>
               </div>
-              {paymentMode === 'PREPAY' && (
+              {paymentMode === 'ONLINE_PAY' && (
                 <select
                   value={paymentProvider}
                   onChange={(e) => setPaymentProvider(e.target.value as PaymentProvider)}
@@ -1710,7 +2128,7 @@ export default function CustomerMenu() {
               </div>
               {promoPreview && (
                 <p className="mt-2 text-xs text-emerald-700">
-                  Đã áp dụng {promoPreview.code}: -{promoPreview.discountAmount.toLocaleString()}đ
+                  Đã áp dụng {promoPreview.code}: -{formatVnd(promoPreview.discountAmount)}
                 </p>
               )}
             </div>
@@ -1718,15 +2136,15 @@ export default function CustomerMenu() {
             <div className="mt-3 space-y-1 border-t pt-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-gray-600">Tạm tính</span>
-                <span>{cartTotal.toLocaleString()}đ</span>
+                <span>{formatVnd(cartTotal)}</span>
               </div>
               <div className="flex items-center justify-between text-emerald-700">
                 <span>Khuyến mãi</span>
-                <span>-{previewDiscount.toLocaleString()}đ</span>
+                <span>-{formatVnd(previewDiscount)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="font-semibold">Tong</span>
-                <span className="font-bold text-amber-700">{payableCartTotal.toLocaleString()}đ</span>
+                <span className="font-bold text-amber-700">{formatVnd(payableCartTotal)}</span>
               </div>
             </div>
             <button
@@ -1738,7 +2156,7 @@ export default function CustomerMenu() {
                 ? 'Đang gửi...'
                 : editingCurrentOrder
                   ? 'Cập nhật đơn hàng'
-                  : paymentMode === 'PREPAY'
+                  : paymentMode === 'ONLINE_PAY'
                     ? 'Đặt món và thanh toán'
                     : 'Gửi đơn chờ xác nhận'}
             </button>
@@ -1810,23 +2228,23 @@ export default function CustomerMenu() {
                 </div>
                 {typeof currentOrder.subtotalAmount === 'number' && (
                   <p>
-                    Tạm tính: <span className="font-semibold">{currentOrder.subtotalAmount.toLocaleString()}đ</span>
+                    Tạm tính: <span className="font-semibold">{formatVnd(currentOrder.subtotalAmount)}</span>
                   </p>
                 )}
                 {!!currentOrder.discountAmount && currentOrder.discountAmount > 0 && (
                   <p className="text-emerald-700">
                     Giảm giá {currentOrder.promotionCode ? `(${currentOrder.promotionCode})` : ''}:{' '}
-                    <span className="font-semibold">-{currentOrder.discountAmount.toLocaleString()}đ</span>
+                    <span className="font-semibold">-{formatVnd(currentOrder.discountAmount)}</span>
                   </p>
                 )}
                 <p>
-                  Tổng thanh toán: <span className="font-semibold">{currentOrder.totalAmount.toLocaleString()}đ</span>
+                  Tổng thanh toán: <span className="font-semibold">{formatVnd(currentOrder.totalAmount)}</span>
                 </p>
                 {currentOrder.status === 'PENDING' && !currentPayment && !loadingPaymentStatus && (
                   <button
                     type="button"
                     onClick={populateCartFromCurrentOrder}
-                    className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
+                    className="mt-2 rounded border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700"
                   >
                     Sửa món trong đơn
                   </button>
@@ -1899,6 +2317,21 @@ export default function CustomerMenu() {
                             )}
                           </div>
                         )}
+                      {currentPayment.status === 'PAID' && (
+                        <div className="pt-1">
+                          {loadingPublicInvoiceUrl && <p className="text-gray-500">Đang tạo link hóa đơn...</p>}
+                          {!loadingPublicInvoiceUrl && publicInvoiceUrl && (
+                            <a
+                              href={publicInvoiceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-block rounded border border-sky-300 bg-sky-50 px-2 py-1 text-sky-700"
+                            >
+                              Xem hóa đơn
+                            </a>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1949,6 +2382,22 @@ export default function CustomerMenu() {
             </button>
           </div>
           </div>
+        </div>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-sky-100 bg-white/95 px-3 py-2 backdrop-blur lg:hidden">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs text-slate-500">{cartItemCount} món trong giỏ</p>
+            <p className="truncate text-sm font-bold text-slate-900">Tạm tính {formatVnd(payableCartTotal)}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCartDrawerOpen(true)}
+            className="inline-flex min-h-11 items-center rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white"
+          >
+            Xem giỏ hàng
+          </button>
         </div>
       </div>
 
@@ -2011,7 +2460,7 @@ export default function CustomerMenu() {
                           <p className="text-xs text-gray-500">{dinhDangThoiGianDon(historyOrder.createdAt)}</p>
                         </div>
                         <div className="text-right">
-                          <p className="font-semibold text-amber-700">{historyOrder.totalAmount.toLocaleString()}đ</p>
+                          <p className="font-semibold text-amber-700">{formatVnd(historyOrder.totalAmount)}</p>
                           <p className="text-xs font-medium text-slate-700">{trangThaiDonHang(historyOrder.status)}</p>
                         </div>
                       </div>
@@ -2271,7 +2720,7 @@ export default function CustomerMenu() {
                   <div className="mt-2 flex gap-2">
                     <input
                       value={chatText}
-                      onChange={(e) => setChatText(e.target.value)}
+                      onChange={(e) => emitCustomerTyping(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendChat()}
                       className={`${fieldClass} flex-1`}
                       placeholder="Nhập tin nhắn..."
@@ -2280,6 +2729,7 @@ export default function CustomerMenu() {
                       Gửi
                     </button>
                   </div>
+                  {staffTyping && <p className="mt-1 text-xs text-slate-500">Nhân viên đang gõ...</p>}
                 </>
               )}
             </>

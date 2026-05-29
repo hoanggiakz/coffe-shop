@@ -17,6 +17,11 @@ enum PaymentStatus {
   CANCELLED
 }
 
+enum InvoiceStatus {
+  ISSUED
+  VOIDED
+}
+
 model Payment {
   id        String         @id @default(cuid())
   orderId   String         @unique
@@ -31,11 +36,63 @@ model Payment {
 
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
+  invoices  Invoice[]
 
   @@map("payments")
   @@index([orderId])
   @@index([status])
   @@index([provider])
+}
+
+model Invoice {
+  id                   String        @id @default(cuid())
+  branchId             String        @map("branch_id")
+  orderId              String        @unique @map("order_id")
+  invoiceNumber        String        @unique @map("invoice_number")
+  issueDate            DateTime      @default(now()) @map("issue_date")
+  customerName         String?       @map("customer_name")
+  customerPhone        String?       @map("customer_phone")
+  subtotal             Decimal       @db.Decimal(10, 2)
+  discount             Decimal       @default(0) @db.Decimal(10, 2)
+  taxRate              Decimal       @default(0) @db.Decimal(5, 2) @map("tax_rate")
+  taxAmount            Decimal       @default(0) @db.Decimal(10, 2) @map("tax_amount")
+  totalAmount          Decimal       @db.Decimal(10, 2) @map("total_amount")
+  paymentMethod        String        @map("payment_method")
+  paymentTransactionId String?       @map("payment_transaction_id")
+  status               InvoiceStatus @default(ISSUED)
+  voidReason           String?       @map("void_reason")
+  voidedAt             DateTime?     @map("voided_at")
+  createdBy            String?       @map("created_by")
+  pdfUrl               String?       @map("pdf_url")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+
+  payment Payment? @relation(fields: [paymentTransactionId], references: [id], onDelete: SetNull)
+
+  @@map("invoice")
+  @@index([branchId, issueDate])
+  @@index([branchId, status])
+}
+
+model InvoiceSequence {
+  id            String   @id @default(cuid())
+  branchId      String   @map("branch_id")
+  year          Int
+  month         Int
+  currentNumber Int      @default(1) @map("current_number")
+
+  @@map("invoice_sequence")
+  @@unique([branchId, year, month])
+}
+
+model BranchTaxConfig {
+  id             String   @id @default(cuid())
+  branchId       String   @unique @map("branch_id")
+  taxRate        Decimal  @default(0) @db.Decimal(5, 2) @map("tax_rate")
+  isTaxInclusive Boolean  @default(false) @map("is_tax_inclusive")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("branch_tax_config")
 }
 
 model PaymentRelayEvent {

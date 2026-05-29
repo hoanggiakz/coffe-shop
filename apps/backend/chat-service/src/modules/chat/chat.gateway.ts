@@ -1,39 +1,28 @@
 import {
-  WebSocketGateway,
-  SubscribeMessage,
-  MessageBody,
-  WebSocketServer,
   ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
 } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
+import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
 
-export type StaffNotificationType =
-  | 'ORDER_NEW'
-  | 'CALL_STAFF'
-  | 'CHAT_MESSAGE'
-  | 'CHAT_OPENED'
-  | 'KDS_ITEM_STATUS'
-  | 'KDS_ORDER_READY'
-  | 'LOW_STOCK';
-
-export interface StaffNotificationPayload {
-  id: string;
-  type: StaffNotificationType;
+export interface StaffNotificationInput {
+  type: 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY' | 'LOW_STOCK';
   title: string;
   message: string;
+  branchId?: string;
   chatId?: string;
   tableId?: string;
   messageId?: string;
   orderId?: string;
-  createdAt: string;
+  id?: string;
+  createdAt?: string;
 }
-
-export type StaffNotificationInput = Omit<StaffNotificationPayload, 'id' | 'createdAt'> &
-  Partial<Pick<StaffNotificationPayload, 'id' | 'createdAt'>>;
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -41,281 +30,290 @@ export type StaffNotificationInput = Omit<StaffNotificationPayload, 'id' | 'crea
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
-  private logger = new Logger('ChatGateway');
+  private readonly logger = new Logger('ChatGateway');
+  private readonly customerRateLimitWindowMs = 60_000;
+  private readonly customerRateLimitMax = 10;
+  private readonly customerRateMap = new Map<string, number[]>();
 
-  constructor(private chatService: ChatService) {}
+  constructor(private readonly chatService: ChatService) {}
 
-  async handleConnection(@ConnectedSocket() client: Socket) {
+  handleConnection(client: Socket) {
     this.logger.log(`Client ${client.id} connected`);
   }
 
-  handleDisconnect(@ConnectedSocket() client: Socket) {
+  handleDisconnect(client: Socket) {
     this.logger.log(`Client ${client.id} disconnected`);
   }
 
   @SubscribeMessage('join-staff')
   handleJoinStaff(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data?: { staffId?: string; staffName?: string },
+    @MessageBody() data?: { staffId?: string; staffName?: string; branchId?: string; role?: string },
   ) {
     client.join('staff:global');
+    const branchId = String(data?.branchId || '').trim();
+    if (branchId) {
+      client.join(this.staffBranchRoom(branchId));
+      client.data.branchId = branchId;
+    }
     client.data.isStaff = true;
     client.data.staffId = data?.staffId;
     client.data.staffName = data?.staffName;
-    client.emit('joined-staff', { room: 'staff:global' });
-    this.logger.log(`Staff client ${client.id} joined staff:global`);
+    client.data.role = String(data?.role || '').toUpperCase();
+    client.emit('joined-staff', {
+      room: 'staff:global',
+      branchRoom: branchId ? this.staffBranchRoom(branchId) : null,
+    });
   }
 
-  // Client gửi { tableId, customerName?, customerPhone?, senderType? } để join phòng
-  @SubscribeMessage('join')
-  async handleJoin(
-    @MessageBody() data: { tableId: string; customerName?: string; customerPhone?: string; senderType?: 'CUSTOMER' | 'STAFF' },
+  @SubscribeMessage('join-chat')
+  async handleJoinChat(
     @ConnectedSocket() client: Socket,
+    @MessageBody() data: { tableId: string; branchId: string; customerName?: string; customerPhone?: string },
   ) {
-    try {
-      const tableId = String(data?.tableId || '').trim();
-      if (!tableId) {
-        client.emit('error', { message: 'Thieu tableId de mo chat' });
-        return;
-      }
+    const tableId = String(data?.tableId || '').trim();
+    const branchId = String(data?.branchId || '').trim();
 
-      const chat = await this.chatService.getOrCreateChat(
-        tableId, data.customerName, data.customerPhone,
-      );
-      const room = this.chatRoom(tableId);
-      const legacyRoom = this.legacyTableRoom(tableId);
-      client.join(room);
-      // Backward compatibility for existing consumers that still expect `table:{tableId}`.
-      client.join(legacyRoom);
-      client.data.tableId = tableId;
-      client.data.chatId = chat.id;
-      client.emit('joined', {
-        chatId: chat.id,
-        room,
-        messages: (chat as any).messages ?? [],
+    if (!tableId || !branchId) {
+      client.emit('error', { message: 'Thiếu tableId hoặc branchId' });
+      return;
+    }
+
+    const session = await this.chatService.getOrCreateOpenSession({
+      tableId,
+      branchId,
+      customerName: data.customerName,
+      customerPhone: data.customerPhone,
+    });
+
+    const room = this.chatRoom(session.id);
+    client.join(room);
+    client.data.sessionId = session.id;
+    client.data.tableId = tableId;
+    client.data.branchId = branchId;
+
+    const messages = Array.isArray((session as any).messages) ? (session as any).messages : [];
+    client.emit('chat-joined', { sessionId: session.id, messages });
+    client.emit('joined', { chatId: session.id, room, messages });
+
+    if (messages.length === 0) {
+      this.server.to(this.staffBranchRoom(branchId)).emit('new-message', {
+        sessionId: session.id,
+        tableId,
+        preview: `Bàn ${tableId} vừa mở chat`,
       });
-
-      const isStaffJoin = data?.senderType === 'STAFF' || client.data.isStaff === true;
-      const hasMessages = Array.isArray((chat as any).messages) && (chat as any).messages.length > 0;
-      if (!isStaffJoin && !hasMessages) {
-        this.emitStaffNotification({
-          id: `chat-opened:${chat.id}`,
-          type: 'CHAT_OPENED',
-          title: 'Khách mở chat',
-          message: `Bàn ${tableId} vừa mở phiên chat hỗ trợ`,
-          chatId: chat.id,
-          tableId,
-          createdAt: new Date().toISOString(),
-        });
-      }
-
-      this.logger.log(`Client ${client.id} joined ${room} chat:${chat.id}`);
-    } catch (err: any) {
-      client.emit('error', { message: err.message || 'Không thể join phòng' });
     }
   }
 
-  // Client gửi tin nhắn { content, senderType, senderName, senderId? }
+  @SubscribeMessage('join')
+  async handleJoinLegacy(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { tableId: string; branchId?: string; customerName?: string; customerPhone?: string; senderType?: 'CUSTOMER' | 'STAFF' },
+  ) {
+    const branchId = String(data?.branchId || client.data.branchId || '').trim();
+    if (!branchId) {
+      client.emit('error', { message: 'Thiếu branchId' });
+      return;
+    }
+
+    await this.handleJoinChat(client, {
+      tableId: data.tableId,
+      branchId,
+      customerName: data.customerName,
+      customerPhone: data.customerPhone,
+    });
+  }
+
+  @SubscribeMessage('join-chat-room')
+  async handleJoinChatRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { sessionId: string },
+  ) {
+    const sessionId = String(data?.sessionId || '').trim();
+    if (!sessionId) {
+      client.emit('error', { message: 'Thiếu sessionId' });
+      return;
+    }
+
+    const session = await this.chatService.getSessionById(sessionId);
+    if (!session) {
+      client.emit('error', { message: 'Không tìm thấy phiên chat' });
+      return;
+    }
+
+    if (client.data.isStaff) {
+      const role = String(client.data.role || '').toUpperCase();
+      if (role !== 'ADMIN' && String(client.data.branchId || '').trim() !== session.branchId) {
+        client.emit('error', { message: 'Không có quyền truy cập chat của chi nhánh khác' });
+        return;
+      }
+    }
+
+    client.join(this.chatRoom(session.id));
+    client.data.sessionId = session.id;
+    client.data.tableId = session.tableId;
+    client.data.branchId = session.branchId;
+  }
+
   @SubscribeMessage('send-message')
   async handleSendMessage(
-    @MessageBody() data: {
-      content: string;
-      senderType: 'CUSTOMER' | 'STAFF';
-      senderName: string;
-      senderId?: string;
-    },
     @ConnectedSocket() client: Socket,
+    @MessageBody() data: { sessionId?: string; content: string; senderType: 'CUSTOMER' | 'STAFF'; senderName: string; senderId?: string },
   ) {
-    try {
-      const content = String(data?.content || '').trim();
-      if (!content) {
-        client.emit('error', { message: 'Tin nhan khong duoc rong' });
+    const sessionId = String(data?.sessionId || client.data.sessionId || '').trim();
+    const content = String(data?.content || '').trim();
+    if (!sessionId || !content) {
+      client.emit('error', { message: 'Thiếu sessionId hoặc nội dung' });
+      return;
+    }
+
+    if (String(data.senderType).toUpperCase() === 'CUSTOMER' && !this.allowCustomerMessage(sessionId)) {
+      client.emit('error', { message: 'Bạn đã gửi quá nhanh, vui lòng thử lại sau' });
+      return;
+    }
+
+    const session = await this.chatService.getSessionById(sessionId);
+    if (!session) {
+      client.emit('error', { message: 'Không tìm thấy phiên chat' });
+      return;
+    }
+
+    if (String(data.senderType).toUpperCase() === 'STAFF') {
+      if (!client.data.isStaff) {
+        client.emit('error', { message: 'Thiếu xác thực nhân viên' });
         return;
       }
-
-      const chatId = client.data.chatId as string;
-      if (!chatId) {
-        client.emit('error', { message: 'Chưa join phòng chat' });
+      const role = String(client.data.role || '').toUpperCase();
+      if (role !== 'ADMIN' && String(client.data.branchId || '').trim() !== session.branchId) {
+        client.emit('error', { message: 'Không có quyền gửi tin cho chat khác chi nhánh' });
         return;
       }
+    }
 
-      const message = await this.chatService.createMessage({
-        chatId,
-        senderType: data.senderType,
-        senderName: data.senderName,
-        senderId: data.senderId,
-        content,
+    const message = await this.chatService.createMessage({
+      sessionId,
+      senderType: data.senderType,
+      senderName: data.senderName,
+      senderId: data.senderId,
+      content,
+    });
+
+    this.server.to(this.chatRoom(session.id)).emit('message-received', { message });
+    this.server.to(this.chatRoom(session.id)).emit('new-message', message);
+    client.emit('message-sent', { messageId: message.id, sessionId: session.id });
+
+    if (String(data.senderType).toUpperCase() === 'CUSTOMER') {
+      this.server.to(this.staffBranchRoom(session.branchId)).emit('new-message', {
+        sessionId: session.id,
+        tableId: session.tableId,
+        preview: content.slice(0, 120),
       });
-
-      // Phát tin nhắn đến tất cả trong phòng
-      this.emitMessageToTable(String(client.data.tableId || ''), message);
-      this.emitStaffNotificationFromMessage(message, String(client.data.tableId || ''));
-    } catch (err: any) {
-      client.emit('error', { message: err.message || 'Gửi tin nhắn thất bại' });
     }
   }
 
-  emitMessageToTable(tableId: string, message: any) {
-    const normalizedTableId = String(tableId || '').trim();
-    if (!normalizedTableId) {
+  @SubscribeMessage('typing')
+  async handleTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: { sessionId?: string; senderType: 'CUSTOMER' | 'STAFF'; senderName?: string; isTyping: boolean },
+  ) {
+    const sessionId = String(data?.sessionId || client.data.sessionId || '').trim();
+    if (!sessionId) return;
+    const room = this.chatRoom(sessionId);
+    client.to(room).emit('chat-typing', {
+      sessionId,
+      senderType: data.senderType,
+      senderName: String(data.senderName || '').trim(),
+      isTyping: Boolean(data.isTyping),
+    });
+  }
+
+  @SubscribeMessage('close-chat')
+  async handleCloseChat(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { sessionId: string },
+  ) {
+    const sessionId = String(data?.sessionId || '').trim();
+    if (!sessionId) {
+      client.emit('error', { message: 'Thiếu sessionId' });
       return;
     }
-    const room = this.chatRoom(normalizedTableId);
-    this.server.to(room).emit('new-message', message);
-  }
 
-  private chatRoom(tableId: string) {
-    return `chat:${tableId}`;
-  }
-
-  private legacyTableRoom(tableId: string) {
-    return `table:${tableId}`;
-  }
-
-  emitStaffNotificationFromMessage(message: any, tableId?: string) {
-    const payload = this.buildNotificationFromMessage(message, tableId);
-    if (!payload) {
+    const session = await this.chatService.getSessionById(sessionId);
+    if (!session) {
+      client.emit('error', { message: 'Không tìm thấy phiên chat' });
       return;
     }
-    this.emitStaffNotification(payload);
+
+    if (!client.data.isStaff) {
+      client.emit('error', { message: 'Thiếu xác thực nhân viên' });
+      return;
+    }
+
+    const role = String(client.data.role || '').toUpperCase();
+    if (role !== 'ADMIN' && String(client.data.branchId || '').trim() !== session.branchId) {
+      client.emit('error', { message: 'Không có quyền đóng chat của chi nhánh khác' });
+      return;
+    }
+
+    await this.chatService.closeSession(sessionId, {
+      role: role || undefined,
+      branchId: String(client.data.branchId || ''),
+      userId: String(client.data.staffId || ''),
+    });
+    this.emitChatClosed(sessionId);
   }
 
   emitStaffNotificationEvent(input: StaffNotificationInput) {
-    const normalizedPayload: StaffNotificationPayload = {
-      id:
-        String(input.id || '').trim() ||
-        `${input.type}:${input.orderId || input.messageId || Date.now()}:${input.tableId || ''}`,
+    const payload = {
+      id: String(input.id || '').trim() || `${input.type}:${Date.now()}`,
       type: input.type,
       title: String(input.title || '').trim() || 'Thông báo',
       message: String(input.message || '').trim() || 'Có cập nhật mới',
+      branchId: input.branchId ? String(input.branchId) : undefined,
       chatId: input.chatId ? String(input.chatId) : undefined,
       tableId: input.tableId ? String(input.tableId) : undefined,
       messageId: input.messageId ? String(input.messageId) : undefined,
       orderId: input.orderId ? String(input.orderId) : undefined,
       createdAt: input.createdAt ? new Date(input.createdAt).toISOString() : new Date().toISOString(),
     };
-    this.emitStaffNotification(normalizedPayload);
-    return normalizedPayload;
+
+    if (payload.branchId) {
+      this.server.to(this.staffBranchRoom(payload.branchId)).emit('staff-notification', payload);
+    } else {
+      this.server.to('staff:global').emit('staff-notification', payload);
+    }
+
+    return payload;
   }
 
-  private emitStaffNotification(payload: StaffNotificationPayload) {
-    this.server.to('staff:global').emit('staff-notification', payload);
+  emitMessageToSession(sessionId: string, message: any) {
+    this.server.to(this.chatRoom(sessionId)).emit('message-received', { message });
+    this.server.to(this.chatRoom(sessionId)).emit('new-message', message);
   }
 
-  private buildNotificationFromMessage(message: any, tableId?: string): StaffNotificationPayload | null {
-    const content = String(message?.content || '').trim();
-    if (!content) return null;
-
-    const chatId = message?.chatId ? String(message.chatId) : undefined;
-    const messageId = message?.id ? String(message.id) : undefined;
-    const createdAt = message?.createdAt ? new Date(message.createdAt).toISOString() : new Date().toISOString();
-    const normalizedTableId = String(tableId || '').trim() || undefined;
-
-    if (content.startsWith('[ORDER_NEW]')) {
-      const meta = this.parseTaggedMeta(content, 'ORDER_NEW');
-      const orderId = meta.orderId || undefined;
-      const items = Number(meta.items || 0);
-      const total = Number(meta.total || 0);
-      const table = meta.tableId || normalizedTableId;
-      const orderSummary =
-        items > 0
-          ? `${items} món - ${total.toLocaleString('vi-VN')}đ`
-          : content.replace('[ORDER_NEW]', '').trim();
-
-      return {
-        id: messageId ? `order-new:${messageId}` : `order-new:${Date.now()}`,
-        type: 'ORDER_NEW',
-        title: table ? `Đơn mới từ bàn ${table}` : 'Đơn mới',
-        message: orderSummary || 'Có đơn mới vừa được tạo',
-        chatId,
-        tableId: table || undefined,
-        messageId,
-        orderId,
-        createdAt,
-      };
-    }
-
-    if (content.startsWith('[CALL_STAFF]')) {
-      const reason = content.replace('[CALL_STAFF]', '').trim() || 'Khách cần hỗ trợ tại bàn';
-      return {
-        id: messageId ? `call-staff:${messageId}` : `call-staff:${Date.now()}`,
-        type: 'CALL_STAFF',
-        title: normalizedTableId ? `Gọi phục vụ - Bàn ${normalizedTableId}` : 'Gọi phục vụ',
-        message: reason,
-        chatId,
-        tableId: normalizedTableId,
-        messageId,
-        createdAt,
-      };
-    }
-
-    if (content.startsWith('[KDS_ITEM_STATUS]')) {
-      const meta = this.parseTaggedMeta(content, 'KDS_ITEM_STATUS');
-      const orderId = meta.orderId || undefined;
-      const table = meta.tableId || normalizedTableId;
-      const itemStatus = (meta.status || '').toUpperCase();
-      return {
-        id: messageId ? `kds-item:${messageId}` : `kds-item:${Date.now()}`,
-        type: 'KDS_ITEM_STATUS',
-        title: table ? `Bếp cập nhật món - Bàn ${table}` : 'Bếp cập nhật món',
-        message: itemStatus
-          ? `Đơn ${orderId || ''} chuyển món sang ${itemStatus}`.trim()
-          : content.replace('[KDS_ITEM_STATUS]', '').trim(),
-        chatId,
-        tableId: table || undefined,
-        messageId,
-        orderId,
-        createdAt,
-      };
-    }
-
-    if (content.startsWith('[KDS_ORDER_READY]')) {
-      const meta = this.parseTaggedMeta(content, 'KDS_ORDER_READY');
-      const orderId = meta.orderId || undefined;
-      const table = meta.tableId || normalizedTableId;
-      return {
-        id: messageId ? `kds-ready:${messageId}` : `kds-ready:${Date.now()}`,
-        type: 'KDS_ORDER_READY',
-        title: table ? `Bếp hoàn thành đơn - Bàn ${table}` : 'Bếp hoàn thành đơn',
-        message: orderId ? `Đơn ${orderId} đã sẵn sàng phục vụ` : 'Đơn đã sẵn sàng phục vụ',
-        chatId,
-        tableId: table || undefined,
-        messageId,
-        orderId,
-        createdAt,
-      };
-    }
-
-    if (String(message?.senderType || '').toUpperCase() === 'CUSTOMER') {
-      return {
-        id: messageId ? `chat-message:${messageId}` : `chat-message:${Date.now()}`,
-        type: 'CHAT_MESSAGE',
-        title: normalizedTableId ? `Tin nhắn khách - Bàn ${normalizedTableId}` : 'Tin nhắn khách',
-        message: `${String(message?.senderName || 'Khách')}: ${content}`,
-        chatId,
-        tableId: normalizedTableId,
-        messageId,
-        createdAt,
-      };
-    }
-
-    return null;
+  emitChatClosed(sessionId: string) {
+    this.server.to(this.chatRoom(sessionId)).emit('chat-closed', { sessionId });
   }
 
-  private parseTaggedMeta(content: string, tag: string): Record<string, string> {
-    const prefix = `[${tag}]`;
-    const raw = content.startsWith(prefix) ? content.slice(prefix.length).trim() : content;
-    const pairs = raw.split(';').map((item) => item.trim()).filter(Boolean);
-    const result: Record<string, string> = {};
+  private chatRoom(sessionId: string) {
+    return `chat:${sessionId}`;
+  }
 
-    for (const pair of pairs) {
-      const index = pair.indexOf('=');
-      if (index <= 0) continue;
-      const key = pair.slice(0, index).trim();
-      const value = pair.slice(index + 1).trim();
-      if (key) result[key] = value;
+  private staffBranchRoom(branchId: string) {
+    return `staff:${branchId}`;
+  }
+
+  private allowCustomerMessage(sessionId: string) {
+    const now = Date.now();
+    const marks = this.customerRateMap.get(sessionId) || [];
+    const fresh = marks.filter((item) => now - item <= this.customerRateLimitWindowMs);
+    if (fresh.length >= this.customerRateLimitMax) {
+      this.customerRateMap.set(sessionId, fresh);
+      return false;
     }
-
-    return result;
+    fresh.push(now);
+    this.customerRateMap.set(sessionId, fresh);
+    return true;
   }
 }

@@ -32,6 +32,9 @@ public class Branch {
     @Column(nullable = false)
     private String name;
 
+    @Column(nullable = false, unique = true, length = 20)
+    private String code;
+
     private String address;
 
     private String phone;

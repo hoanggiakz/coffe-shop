@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { KafkaService } from '../../kafka/kafka.service';
@@ -6,12 +6,24 @@ import { ConfigService } from '@nestjs/config';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { WebhookDto } from './dto/webhook.dto';
 import { PaymentReturnDto } from './dto/return.dto';
-import { PaymentStatus } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus } from '@prisma/client';
 
 type SupportedProvider = 'SEPAY' | 'CASH';
 type OnlineProvider = Exclude<SupportedProvider, 'CASH'>;
 type ReturnStatusHint = PaymentStatus | 'SUCCESS_HINT' | null;
 type RequestHeaders = Record<string, string | string[] | undefined>;
+type InvoiceListStatus = 'ISSUED' | 'VOIDED' | 'ALL';
+
+export interface ActorContext {
+  role?: string;
+  branchId?: string;
+  userId?: string;
+}
+
+type PublicInvoiceTokenPayload = {
+  invoiceId: string;
+  exp: number;
+};
 
 const TERMINAL_PAYMENT_STATUSES = new Set<PaymentStatus>([
   PaymentStatus.PAID,
@@ -44,6 +56,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
 
   private get chatServiceUrl() {
     return this.config.get<string>('CHAT_SERVICE_URL', 'http://chat-service:3007/api/chats');
+  }
+
+  private get orderServiceUrl() {
+    return this.config.get<string>('ORDER_SERVICE_URL', 'http://order-service:3001');
   }
 
   private get onlineQrImageUrl() {
@@ -85,7 +101,32 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
   }
 
   private get sepayQueryUrl() {
-    return String(this.config.get<string>('SEPAY_QUERY_URL', '') || '').trim();
+    const explicit = String(this.config.get<string>('SEPAY_QUERY_URL', '') || '').trim();
+    if (explicit) {
+      return explicit;
+    }
+    return this.sepayDefaultQueryUrl;
+  }
+
+  private get invoicePublicSecret() {
+    return String(
+      this.config.get<string>('INVOICE_PUBLIC_SECRET', this.config.get<string>('JWT_SECRET', 'invoice-public-secret')) ||
+        'invoice-public-secret',
+    ).trim();
+  }
+
+  private get sepayEnv() {
+    const raw = String(this.config.get<string>('SEPAY_ENV', 'production') || 'production')
+      .trim()
+      .toLowerCase();
+    return raw === 'sandbox' ? 'sandbox' : 'production';
+  }
+
+  private get sepayDefaultQueryUrl() {
+    if (this.sepayEnv === 'sandbox') {
+      return 'https://pgapi-sandbox.sepay.vn';
+    }
+    return 'https://pgapi.sepay.vn';
   }
 
   private get onlinePaymentTimeoutMinutes() {
@@ -365,7 +406,9 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
 
     const expectedApiKey = String(this.config.get<string>('SEPAY_IPN_API_KEY', '') || '').trim();
     const expectedSecretKey =
-      String(this.config.get<string>('SEPAY_WEBHOOK_SECRET', '') || '').trim() || this.commonWebhookSecret;
+      String(this.config.get<string>('SEPAY_WEBHOOK_SECRET', '') || '').trim() ||
+      String(this.config.get<string>('SEPAY_SECRET_KEY', '') || '').trim() ||
+      this.commonWebhookSecret;
 
     const authHeader = this.getHeaderValue(headers, 'authorization');
     const secretHeader = this.getHeaderValue(headers, 'x-secret-key');
@@ -817,11 +860,12 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     let qrImageUrl = String(this.onlineQrImageUrl || '').trim();
     const amount = Number(options?.amount || 0);
     const transferContent = String(options?.transferContent || '').trim();
+    const sepayBank = this.onlineQrBankName || this.onlineQrBankCode;
 
-    if (this.onlineQrAccountNo && this.onlineQrBankName) {
+    if (this.onlineQrAccountNo && sepayBank) {
       const url = new URL('https://qr.sepay.vn/img');
       url.searchParams.set('acc', this.onlineQrAccountNo);
-      url.searchParams.set('bank', this.onlineQrBankName);
+      url.searchParams.set('bank', sepayBank);
       if (Number.isFinite(amount) && amount > 0) {
         url.searchParams.set('amount', String(Math.round(amount)));
       }
@@ -931,6 +975,447 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private toBase64Url(value: string) {
+    return Buffer.from(value, 'utf8')
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '');
+  }
+
+  private fromBase64Url(value: string) {
+    const normalized = String(value || '')
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    return Buffer.from(padded, 'base64').toString('utf8');
+  }
+
+  private signInvoiceTokenPayload(payloadB64: string) {
+    return createHmac('sha256', this.invoicePublicSecret)
+      .update(payloadB64, 'utf8')
+      .digest('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '');
+  }
+
+  private buildPublicInvoiceToken(payload: PublicInvoiceTokenPayload) {
+    const payloadB64 = this.toBase64Url(JSON.stringify(payload));
+    const signature = this.signInvoiceTokenPayload(payloadB64);
+    return `${payloadB64}.${signature}`;
+  }
+
+  private verifyPublicInvoiceToken(invoiceId: string, token: string) {
+    const raw = String(token || '').trim();
+    if (!raw.includes('.')) {
+      throw new ForbiddenException('Invoice token không hợp lệ');
+    }
+    const [payloadB64, signature] = raw.split('.', 2);
+    const expected = this.signInvoiceTokenPayload(payloadB64);
+    if (!this.safeCompare(expected, signature || '')) {
+      throw new ForbiddenException('Invoice token không hợp lệ');
+    }
+
+    let payload: PublicInvoiceTokenPayload | null = null;
+    try {
+      payload = JSON.parse(this.fromBase64Url(payloadB64)) as PublicInvoiceTokenPayload;
+    } catch {
+      throw new ForbiddenException('Invoice token không hợp lệ');
+    }
+
+    if (!payload?.invoiceId || payload.invoiceId !== invoiceId) {
+      throw new ForbiddenException('Invoice token không hợp lệ');
+    }
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    if (!payload.exp || nowEpoch >= payload.exp) {
+      throw new ForbiddenException('Invoice token đã hết hạn');
+    }
+  }
+
+  private buildPublicInvoiceUrl(invoiceId: string, token: string) {
+    const baseUrl = this.appBaseUrl.replace(/\/+$/, '');
+    return `${baseUrl}/invoice/public/${encodeURIComponent(invoiceId)}?token=${encodeURIComponent(token)}`;
+  }
+
+  private enforceBranchAccess(actor: ActorContext, branchId: string) {
+    const actorRole = String(actor.role || '').toUpperCase();
+    const actorBranchId = String(actor.branchId || '').trim();
+    if (actorRole === 'ADMIN') return;
+    if (!actorBranchId || actorBranchId !== String(branchId || '').trim()) {
+      throw new ForbiddenException('Không có quyền truy cập dữ liệu chi nhánh khác');
+    }
+  }
+
+  private requireRoles(actor: ActorContext, allowedRoles: string[]) {
+    const actorRole = String(actor.role || '').toUpperCase();
+    if (!allowedRoles.includes(actorRole)) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
+  }
+
+  private normalizeInvoiceListStatus(status?: string): InvoiceListStatus {
+    const normalized = String(status || 'ALL').trim().toUpperCase();
+    if (normalized === 'ISSUED' || normalized === 'VOIDED') return normalized;
+    return 'ALL';
+  }
+
+  private async fetchOrderForInvoice(orderId: string) {
+    const response = await this.fetchWithRetry(`${this.orderServiceUrl}/api/orders/${encodeURIComponent(orderId)}`);
+    if (!response.ok) {
+      throw new BadRequestException(`Không lấy được thông tin đơn hàng ${orderId}`);
+    }
+    return (await response.json()) as any;
+  }
+
+  private async nextInvoiceNumber(branchId: string, now: Date) {
+    const year = now.getUTCFullYear();
+    const month = now.getUTCMonth() + 1;
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO invoice_sequence (id, branch_id, year, month, current_number)
+       VALUES ($1, $2, $3, $4, 1)
+       ON CONFLICT (branch_id, year, month) DO NOTHING`,
+      `invseq_${Math.random().toString(36).slice(2, 14)}`,
+      branchId,
+      year,
+      month,
+    );
+
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ seq: number }>>(
+      `UPDATE invoice_sequence
+       SET current_number = current_number + 1
+       WHERE branch_id = $1 AND year = $2 AND month = $3
+       RETURNING current_number - 1 AS seq`,
+      branchId,
+      year,
+      month,
+    );
+    const seq = Number(rows?.[0]?.seq || 1);
+    const yyyymm = `${year}${String(month).padStart(2, '0')}`;
+    return `HD-${yyyymm}-${String(seq).padStart(6, '0')}`;
+  }
+
+  private async getBranchTaxConfig(branchId: string) {
+    const existing = await this.prisma.branchTaxConfig.findUnique({ where: { branchId } });
+    if (existing) return existing;
+    return this.prisma.branchTaxConfig.create({
+      data: { branchId, taxRate: 0, isTaxInclusive: false },
+    });
+  }
+
+  private to2(value: number) {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private computeTaxAmounts(subtotal: number, discount: number, taxRate: number, isTaxInclusive: boolean) {
+    const base = Math.max(subtotal - discount, 0);
+    if (isTaxInclusive) {
+      const taxAmount = taxRate > 0 ? base - base / (1 + taxRate / 100) : 0;
+      return {
+        taxAmount: this.to2(taxAmount),
+        totalAmount: this.to2(base),
+      };
+    }
+    const taxAmount = base * (taxRate / 100);
+    return {
+      taxAmount: this.to2(taxAmount),
+      totalAmount: this.to2(base + taxAmount),
+    };
+  }
+
+  private mapPaymentMethod(provider?: string) {
+    const p = String(provider || '').toUpperCase();
+    if (p === 'CASH') return 'CASH';
+    if (p === 'SEPAY') return 'SEPAY';
+    return 'BANK_TRANSFER';
+  }
+
+  private escapePdfText(value: string) {
+    return String(value || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)');
+  }
+
+  private buildMinimalInvoicePdf(invoice: any) {
+    const lines = [
+      'COFFEE SHOP - HOA DON',
+      `So hoa don: ${invoice.invoiceNumber}`,
+      `Ngay: ${new Date(invoice.issueDate).toLocaleString('vi-VN')}`,
+      `Khach: ${invoice.customerName || 'Khach vang lai'}`,
+      `Tam tinh: ${Number(invoice.subtotal).toLocaleString('vi-VN')}d`,
+      `Giam gia: ${Number(invoice.discount).toLocaleString('vi-VN')}d`,
+      `Thue (${Number(invoice.taxRate)}%): ${Number(invoice.taxAmount).toLocaleString('vi-VN')}d`,
+      `Tong cong: ${Number(invoice.totalAmount).toLocaleString('vi-VN')}d`,
+      `Thanh toan: ${invoice.paymentMethod}`,
+    ];
+
+    const contentStream = [
+      'BT',
+      '/F1 12 Tf',
+      '50 780 Td',
+      ...lines.map((line, index) => `${index === 0 ? '' : '0 -18 Td ' }(${this.escapePdfText(line)}) Tj`),
+      'ET',
+    ].join('\n');
+
+    const contentLength = Buffer.byteLength(contentStream, 'utf8');
+    const objects = [
+      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
+      '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+      `5 0 obj << /Length ${contentLength} >> stream\n${contentStream}\nendstream endobj`,
+    ];
+
+    let pdf = '%PDF-1.4\n';
+    const offsets = [0];
+    for (const object of objects) {
+      offsets.push(Buffer.byteLength(pdf, 'utf8'));
+      pdf += `${object}\n`;
+    }
+
+    const xrefOffset = Buffer.byteLength(pdf, 'utf8');
+    pdf += `xref\n0 ${objects.length + 1}\n`;
+    pdf += '0000000000 65535 f \n';
+    for (let i = 1; i <= objects.length; i += 1) {
+      pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+    }
+    pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+    return Buffer.from(pdf, 'utf8');
+  }
+
+  async ensureInvoiceForPayment(payment: any, createdBy?: string) {
+    const existing = await this.prisma.invoice.findUnique({ where: { orderId: payment.orderId } });
+    if (existing) return existing;
+
+    const order = await this.fetchOrderForInvoice(payment.orderId);
+    const branchId = String(order?.branchId || payment?.metadata?.branchId || '').trim();
+    if (!branchId) {
+      throw new BadRequestException(`Thiếu branchId để tạo hóa đơn cho order ${payment.orderId}`);
+    }
+
+    const subtotal = Number(order?.subtotalAmount || 0);
+    const discount = Number(order?.discountAmount || 0);
+    const taxConfig = await this.getBranchTaxConfig(branchId);
+    const taxRate = Number(taxConfig.taxRate || 0);
+    const { taxAmount, totalAmount } = this.computeTaxAmounts(
+      subtotal,
+      discount,
+      taxRate,
+      Boolean(taxConfig.isTaxInclusive),
+    );
+
+    const now = new Date();
+    const invoiceNumber = await this.nextInvoiceNumber(branchId, now);
+    const created = await this.prisma.invoice.create({
+      data: {
+        branchId,
+        orderId: payment.orderId,
+        invoiceNumber,
+        issueDate: now,
+        customerName: order?.customerName || null,
+        customerPhone: order?.customerPhone || null,
+        subtotal,
+        discount,
+        taxRate,
+        taxAmount,
+        totalAmount,
+        paymentMethod: this.mapPaymentMethod(payment.provider),
+        paymentTransactionId: payment.id,
+        createdBy: createdBy || null,
+      },
+    });
+    return created;
+  }
+
+  async listInvoices(
+    branchId: string,
+    query: { start_date?: string; end_date?: string; status?: string; page?: number; limit?: number },
+    actor: ActorContext,
+  ) {
+    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+    this.enforceBranchAccess(actor, branchId);
+    const status = this.normalizeInvoiceListStatus(query.status);
+    const page = Number.isFinite(query.page) ? Math.max(1, Math.floor(Number(query.page))) : 1;
+    const limit = Number.isFinite(query.limit) ? Math.min(100, Math.max(1, Math.floor(Number(query.limit)))) : 20;
+    const skip = (page - 1) * limit;
+
+    const where: any = { branchId };
+    if (status !== 'ALL') where.status = status;
+    if (query.start_date || query.end_date) {
+      where.issueDate = {};
+      if (query.start_date) where.issueDate.gte = new Date(`${query.start_date}T00:00:00.000Z`);
+      if (query.end_date) where.issueDate.lte = new Date(`${query.end_date}T23:59:59.999Z`);
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.invoice.findMany({
+        where,
+        orderBy: { issueDate: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.invoice.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((row) => ({
+        id: row.id,
+        invoiceNumber: row.invoiceNumber,
+        issueDate: row.issueDate,
+        customerName: row.customerName,
+        subtotal: Number(row.subtotal),
+        discount: Number(row.discount),
+        taxRate: Number(row.taxRate),
+        taxAmount: Number(row.taxAmount),
+        totalAmount: Number(row.totalAmount),
+        paymentMethod: row.paymentMethod,
+        status: row.status,
+        pdfUrl: row.pdfUrl,
+      })),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getInvoiceDetail(invoiceId: string, actor: ActorContext) {
+    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+    const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    this.enforceBranchAccess(actor, invoice.branchId);
+    const order = await this.fetchOrderForInvoice(invoice.orderId);
+    return {
+      id: invoice.id,
+      branchId: invoice.branchId,
+      branchName: null,
+      invoiceNumber: invoice.invoiceNumber,
+      issueDate: invoice.issueDate,
+      orderId: invoice.orderId,
+      customerName: invoice.customerName,
+      customerPhone: invoice.customerPhone,
+      items: (order?.orderItems || []).map((item: any) => ({
+        name: item.menuItemName || item.name || item.menuItemId,
+        quantity: Number(item.quantity || 0),
+        unitPrice: Number(item.price || 0),
+        totalPrice: Number(item.price || 0) * Number(item.quantity || 0),
+      })),
+      subtotal: Number(invoice.subtotal),
+      discount: Number(invoice.discount),
+      taxRate: Number(invoice.taxRate),
+      taxAmount: Number(invoice.taxAmount),
+      totalAmount: Number(invoice.totalAmount),
+      paymentMethod: invoice.paymentMethod,
+      status: invoice.status,
+      pdfUrl: invoice.pdfUrl,
+      voidReason: invoice.voidReason,
+      voidedAt: invoice.voidedAt,
+    };
+  }
+
+  async getPublicInvoiceLinkByOrder(orderId: string) {
+    const invoice = await this.prisma.invoice.findUnique({ where: { orderId: String(orderId || '').trim() } });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+    const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60 * 24;
+    const token = this.buildPublicInvoiceToken({ invoiceId: invoice.id, exp: expiresAt });
+    return {
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      url: this.buildPublicInvoiceUrl(invoice.id, token),
+      token,
+      expiresAt: new Date(expiresAt * 1000).toISOString(),
+    };
+  }
+
+  async getPublicInvoiceDetail(invoiceId: string, token: string) {
+    this.verifyPublicInvoiceToken(invoiceId, token);
+    const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    const order = await this.fetchOrderForInvoice(invoice.orderId);
+    return {
+      id: invoice.id,
+      branchId: invoice.branchId,
+      invoiceNumber: invoice.invoiceNumber,
+      issueDate: invoice.issueDate,
+      orderId: invoice.orderId,
+      customerName: invoice.customerName,
+      customerPhone: invoice.customerPhone,
+      items: (order?.orderItems || []).map((item: any) => ({
+        name: item.menuItemName || item.name || item.menuItemId,
+        quantity: Number(item.quantity || 0),
+        unitPrice: Number(item.price || 0),
+        totalPrice: Number(item.price || 0) * Number(item.quantity || 0),
+      })),
+      subtotal: Number(invoice.subtotal),
+      discount: Number(invoice.discount),
+      taxRate: Number(invoice.taxRate),
+      taxAmount: Number(invoice.taxAmount),
+      totalAmount: Number(invoice.totalAmount),
+      paymentMethod: invoice.paymentMethod,
+      status: invoice.status,
+      pdfUrl: invoice.pdfUrl,
+      voidReason: invoice.voidReason,
+      voidedAt: invoice.voidedAt,
+    };
+  }
+
+  async getPublicInvoicePdf(invoiceId: string, token: string) {
+    const detail = await this.getPublicInvoiceDetail(invoiceId, token);
+    return this.buildMinimalInvoicePdf(detail);
+  }
+
+  async getInvoicePdf(invoiceId: string, actor: ActorContext) {
+    const detail = await this.getInvoiceDetail(invoiceId, actor);
+    return this.buildMinimalInvoicePdf(detail);
+  }
+
+  async voidInvoice(invoiceId: string, reason: string, actor: ActorContext) {
+    this.requireRoles(actor, ['ADMIN', 'MANAGER']);
+    const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    this.enforceBranchAccess(actor, invoice.branchId);
+    if (invoice.status === InvoiceStatus.VOIDED) {
+      throw new BadRequestException('Invoice already voided');
+    }
+    const trimmedReason = String(reason || '').trim();
+    if (!trimmedReason) throw new BadRequestException('Void reason is required');
+    const updated = await this.prisma.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        status: InvoiceStatus.VOIDED,
+        voidReason: trimmedReason,
+        voidedAt: new Date(),
+      },
+    });
+    return {
+      success: true,
+      message: 'Invoice voided successfully',
+      invoice: {
+        id: updated.id,
+        status: updated.status,
+        voidReason: updated.voidReason,
+        voidedAt: updated.voidedAt,
+      },
+    };
+  }
+
+  async regenerateInvoice(orderId: string, actor: ActorContext) {
+    this.requireRoles(actor, ['ADMIN']);
+    const payment = await this.prisma.payment.findUnique({ where: { orderId } });
+    if (!payment) throw new NotFoundException('Payment not found for order');
+    if (payment.status !== PaymentStatus.PAID) {
+      throw new BadRequestException('Order payment is not completed');
+    }
+    const existing = await this.prisma.invoice.findUnique({ where: { orderId } });
+    if (existing) return existing;
+    return this.ensureInvoiceForPayment(payment, actor.userId || 'system');
+  }
+
   private async updatePaymentStatus(
     paymentId: string,
     status: PaymentStatus,
@@ -976,6 +1461,11 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
 
     if (statusChanged && targetStatus === PaymentStatus.PAID) {
       await this.emitPaymentCompleted(updated);
+      try {
+        await this.ensureInvoiceForPayment(updated, String((nextMetadata as any)?.confirmedBy || 'system'));
+      } catch (error) {
+        this.logger.warn(`Auto invoice generation failed for order ${updated.orderId}: ${(error as Error).message}`);
+      }
     }
 
     return updated;
@@ -1077,6 +1567,36 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         throw new BadRequestException(
           `Order ${orderId} already has payment method ${existing.provider}. Cannot switch to ${provider}.`,
         );
+      }
+      if (provider === 'SEPAY' && existing.status !== PaymentStatus.PAID) {
+        const transferContent = `PAY ${String(orderId).toUpperCase()}`;
+        const onlineQr = this.getOnlineQr({ amount, transferContent });
+        const providerPrefix = provider.toLowerCase();
+        const transactionId = `${providerPrefix}_${String(orderId).slice(0, 24)}_${Date.now()}`;
+        const updated = await this.prisma.payment.update({
+          where: { id: existing.id },
+          data: {
+            amount,
+            tableId,
+            status: PaymentStatus.WAITING_TRANSFER,
+            transactionId,
+            transferContent,
+            metadata: this.buildOnlinePaymentMetadata({
+              ...((existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}) as Record<string, any>),
+              branchId,
+              gateway: provider,
+              vietQr: {
+                qrImageUrl: onlineQr.qrImageUrl,
+                htmlTag: onlineQr.htmlTag,
+                accountName: onlineQr.accountName,
+                accountNo: onlineQr.accountNo,
+                bankCode: onlineQr.bankCode,
+                transferContent,
+              },
+            }),
+          },
+        });
+        return this.buildResponse(updated);
       }
       return this.buildResponse(existing);
     }

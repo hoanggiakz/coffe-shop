@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 public class BranchResponse {
     private String id;
     private String name;
+    private String code;
     private String address;
     private String phone;
     private String managerId;
@@ -24,6 +25,7 @@ public class BranchResponse {
         return new BranchResponse(
                 branch.getId(),
                 branch.getName(),
+                branch.getCode(),
                 branch.getAddress(),
                 branch.getPhone(),
                 branch.getManagerId(),

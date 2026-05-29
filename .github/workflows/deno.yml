@@ -1,10 +1,15 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
-    branches: ["main", "develop", "deverlop"]
+    branches: ["main", "develop", "f3"]
   push:
-    branches: ["main", "develop", "deverlop"]
+    branches: ["main", "develop", "f3"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -39,6 +44,24 @@ jobs:
         working-directory: ${{ matrix.service }}
         run: npm ci
 
+      - name: Lint (if script exists)
+        working-directory: ${{ matrix.service }}
+        run: |
+          if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.lint ? 0 : 1)"; then
+            npm run lint
+          else
+            echo "No lint script for ${{ matrix.service }}, skipping."
+          fi
+
+      - name: Type check (if script exists)
+        working-directory: ${{ matrix.service }}
+        run: |
+          if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.typecheck ? 0 : 1)"; then
+            npm run typecheck
+          else
+            echo "No typecheck script for ${{ matrix.service }}, skipping."
+          fi
+
       - name: Build
         working-directory: ${{ matrix.service }}
         run: npm run build
@@ -46,8 +69,8 @@ jobs:
       - name: Unit test
         working-directory: ${{ matrix.service }}
         run: |
-          if npm run | grep -qE "^[[:space:]]+test"; then
-            npm test -- --runInBand --passWithNoTests
+          if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.test ? 0 : 1)"; then
+            npm test -- --passWithNoTests
           else
             echo "No test script for ${{ matrix.service }}, skipping."
           fi
@@ -65,13 +88,86 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run checkstyle + tests + jacoco (Gradle Docker)
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Ensure Gradle wrapper executable
+        working-directory: ${{ matrix.service }}
+        run: chmod +x ./gradlew
+
+      - name: Compile and package
+        working-directory: ${{ matrix.service }}
+        run: ./gradlew --no-daemon clean assemble
+
+  python-ai-check:
+    name: Python AI Check (ai-service)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: apps/backend/ai-service
         run: |
-          docker run --rm \
-            -v "$PWD/${{ matrix.service }}:/app" \
-            -w /app \
-            gradle:8-jdk17-alpine \
-            gradle checkstyleMain test jacocoTestReport --no-daemon
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest mypy ruff httpx
+
+      - name: Ruff lint
+        run: ruff check apps/backend/ai-service/app
+
+      - name: Type check
+        run: mypy --ignore-missing-imports apps/backend/ai-service/app
+
+      - name: Unit tests
+        run: pytest -q apps/backend/ai-service/tests
+
+  migration-checks:
+    name: Migration Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19"
+
+      - name: Validate Prisma schemas
+        run: |
+          cd apps/backend/order-service && npm ci && npx prisma validate
+          cd ../inventory-service && npm ci && npx prisma validate
+          cd ../payment-service && npm ci && npx prisma validate
+          cd ../report-service && npm ci && npx prisma validate
+
+  image-scan-ai:
+    name: Image Scan (ai-service)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ai-service image
+        run: docker build -t coffee-ai-service:ci ./apps/backend/ai-service
+
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: coffee-ai-service:ci
+          format: table
+          exit-code: 0
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
 
   compose-validate:
     name: Compose Validate
@@ -83,12 +179,73 @@ jobs:
       - name: Validate docker compose
         run: docker compose config -q
 
+      - name: Validate ELK compose
+        run: docker compose -f logging/elk-stack.yml config -q
+
+      - name: Validate Prometheus config
+        run: docker run --rm --entrypoint promtool -v "$PWD/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro" prom/prometheus:v2.53.0 check config /etc/prometheus/prometheus.yml
+
+  e2e-ai-contract:
+    name: E2E AI Contract (develop)
+    runs-on: ubuntu-latest
+    needs:
+      - node-build-and-test
+      - java-build-and-test
+      - python-ai-check
+      - migration-checks
+      - image-scan-ai
+      - compose-validate
+    if: github.ref == 'refs/heads/develop' || github.base_ref == 'develop'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19"
+
+      - name: Start stack for E2E
+        run: docker compose up -d --build
+
+      - name: Wait for gateway health
+        run: |
+          for i in {1..120}; do
+            if curl -fsS http://127.0.0.1:8080/ >/dev/null; then
+              echo "Gateway is healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Gateway health check timed out"
+          docker compose ps
+          exit 1
+
+      - name: Run AI contract E2E via gateway
+        env:
+          API_BASE_URL: http://127.0.0.1:8080/api
+          AI_E2E_MANAGER_EMAIL: manager.central@coffeeshop.local
+          AI_E2E_MANAGER_PASSWORD: Manager@123
+          AI_E2E_BRANCH_ID: branch-e2e
+        run: node ops/scripts/test-ai-contract.mjs
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
+
   deploy:
     name: Deploy (main only)
     runs-on: ubuntu-latest
     needs:
       - node-build-and-test
       - java-build-and-test
+      - python-ai-check
+      - migration-checks
+      - image-scan-ai
       - compose-validate
     if: github.ref == 'refs/heads/main'
     steps:

@@ -19,12 +19,77 @@ model Ingredient {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   movements StockMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
 
   @@map("ingredients")
+  @@unique([branchId, name])
   @@index([branchId])
   @@index([branchId, name])
   @@index([name])
   @@index([isActive])
+}
+
+model Recipe {
+  id           String   @id @default(cuid())
+  menuItemId   String
+  ingredientId String
+  quantity     Decimal
+  wastageRate  Decimal  @default(0)
+  createdAt    DateTime @default(now())
+
+  @@map("recipes")
+  @@unique([menuItemId, ingredientId])
+  @@index([menuItemId])
+  @@index([ingredientId])
+}
+
+model BranchRecipe {
+  id           String   @id @default(cuid())
+  branchId     String
+  menuItemId   String
+  ingredientId String
+  quantity     Decimal
+  wastageRate  Decimal  @default(0)
+  createdAt    DateTime @default(now())
+
+  @@map("branch_recipes")
+  @@unique([branchId, menuItemId, ingredientId])
+  @@index([branchId, menuItemId])
+}
+
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  branchId     String
+  supplierName String
+  totalAmount  Decimal             @default(0)
+  status       PurchaseOrderStatus @default(DRAFT)
+  receivedAt   DateTime?
+  notes        String?
+  createdBy    String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  items        PurchaseOrderItem[]
+
+  @@map("purchase_orders")
+  @@index([branchId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  ingredientId    String
+  quantity        Decimal
+  unitPrice       Decimal
+  expiryDate      DateTime?
+  createdAt       DateTime      @default(now())
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  ingredient      Ingredient    @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@map("purchase_order_items")
+  @@index([purchaseOrderId])
+  @@index([ingredientId])
 }
 
 model StockMovement {
@@ -67,4 +132,11 @@ enum StockSource {
   STOCKTAKE
   SYNC_MENU
   SYSTEM
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  SUBMITTED
+  RECEIVED
+  CANCELLED
 }

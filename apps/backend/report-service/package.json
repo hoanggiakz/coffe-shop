@@ -20,7 +20,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "prisma generate",
     "prisma:db:push": "prisma db push",
-    "prisma:migrate:dev": "prisma migrate dev"
+    "prisma:migrate:dev": "prisma migrate dev",
+    "ai:readiness-check": "node ./scripts/ai-data-readiness-check.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

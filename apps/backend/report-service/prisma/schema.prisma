@@ -7,6 +7,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AiAnomalySeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AiSentimentLabel {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
 // Aggregate tables for analytics - denormalized for performance
 model DailyRevenue {
   date       DateTime @unique
@@ -48,5 +61,113 @@ model DailyStats {
 
   @@map("daily_stats")
   @@index([date])
+}
+
+model SalesForecast {
+  id               String   @id @default(cuid())
+  branchId         String
+  forecastDate     DateTime
+  granularity      String   @default("daily")
+  predictedRevenue Decimal
+  confidenceLow    Decimal?
+  confidenceHigh   Decimal?
+  confidence       Decimal?
+  modelVersion     String?
+  mape             Decimal?
+  generatedAt      DateTime @default(now())
+
+  @@map("sales_forecast")
+  @@unique([branchId, forecastDate, granularity])
+  @@index([branchId, forecastDate])
+}
+
+model ItemRecommendation {
+  id            String   @id @default(cuid())
+  branchId      String
+  sourceItemId  String
+  targetItemId  String
+  score         Decimal
+  reason        String?
+  modelVersion  String?
+  generatedAt   DateTime @default(now())
+
+  @@map("item_recommendation")
+  @@unique([branchId, sourceItemId, targetItemId])
+  @@index([branchId, sourceItemId])
+  @@index([branchId, targetItemId])
+}
+
+model AnomalyAlert {
+  id            String            @id @default(cuid())
+  branchId      String
+  alertType     String
+  severity      AiAnomalySeverity
+  referenceId   String?
+  referenceType String?
+  description   String
+  anomalyScore  Decimal?
+  explanation   Json?
+  isResolved    Boolean           @default(false)
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  resolutionNote String?
+  detectedAt    DateTime          @default(now())
+
+  @@map("anomaly_alert")
+  @@index([branchId, isResolved])
+  @@index([branchId, detectedAt])
+  @@index([severity, alertType])
+}
+
+model SentimentAnalysis {
+  id           String           @id @default(cuid())
+  branchId     String
+  sourceType   String
+  sourceId     String?
+  originalText String
+  label        AiSentimentLabel
+  confidence   Decimal?
+  reason       String?
+  modelVersion String?
+  analyzedAt   DateTime         @default(now())
+
+  @@map("sentiment_analysis")
+  @@index([branchId, analyzedAt])
+  @@index([branchId, label])
+}
+
+model ChatbotQueryLog {
+  id          String   @id @default(cuid())
+  branchId    String?
+  userId      String?
+  question    String
+  generatedSql String?
+  sqlResult   Json?
+  answer      String?
+  tokensUsed  Int?
+  latencyMs   Int?
+  isSuccessful Boolean?
+  createdAt   DateTime @default(now())
+
+  @@map("chatbot_query_log")
+  @@index([branchId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model AiAuditLog {
+  id         String   @id @default(cuid())
+  branchId   String?
+  endpoint   String
+  action     String
+  actorId    String?
+  success    Boolean  @default(true)
+  latencyMs  Int?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@map("ai_audit_log")
+  @@index([createdAt])
+  @@index([endpoint, createdAt])
+  @@index([branchId, createdAt])
 }
 

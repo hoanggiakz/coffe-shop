@@ -5,7 +5,10 @@ export interface User {
   name: string
   role: 'ADMIN' | 'MANAGER' | 'WAITER' | 'BARISTA' | 'STAFF' | 'CUSTOMER'
   branchId?: string | null
+  phone?: string | null
+  employeeCode?: string | null
   avatar?: string
+  avatarUrl?: string | null
 }
 
 export interface AuthResponse {
@@ -102,20 +105,26 @@ export interface InventoryItem {
 }
 
 // Chat
-export type SenderType = 'CUSTOMER' | 'WAITER'
+export type SenderType = 'CUSTOMER' | 'STAFF'
 
 export interface ChatMessage {
   id: string
-  chatId: string
+  sessionId: string
   senderType: SenderType
+  senderName: string
+  isRead?: boolean
   content: string
   createdAt: string
 }
 
 export interface Chat {
   id: string
+  branchId?: string
   tableId: string
-  status: 'ACTIVE' | 'CLOSED'
+  customerName?: string | null
+  customerPhone?: string | null
+  status: 'OPEN' | 'CLOSED'
+  unreadCount?: number
   messages: ChatMessage[]
 }
 

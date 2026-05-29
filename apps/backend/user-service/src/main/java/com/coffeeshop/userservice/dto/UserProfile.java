@@ -13,6 +13,8 @@ public class UserProfile {
     private String role;
     private String phone;
     private String branchId;
+    private String employeeCode;
+    private String avatarUrl;
     private Integer loyaltyPoints;
     private String memberTier;
     private Long totalSpent;
@@ -25,6 +27,8 @@ public class UserProfile {
             user.getRole().name(),
             user.getPhone(),
             user.getBranchId(),
+            user.getEmployeeCode(),
+            user.getAvatarUrl(),
             user.getLoyaltyPoints(),
             user.getMemberTier().name(),
             user.getTotalSpent()

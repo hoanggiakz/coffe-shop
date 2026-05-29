@@ -8,6 +8,7 @@ import { CustomLogger } from './common/logger.service';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import compression from 'compression';
+import { json, urlencoded } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -22,6 +23,8 @@ async function bootstrap() {
   app.enableShutdownHooks();
   app.use(helmet());
   app.use(compression());
+  app.use(json({ limit: '25mb' }));
+  app.use(urlencoded({ limit: '25mb', extended: true }));
   app.use(
     rateLimit({
       windowMs: 15 * 60 * 1000, // 15 minutes

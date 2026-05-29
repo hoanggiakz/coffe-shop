@@ -1,0 +1,38 @@
+groups:
+  - name: ai-service-alerts
+    rules:
+      - alert: AIServiceHighErrorRate
+        expr: sum(rate(ai_requests_total{status="error"}[5m])) / clamp_min(sum(rate(ai_requests_total[5m])), 1) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI service error rate is high"
+          description: "Error ratio over 10% in last 5 minutes."
+
+      - alert: AIServiceHighLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(ai_request_latency_seconds_bucket[5m])) by (le, endpoint)) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI service latency p95 high"
+          description: "P95 latency is above 1.5s."
+
+      - alert: AIDataFreshnessStale
+        expr: ai_data_freshness_minutes > 120
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AI feature/data freshness stale"
+          description: "Data freshness is older than 120 minutes."
+
+      - alert: AIPredictionErrorTooHigh
+        expr: ai_prediction_error_mape > 20
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI prediction error increased"
+          description: "MAPE above 20% suggests drift or degraded model."

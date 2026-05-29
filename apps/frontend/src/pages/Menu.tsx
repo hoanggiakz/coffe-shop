@@ -317,23 +317,29 @@ export default function Menu() {
     }
 
     setIsUploadingImage(true)
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = String(reader.result || '')
-      if (!dataUrl.startsWith('data:image/')) {
-        toast.error('Không đọc được file ảnh')
+    const formData = new FormData()
+    formData.append('file', file)
+    api.post('/orders/admin/menu/images/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+      .then((response) => {
+        const dataUrl = String(response?.data?.dataUrl || '')
+        if (!dataUrl.startsWith('data:image/')) {
+          toast.error('Upload ảnh thất bại')
+          return
+        }
+        setItemForm((prev) => ({ ...prev, image: dataUrl }))
+        toast.success('Đã upload ảnh và lưu dữ liệu vào DB')
+      })
+      .catch((error: any) => {
+        toast.error(error.response?.data?.message || 'Không thể upload ảnh')
+      })
+      .finally(() => {
         setIsUploadingImage(false)
-        return
-      }
-      setItemForm((prev) => ({ ...prev, image: dataUrl }))
-      setIsUploadingImage(false)
-      toast.success('Đã tải ảnh lên form')
-    }
-    reader.onerror = () => {
-      setIsUploadingImage(false)
-      toast.error('Không thể đọc file ảnh')
-    }
-    reader.readAsDataURL(file)
+      })
+    // Reset input value to allow selecting same file again
+    // eslint-disable-next-line no-param-reassign
+    ;(document.activeElement as HTMLInputElement | null)?.blur()
   }
 
   const submitItem = async () => {
@@ -651,7 +657,7 @@ export default function Menu() {
               <label className="text-sm md:col-span-2">
                 Danh mục
                 <select
-                  className="mt-1 block w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm"
+                  className="mt-1 block w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm"
                   value={itemForm.categoryId}
                   onChange={(e) => setItemForm((p) => ({ ...p, categoryId: e.target.value }))}
                 >
@@ -667,7 +673,7 @@ export default function Menu() {
                 Mô tả món
                 <textarea
                   rows={3}
-                  className="mt-1 block w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm"
+                  className="mt-1 block w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm"
                   placeholder="Mô tả hương vị, thành phần nổi bật, nhiệt độ phục vụ..."
                   value={itemForm.description}
                   onChange={(e) => setItemForm((p) => ({ ...p, description: e.target.value }))}
@@ -687,7 +693,7 @@ export default function Menu() {
             </p>
           </div>
 
-          <div className="rounded-xl border border-sky-100/80 bg-white/90 p-3">
+          <div className="rounded-xl border border-amber-100/80 bg-white/90 p-3">
             <Input
               label="URL hình ảnh món"
               placeholder="https://..."
@@ -699,7 +705,7 @@ export default function Menu() {
               <input
                 type="file"
                 accept="image/*"
-                className="mt-1 block w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm"
+                className="mt-1 block w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm"
                 onChange={(e) => onItemImageFileChange(e.target.files?.[0] || null)}
                 disabled={isUploadingImage}
               />

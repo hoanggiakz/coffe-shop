@@ -10,6 +10,8 @@ import com.coffeeshop.tableservice.service.TableService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -83,9 +85,24 @@ public class TableController {
     }
 
     @PostMapping("/qr/batch")
-    public ResponseEntity<List<Map<String, String>>> getQrCodesBatch(@RequestBody(required = false) BatchQrRequest request) {
+    public ResponseEntity<List<Map<String, String>>> getQrCodesBatch(
+            @RequestBody(required = false) BatchQrRequest request) {
         List<String> tableIds = request != null ? request.getTableIds() : null;
-        return ResponseEntity.ok(tableService.getQrBatch(tableIds));
+        String baseUrl = request != null ? request.getBaseUrl() : null;
+        return ResponseEntity.ok(tableService.getQrBatch(tableIds, baseUrl));
+    }
+
+    @PostMapping("/qr/batch/download")
+    public ResponseEntity<byte[]> downloadQrCodesBatchZip(
+            @RequestBody(required = false) BatchQrRequest request) {
+        List<String> tableIds = request != null ? request.getTableIds() : null;
+        String baseUrl = request != null ? request.getBaseUrl() : null;
+        byte[] zipBytes = tableService.exportQrBatchZip(tableIds, baseUrl);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"table-qr-batch.zip\"");
+        return new ResponseEntity<>(zipBytes, headers, HttpStatus.OK);
     }
 
     @PostMapping("/{id}/call-staff")

@@ -1,4 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
+const fs = require('fs');
+const path = require('path');
 
 const prisma = new PrismaClient();
 
@@ -72,6 +74,34 @@ const items = [
   { name: 'Sinh to bo', description: 'Sinh to bo beo ngay', price: 45000, category: 'smoothie' },
   { name: 'Croissant', description: 'Croissant bo Phap', price: 35000, category: 'food' },
 ];
+
+const imageByItemName = {
+  'Bac xiu': '/menu-images/bac-xiu.jpg',
+  'Ca phe den': '/menu-images/ca-phe-den.jpg',
+  'Ca phe sua': '/menu-images/ca-phe-sua.jpg',
+  Cappuccino: '/menu-images/cappuccino.jpg',
+  Croissant: '/menu-images/croissant.jpg',
+  Espresso: '/menu-images/espresso.jpg',
+  Latte: '/menu-images/latte.jpg',
+  'Matcha Latte': '/menu-images/matcha-latte.jpg',
+  'Sinh to bo': '/menu-images/sinh-to-bo.jpg',
+  'Tra dao': '/menu-images/tra-dao.jpg',
+};
+
+function resolveSeedImage(imagePath, itemName) {
+  const relative = String(imagePath || '').trim();
+  if (!relative.startsWith('/menu-images/')) {
+    return `https://placehold.co/600x400?text=${encodeURIComponent(itemName)}`;
+  }
+  const localFile = path.join(__dirname, relative.replace(/^\//, ''));
+  if (!fs.existsSync(localFile)) {
+    return `https://placehold.co/600x400?text=${encodeURIComponent(itemName)}`;
+  }
+  const ext = path.extname(localFile).toLowerCase();
+  const mimeType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  const base64 = fs.readFileSync(localFile).toString('base64');
+  return `data:${mimeType};base64,${base64}`;
+}
 
 const categoryNameMap = {
   coffee: 'Ca phe',
@@ -176,7 +206,7 @@ async function main() {
   }
 
   for (const item of items) {
-    const image = `https://placehold.co/600x400?text=${encodeURIComponent(item.name)}`;
+    const image = resolveSeedImage(imageByItemName[item.name], item.name);
     const customizations = item.category === 'food' ? foodCustomizations : drinkCustomizations;
     const categoryId = categoryIds[item.category] || null;
 
