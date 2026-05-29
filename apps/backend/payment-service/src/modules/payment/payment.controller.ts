@@ -63,10 +63,17 @@ export class PaymentController {
   }
 
   @Get('online/qr')
-  @ApiOperation({ summary: 'Get static VietQR image for online transfer' })
+  @ApiOperation({ summary: 'Get VietQR image for online transfer (supports amount, transferContent)' })
   @ApiResponse({ status: 200, description: 'Online QR fetched.' })
-  getOnlineQr() {
-    return this.paymentService.getOnlineQr();
+  getOnlineQr(
+    @Query('amount') amount?: string,
+    @Query('transferContent') transferContent?: string,
+  ) {
+    const parsedAmount = Number(amount);
+    return this.paymentService.getOnlineQr({
+      amount: Number.isFinite(parsedAmount) ? parsedAmount : undefined,
+      transferContent,
+    });
   }
 
   @Get(':paymentId')

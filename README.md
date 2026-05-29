@@ -234,7 +234,7 @@ Base URL khi chạy compose mặc định: `http://127.0.0.1:18080/api`
   - `POST /v1/payments`
   - Provider hỗ trợ: `CASH`, `SEPAY`
   - `GET /v1/payments/orders/{orderId}`
-  - `GET /v1/payments/online/qr`
+  - `GET /v1/payments/online/qr?amount=120000&transferContent=PAY%20ORDER123`
   - `GET /v1/payments/{paymentId}`
   - `POST /v1/payments/{paymentId}/verify` (đối soát giao dịch thật trước khi chốt `PAID`)
   - `POST /v1/payments/webhook`
