@@ -73,6 +73,8 @@ docker compose up -d --build
 docker compose ps
 ```
 
+Ubuntu VM: xem huong dan toi uu tai `ops/docs/ubuntu-vm-quickstart.md`.
+
 Truy cap:
 
 - FE: `http://localhost`
