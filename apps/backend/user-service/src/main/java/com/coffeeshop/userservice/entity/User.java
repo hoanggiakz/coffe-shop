@@ -58,6 +58,9 @@ public class User {
     @Column(name = "branch_id")
     private String branchId;
 
+    @Column(name = "avatar_url", columnDefinition = "TEXT")
+    private String avatarUrl;
+
     @Column(name = "employee_code", unique = true)
     private String employeeCode;
 

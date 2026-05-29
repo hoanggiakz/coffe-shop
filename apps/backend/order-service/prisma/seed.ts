@@ -1,4 +1,6 @@
 import { PrismaClient } from '@prisma/client';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const prisma = new PrismaClient();
 
@@ -84,6 +86,21 @@ const imageByItemName: Record<string, string> = {
   'Matcha Latte': '/menu-images/matcha-latte.jpg',
   'Sinh to bo': '/menu-images/sinh-to-bo.jpg',
   'Tra dao': '/menu-images/tra-dao.jpg',
+};
+
+const resolveSeedImage = (imagePath: string | undefined, itemName: string) => {
+  const relative = String(imagePath || '').trim();
+  if (!relative.startsWith('/menu-images/')) {
+    return `https://placehold.co/600x400?text=${encodeURIComponent(itemName)}`;
+  }
+  const localFile = path.join(__dirname, relative.replace(/^\//, ''));
+  if (!fs.existsSync(localFile)) {
+    return `https://placehold.co/600x400?text=${encodeURIComponent(itemName)}`;
+  }
+  const ext = path.extname(localFile).toLowerCase();
+  const mimeType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  const base64 = fs.readFileSync(localFile).toString('base64');
+  return `data:${mimeType};base64,${base64}`;
 };
 
 const categoryNameMap: Record<string, string> = {
@@ -189,7 +206,7 @@ async function main() {
   }
 
   for (const item of items) {
-    const image = imageByItemName[item.name] || `https://placehold.co/600x400?text=${encodeURIComponent(item.name)}`;
+    const image = resolveSeedImage(imageByItemName[item.name], item.name);
     const customizations = item.category === 'food' ? foodCustomizations : drinkCustomizations;
     const categoryId = categoryIds[item.category] || null;
 

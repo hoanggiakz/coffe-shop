@@ -1,5 +1,6 @@
 import os
 import time
+from functools import wraps
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -64,6 +65,7 @@ CHAT_HISTORY: list[dict[str, Any]] = []
 
 def metric_guard(endpoint: str):
     def decorator(func):
+        @wraps(func)
         def wrapper(*args, **kwargs):
             start = time.perf_counter()
             try:

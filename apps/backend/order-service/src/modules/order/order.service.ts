@@ -231,16 +231,15 @@ export class OrderService {
       throw new BadRequestException('branchId khong hop le');
     }
     const tableIdNormalized = String(tableId || '').trim();
-    const resolvedBranchId =
-      requestedBranchId || (tableIdNormalized ? await this.resolveBranchIdFromTable(tableIdNormalized) : null);
-    if (!resolvedBranchId) {
-      throw new BadRequestException('Khong xac dinh duoc chi nhanh');
+    const tableBranchId = tableIdNormalized ? await this.resolveBranchIdFromTable(tableIdNormalized) : null;
+    if (tableIdNormalized && tableBranchId && tableBranchId !== requestedBranchId) {
+      throw new NotFoundException('Khong tim thay ban. Vui long quet lai QR.');
     }
+    const resolvedBranchId = requestedBranchId;
 
     const entries = await this.prisma.branchMenuItem.findMany({
       where: {
         branchId: resolvedBranchId,
-        isAvailable: true,
         menuItem: { available: true },
       },
       include: {
@@ -266,7 +265,43 @@ export class OrderService {
       orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
     });
 
-    return entries.map((entry) => this.mapBranchMenuItemResponse(entry.menuItem, entry));
+    const flatItems = entries
+      .map((entry) => this.mapBranchMenuItemResponse(entry.menuItem, entry))
+      .filter(Boolean) as any[];
+
+    const categoryMap = new Map<string, { id: string; name: string; emoji: string; sortOrder: number; items: any[] }>();
+    flatItems.forEach((item, index) => {
+      const categoryId = String(item.category_id || 'uncategorized');
+      const categoryName = String(item.category_name || 'Khac');
+      if (!categoryMap.has(categoryId)) {
+        categoryMap.set(categoryId, {
+          id: categoryId,
+          name: categoryName,
+          emoji: '',
+          sortOrder: index + 1,
+          items: [],
+        });
+      }
+      categoryMap.get(categoryId)!.items.push({
+        id: item.menu_item_id,
+        branchMenuItemId: item.id,
+        name: item.name,
+        description: item.description || '',
+        imageUrl: item.image_url || null,
+        price: Number(item.price || 0),
+        isAvailable: Boolean(item.is_available),
+        badges: [],
+        options: item.custom_options || {},
+      });
+    });
+
+    return {
+      branchId: resolvedBranchId,
+      branchName: '',
+      tableId: tableIdNormalized || null,
+      tableName: tableIdNormalized ? `Bàn ${tableIdNormalized}` : '',
+      categories: Array.from(categoryMap.values()),
+    };
   }
 
   async activateBranchMenuItem(
@@ -1206,6 +1241,58 @@ export class OrderService {
           .map((item) => [String(item.id).trim(), item]),
       );
 
+      const missingEntries = recipe.filter((entry) => !ingredientMap.has(entry.ingredientId));
+      if (branchId && missingEntries.length) {
+        const syncPayload = {
+          branchId,
+          items: missingEntries.map((entry) => ({
+            id: entry.ingredientId,
+            name: String(entry.ingredientName || entry.ingredientId).trim(),
+            unit: String(entry.unit || 'portion').trim(),
+          })),
+        };
+
+        const syncResponse = await this.fetchWithRetry(
+          `${this.inventoryServiceUrl}/api/v1/ingredients/sync-menu`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${this.internalServiceToken}`,
+            },
+            body: JSON.stringify(syncPayload),
+          },
+        );
+
+        if (!syncResponse.ok) {
+          const syncBody = await syncResponse.text();
+          this.logger.warn(
+            `Khong dong bo duoc ingredient thieu cho chi nhanh ${branchId}: ${syncResponse.status} ${syncBody}`,
+          );
+        } else {
+          const refetchResponse = await this.fetchWithRetry(
+            `${this.inventoryServiceUrl}/api/v1/ingredients?${params.toString()}`,
+            {
+              headers: {
+                Authorization: `Bearer ${this.internalServiceToken}`,
+              },
+            },
+          );
+          if (refetchResponse.ok) {
+            const refetchPayload = (await refetchResponse.json()) as Array<{
+              id?: string;
+              name?: string;
+              unit?: string;
+              isActive?: boolean;
+            }>;
+            for (const item of Array.isArray(refetchPayload) ? refetchPayload : []) {
+              const id = String(item?.id || '').trim();
+              if (id) ingredientMap.set(id, item);
+            }
+          }
+        }
+      }
+
       return recipe.map((entry) => {
         const ingredient = ingredientMap.get(entry.ingredientId);
         if (!ingredient) {
@@ -1546,6 +1633,19 @@ export class OrderService {
     }
   }
 
+  private extractExtraAmountFromSelectedOptions(selectedOptions?: {
+    size?: { priceModifier?: number };
+    toppings?: Array<{ priceModifier?: number }>;
+  } | null): number {
+    if (!selectedOptions) return 0;
+    const sizeAmount = Number(selectedOptions.size?.priceModifier || 0);
+    const toppingsAmount = Array.isArray(selectedOptions.toppings)
+      ? selectedOptions.toppings.reduce((sum, topping) => sum + Number(topping?.priceModifier || 0), 0)
+      : 0;
+    const total = sizeAmount + toppingsAmount;
+    return Number.isFinite(total) && total > 0 ? Math.round(total) : 0;
+  }
+
   private mapPromotion(item: any) {
     return {
       ...item,
@@ -1839,7 +1939,53 @@ export class OrderService {
       throw new BadRequestException('branchId khong khop voi chi nhanh cua ban');
     }
 
-    const menuItemIds = dto.items.map((i) => i.menuItemId);
+    const requestedBranchMenuItemIds = dto.items
+      .map((item) => String(item.branchMenuItemId || '').trim())
+      .filter(Boolean);
+    const branchMenuIdToMenuItemId = new Map<string, string>();
+    if (requestedBranchMenuItemIds.length) {
+      const branchMenuItems = await this.prisma.branchMenuItem.findMany({
+        where: {
+          id: { in: requestedBranchMenuItemIds },
+          ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
+        },
+        select: { id: true, menuItemId: true, isAvailable: true },
+      });
+      for (const entry of branchMenuItems) {
+        branchMenuIdToMenuItemId.set(entry.id, entry.menuItemId);
+      }
+      if (branchMenuItems.length !== requestedBranchMenuItemIds.length) {
+        throw new BadRequestException('Mot hoac nhieu branchMenuItemId khong hop le');
+      }
+    }
+
+    const normalizedInputItems = dto.items.map((item) => {
+      const branchMenuItemId = String(item.branchMenuItemId || '').trim();
+      const resolvedMenuItemId = branchMenuItemId
+        ? String(branchMenuIdToMenuItemId.get(branchMenuItemId) || '').trim()
+        : String(item.menuItemId || '').trim();
+      if (!resolvedMenuItemId) {
+        throw new BadRequestException('Thieu menuItemId/branchMenuItemId hop le');
+      }
+      const effectiveNote = String(item.selectedOptions?.note || item.note || '').trim();
+      const optionsPayload = item.selectedOptions
+        ? {
+            selectedOptions: item.selectedOptions,
+            note: effectiveNote || undefined,
+            extraAmount: this.extractExtraAmountFromSelectedOptions(item.selectedOptions as any),
+          }
+        : undefined;
+      return {
+        ...item,
+        menuItemId: resolvedMenuItemId,
+        note: effectiveNote || undefined,
+        options:
+          item.options ||
+          (optionsPayload ? JSON.stringify(optionsPayload) : undefined),
+      };
+    });
+
+    const menuItemIds = normalizedInputItems.map((i) => i.menuItemId);
     const menuItems = await this.prisma.menuItem.findMany({
       select: {
         id: true,
@@ -1874,10 +2020,13 @@ export class OrderService {
     }
     this.ensureSellableMenuItemsHaveRecipe(menuItems);
 
+    const promoCode = String(dto.discountCode || dto.promoCode || '').trim() || undefined;
     const priceMap = await this.buildMenuPriceMap(menuItemIds, resolvedBranchId, menuItems);
-    const normalizedItems = dto.items.map((item) => {
+    const normalizedItems = normalizedInputItems.map((item) => {
       const basePrice = priceMap.get(item.menuItemId) || 0;
-      const extraAmount = this.extractExtraAmount(item.options);
+      const extraAmount = item.selectedOptions
+        ? this.extractExtraAmountFromSelectedOptions(item.selectedOptions as any)
+        : this.extractExtraAmount(item.options);
       return {
         ...item,
         unitPrice: basePrice + extraAmount,
@@ -1889,7 +2038,7 @@ export class OrderService {
       0,
     );
 
-    const promotion = await this.resolvePromotion(dto.promoCode, subtotalAmount, normalizedItems, undefined, resolvedBranchId);
+    const promotion = await this.resolvePromotion(promoCode, subtotalAmount, normalizedItems, undefined, resolvedBranchId);
     const discountAmount = promotion.discountAmount;
     const totalAmount = Math.max(subtotalAmount - discountAmount, 0);
 
@@ -2350,7 +2499,7 @@ export class OrderService {
 
     const allowedTransitions: Record<string, string[]> = {
       PENDING: ['CONFIRMED', 'CANCELLED'],
-      CONFIRMED: ['PREPARING', 'CANCELLED'],
+      CONFIRMED: ['PREPARING', 'READY', 'CANCELLED'],
       PREPARING: ['READY'],
       READY: ['PREPARING', 'COMPLETED'],
       COMPLETED: [],
@@ -2494,6 +2643,10 @@ export class OrderService {
     }
 
     const uniqueMenuIds = [...new Set(items.map((item) => item.menuItemId))];
+    const existingOrderMenuIds = new Set(
+      (order.orderItems || []).map((item) => String(item.menuItemId || '').trim()).filter(Boolean),
+    );
+
     const menuItems = await this.prisma.menuItem.findMany({
       select: {
         id: true,
@@ -2510,27 +2663,39 @@ export class OrderService {
         available: true,
       },
     });
-
-    if (menuItems.length !== uniqueMenuIds.length) {
+    const validMenuIds = new Set(menuItems.map((item) => item.id));
+    const invalidMenuIds = uniqueMenuIds.filter((id) => !validMenuIds.has(id) && !existingOrderMenuIds.has(id));
+    if (invalidMenuIds.length) {
       throw new BadRequestException('Mot hoac nhieu mon khong hop le');
     }
     if (order.branchId) {
+      const branchCheckIds = uniqueMenuIds.filter((id) => validMenuIds.has(id));
       const branchMappings = await this.prisma.branchMenuItem.count({
         where: {
           branchId: order.branchId,
-          menuItemId: { in: uniqueMenuIds },
+          menuItemId: { in: branchCheckIds },
           isAvailable: true,
         },
       });
-      if (branchMappings !== uniqueMenuIds.length) {
+      if (branchMappings !== branchCheckIds.length) {
         throw new BadRequestException('Mot hoac nhieu mon chua duoc bat tai chi nhanh');
       }
     }
     this.ensureSellableMenuItemsHaveRecipe(menuItems);
 
-    const priceMap = await this.buildMenuPriceMap(uniqueMenuIds, order.branchId || null, menuItems);
+    const legacyPriceMap = new Map<string, number>();
+    for (const orderItem of order.orderItems || []) {
+      const id = String(orderItem.menuItemId || '').trim();
+      if (!id || legacyPriceMap.has(id)) continue;
+      legacyPriceMap.set(id, Number(orderItem.price || 0));
+    }
+
+    const menuPriceIds = uniqueMenuIds.filter((id) => validMenuIds.has(id));
+    const priceMap = await this.buildMenuPriceMap(menuPriceIds, order.branchId || null, menuItems);
     const normalizedItems = items.map((item) => {
-      const basePrice = priceMap.get(item.menuItemId) || 0;
+      const basePrice = validMenuIds.has(item.menuItemId)
+        ? (priceMap.get(item.menuItemId) || 0)
+        : (legacyPriceMap.get(item.menuItemId) || 0);
       const extraAmount = this.extractExtraAmount(item.options);
       return {
         ...item,
@@ -2695,7 +2860,13 @@ export class OrderService {
     }
 
     if (previousStatus !== nextStatus) {
-      await this.notifyKitchenItemStatus(orderId, order.tableId, itemId, this.toKitchenItemStatus(nextStatus));
+      await this.notifyKitchenItemStatus(
+        orderId,
+        order.tableId,
+        itemId,
+        this.toKitchenItemStatus(nextStatus),
+        order.branchId || undefined,
+      );
     }
 
     // Nếu tất cả items đều DONE → tự động chuyển order sang READY
@@ -2707,7 +2878,7 @@ export class OrderService {
         data: { status: 'READY' },
       });
       this.logger.log(`Tất cả món done → đơn ${orderId} chuyển sang READY`);
-      await this.notifyKitchenOrderReady(orderId, order.tableId);
+      await this.notifyKitchenOrderReady(orderId, order.tableId, order.branchId || undefined);
     }
 
     return {
@@ -3086,6 +3257,7 @@ export class OrderService {
     tableId: string,
     itemId: string,
     status: string,
+    branchId?: string,
   ) {
     await this.emitStaffNotification({
       type: 'KDS_ITEM_STATUS',
@@ -3093,16 +3265,18 @@ export class OrderService {
       message: `Đơn ${orderId}: món ${itemId} -> ${status}`,
       orderId,
       tableId,
+      branchId,
     });
   }
 
-  private async notifyKitchenOrderReady(orderId: string, tableId: string) {
+  private async notifyKitchenOrderReady(orderId: string, tableId: string, branchId?: string) {
     await this.emitStaffNotification({
       type: 'KDS_ORDER_READY',
       title: `Bếp hoàn thành đơn - Bàn ${tableId}`,
       message: `Đơn ${orderId} đã sẵn sàng phục vụ`,
       orderId,
       tableId,
+      branchId,
     });
   }
 
@@ -3112,6 +3286,7 @@ export class OrderService {
     message: string;
     orderId?: string;
     tableId?: string;
+    branchId?: string;
   }) {
     try {
       const response = await this.fetchWithRetry(`${this.chatServiceApiUrl}/staff-notifications`, {

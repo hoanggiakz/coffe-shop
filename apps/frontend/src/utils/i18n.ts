@@ -7,6 +7,7 @@ const dictionary = {
   tables: { vi: 'Bàn', en: 'Bàn' },
   orders: { vi: 'Đơn hàng / POS', en: 'Đơn hàng / POS' },
   payments: { vi: 'Thanh toán', en: 'Thanh toán' },
+  invoices: { vi: 'Hóa đơn', en: 'Hóa đơn' },
   inventory: { vi: 'Kho', en: 'Kho' },
   promotions: { vi: 'Khuyến mãi', en: 'Khuyến mãi' },
   reports: { vi: 'Báo cáo', en: 'Báo cáo' },

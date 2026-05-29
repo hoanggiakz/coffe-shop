@@ -505,6 +505,33 @@ sequenceDiagram
     end
 ```
 
+## 5.15 Đối Chiếu BA Với Code (Rà soát ngày 29/05/2026)
+
+Nguồn đối chiếu:
+- `D:\L-2026\CNM\BA\pos_module_spec.md`
+- `D:\L-2026\CNM\BA\invoice_module_spec.md`
+- `D:\L-2026\CNM\BA\chat_module_spec.md`
+- `D:\L-2026\CNM\BA\customer_menu_spec.md`
+- `D:\L-2026\CNM\BA\kds_websocket_spec.md`
+- `D:\L-2026\CNM\BA\order_management_spec.md`
+
+| Module | Trạng thái bám tài liệu | Ghi chú triển khai thực tế hiện tại |
+|---|---|---|
+| POS (`pos_module_spec`) | ✅ Core đã chạy, 🟡 một phần phase nâng cao | Đã có sơ đồ bàn, tạo/sửa đơn, KDS, thanh toán, invoice UI, queue offline tạo order ở FE. Chưa hoàn tất các hạng mục như split bill, keyboard shortcut đầy đủ, chuyển/ghép bàn toàn phần. |
+| Invoice (`invoice_module_spec`) | ✅ Triển khai chính | Đã có tạo số hóa đơn dạng `HD-YYYYMM-XXXXXX`, API xem danh sách/chi tiết/public, màn Staff Invoices và PublicInvoice, void invoice theo quyền quản lý. |
+| Chat (`chat_module_spec`) | ✅ Hoạt động theo nhánh | Chat realtime đang chạy qua `chat-service` namespace `/chat`, có phân luồng theo branch cho staff notifications, lưu session + message DB, close/read và UI staff/customer. |
+| Customer Menu (`customer_menu_spec`) | ✅ Core + 🟡 mở rộng | Đã có menu QR theo `tableId/branchId`, validate bàn qua gateway, cart, đặt món, login khách OTP/email, lịch sử đơn, chat, gợi ý. Có hỗ trợ cache menu và fallback khi mất mạng. |
+| KDS WebSocket (`kds_websocket_spec`) | 🟡 Tương thích nghiệp vụ, chưa tách namespace chuyên biệt | Đang dùng `staff-notification` và room staff/branch để vận hành ổn định; chưa tách hoàn toàn sang giao thức `/kds` độc lập như thiết kế mục tiêu dài hạn. |
+| Order Management (`order_management_spec`) | ✅ Core + 🟡 nâng cao | Đã có vòng đời order/item, đồng bộ trạng thái KDS, tích hợp tồn kho, payment hooks, branch scoping, discount validate. Một số phần advanced vẫn theo roadmap (partitioning, full event infra profile tuỳ môi trường). |
+
+Các điểm vừa chuẩn hóa theo yêu cầu gần đây:
+- Upload ảnh đại diện nhân viên bằng file (`multipart/form-data`) và lưu trực tiếp vào DB (`users.avatar_url` dạng `TEXT`).
+- Upload ảnh món từ FE qua API backend và lưu chuỗi ảnh vào DB để seed/deploy có sẵn dữ liệu ảnh.
+- Gateway đã thêm route cho attendance/payroll: `/api/attendance`, `/api/payroll`.
+- Tách phạm vi đăng nhập theo tab/session để tránh ghi đè role giữa các tab cùng trình duyệt.
+- Header hiển thị avatar thật sau khi cập nhật profile; fallback chữ cái đầu khi ảnh lỗi.
+- RBAC `/staff` siết lại cho `ADMIN|MANAGER`.
+
 ## 6. Tài khoản mặc định test
 
 | Vai trò | Email | Mật khẩu |

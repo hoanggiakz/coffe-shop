@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import toast from 'react-hot-toast'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
@@ -6,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { vaiTroNhanVien } from '@/utils/display'
 import { normalizeRole } from '@/utils/rbac'
+import api from '@/utils/api'
 
 type SepayEnv = 'sandbox' | 'production'
 
@@ -31,7 +33,7 @@ function buildDefaultAdminConfig(): AdminSystemConfig {
 }
 
 export default function Settings() {
-  const { user } = useAuthStore()
+  const { user, updateUser } = useAuthStore()
   const darkMode = useUiStore((state) => state.darkMode)
   const setDarkMode = useUiStore((state) => state.setDarkMode)
   const soundEnabled = useUiStore((state) => state.soundEnabled)
@@ -43,6 +45,47 @@ export default function Settings() {
   const role = normalizeRole(user?.role)
   const isAdmin = role === 'ADMIN'
   const [adminConfig, setAdminConfig] = useState<AdminSystemConfig>(buildDefaultAdminConfig())
+  const [profileForm, setProfileForm] = useState({
+    name: user?.name || '',
+    phone: user?.phone || '',
+    avatarUrl: user?.avatarUrl || user?.avatar || '',
+  })
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  })
+  const [changingPassword, setChangingPassword] = useState(false)
+
+  useEffect(() => {
+    setProfileForm({
+      name: user?.name || '',
+      phone: user?.phone || '',
+      avatarUrl: user?.avatarUrl || user?.avatar || '',
+    })
+  }, [user?.id, user?.name, user?.phone, user?.avatar, user?.avatarUrl])
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const { data } = await api.get('/users/profile')
+        updateUser({
+          name: data?.name || '',
+          email: data?.email || '',
+          phone: data?.phone || '',
+          branchId: data?.branchId || null,
+          employeeCode: data?.employeeCode || null,
+          avatarUrl: data?.avatarUrl || null,
+          avatar: data?.avatarUrl || null,
+        })
+      } catch {
+        // ignore profile fetch errors on settings load
+      }
+    }
+    void loadProfile()
+  }, [updateUser])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -87,6 +130,90 @@ export default function Settings() {
     }
   }
 
+  const saveProfile = async () => {
+    setSavingProfile(true)
+    try {
+      const payload = {
+        name: profileForm.name,
+        phone: profileForm.phone || null,
+        avatarUrl: profileForm.avatarUrl || null,
+      }
+      const { data } = await api.patch('/users/profile', payload)
+      updateUser({
+        name: data?.name || profileForm.name,
+        phone: data?.phone || profileForm.phone,
+        employeeCode: data?.employeeCode || user?.employeeCode || null,
+        avatarUrl: data?.avatarUrl || profileForm.avatarUrl || null,
+        avatar: data?.avatarUrl || profileForm.avatarUrl || null,
+      })
+      toast.success('Đã cập nhật hồ sơ cá nhân')
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Không thể cập nhật hồ sơ')
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
+  const submitChangePassword = async () => {
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      toast.error('Vui lòng nhập đủ thông tin mật khẩu')
+      return
+    }
+    if (passwordForm.newPassword.length < 6) {
+      toast.error('Mật khẩu mới tối thiểu 6 ký tự')
+      return
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast.error('Xác nhận mật khẩu mới không khớp')
+      return
+    }
+
+    setChangingPassword(true)
+    try {
+      await api.post('/users/change-password', {
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      })
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+      toast.success('Đổi mật khẩu thành công')
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Đổi mật khẩu thất bại')
+    } finally {
+      setChangingPassword(false)
+    }
+  }
+
+  const uploadAvatarFile = async (file?: File | null) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Chỉ chấp nhận file ảnh')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Ảnh tối đa 5MB')
+      return
+    }
+    setUploadingAvatar(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const { data } = await api.post('/users/profile/avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      const avatarUrl = String(data?.avatarUrl || '')
+      setProfileForm((prev) => ({ ...prev, avatarUrl }))
+      updateUser({
+        avatarUrl: avatarUrl || null,
+        avatar: avatarUrl || null,
+      })
+      toast.success('Đã upload ảnh đại diện và lưu vào DB')
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Upload ảnh đại diện thất bại')
+    } finally {
+      setUploadingAvatar(false)
+    }
+  }
+
   return (
     <div className="space-y-5 sm:space-y-6">
       <div>
@@ -98,11 +225,30 @@ export default function Settings() {
 
       <Card title="Thông tin tài khoản">
         <div className="grid max-w-lg grid-cols-1 gap-4 sm:grid-cols-2">
-          <Input id="name" label="Họ tên" defaultValue={user?.name || ''} />
+          <Input id="name" label="Họ tên" value={profileForm.name} onChange={(e) => setProfileForm((prev) => ({ ...prev, name: e.target.value }))} />
           <Input id="email" label="Email" defaultValue={user?.email || ''} disabled />
+          <Input id="employee-code" label="Mã nhân viên" defaultValue={user?.employeeCode || '-'} disabled />
+          <Input id="phone" label="Số điện thoại" value={profileForm.phone} onChange={(e) => setProfileForm((prev) => ({ ...prev, phone: e.target.value }))} />
+          <Input id="avatar-url" label="Ảnh đại diện (URL)" value={profileForm.avatarUrl} onChange={(e) => setProfileForm((prev) => ({ ...prev, avatarUrl: e.target.value }))} />
           <Input id="role" label="Vai trò" defaultValue={vaiTroNhanVien(user?.role)} disabled />
         </div>
-        <Button className="mt-4" size="sm">Lưu thay đổi</Button>
+        <div className="mt-3 max-w-lg">
+          <label className="block text-sm font-medium text-slate-700 dark:text-gray-200">Upload ảnh đại diện từ máy</label>
+          <input
+            type="file"
+            accept="image/*"
+            className="mt-1 block w-full rounded-xl border border-amber-100 bg-white/95 px-3 py-2 text-sm"
+            onChange={(e) => void uploadAvatarFile(e.target.files?.[0] || null)}
+            disabled={uploadingAvatar}
+          />
+          {uploadingAvatar && <p className="mt-1 text-xs text-slate-500">Đang upload ảnh...</p>}
+        </div>
+        {profileForm.avatarUrl && (
+          <div className="mt-4">
+            <img src={profileForm.avatarUrl} alt="Avatar preview" className="h-16 w-16 rounded-full border border-amber-100 object-cover" />
+          </div>
+        )}
+        <Button className="mt-4" size="sm" loading={savingProfile} onClick={saveProfile}>Lưu thay đổi</Button>
       </Card>
 
       <Card title="Tùy chọn giao diện" subtitle="Trải nghiệm sử dụng và khả năng tiếp cận">
@@ -177,11 +323,11 @@ export default function Settings() {
 
       <Card title="Đổi mật khẩu">
         <div className="max-w-sm space-y-4">
-          <Input id="current" label="Mật khẩu hiện tại" type="password" />
-          <Input id="new" label="Mật khẩu mới" type="password" />
-          <Input id="confirm" label="Xác nhận mật khẩu mới" type="password" />
+          <Input id="current" label="Mật khẩu hiện tại" type="password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))} />
+          <Input id="new" label="Mật khẩu mới" type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))} />
+          <Input id="confirm" label="Xác nhận mật khẩu mới" type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
         </div>
-        <Button className="mt-4" size="sm">Cập nhật mật khẩu</Button>
+        <Button className="mt-4" size="sm" loading={changingPassword} onClick={submitChangePassword}>Cập nhật mật khẩu</Button>
       </Card>
 
       {isAdmin && (

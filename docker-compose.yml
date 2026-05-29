@@ -181,7 +181,7 @@ services:
 
   chat-service:
     build: ./apps/backend/chat-service
-    command: sh -c "npx prisma db push && node dist/main"
+    command: sh -c "npx prisma db push --accept-data-loss && node dist/main"
     expose:
       - "3007"
     ports:
@@ -252,6 +252,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-token}
       CHAT_SERVICE_URL: http://chat-service:3007/api/chats
+      ORDER_SERVICE_URL: http://order-service:3001
       APP_BASE_URL: ${APP_BASE_URL:-http://127.0.0.1:8088}
       ONLINE_PAYMENT_QR_URL: ${ONLINE_PAYMENT_QR_URL:-https://img.vietqr.io/image/VCB-1026422235-qr_only.png}
       ONLINE_PAYMENT_QR_ACCOUNT_NAME: ${ONLINE_PAYMENT_QR_ACCOUNT_NAME:-Coffee Shop}

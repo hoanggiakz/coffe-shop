@@ -317,23 +317,29 @@ export default function Menu() {
     }
 
     setIsUploadingImage(true)
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = String(reader.result || '')
-      if (!dataUrl.startsWith('data:image/')) {
-        toast.error('Không đọc được file ảnh')
+    const formData = new FormData()
+    formData.append('file', file)
+    api.post('/orders/admin/menu/images/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+      .then((response) => {
+        const dataUrl = String(response?.data?.dataUrl || '')
+        if (!dataUrl.startsWith('data:image/')) {
+          toast.error('Upload ảnh thất bại')
+          return
+        }
+        setItemForm((prev) => ({ ...prev, image: dataUrl }))
+        toast.success('Đã upload ảnh và lưu dữ liệu vào DB')
+      })
+      .catch((error: any) => {
+        toast.error(error.response?.data?.message || 'Không thể upload ảnh')
+      })
+      .finally(() => {
         setIsUploadingImage(false)
-        return
-      }
-      setItemForm((prev) => ({ ...prev, image: dataUrl }))
-      setIsUploadingImage(false)
-      toast.success('Đã tải ảnh lên form')
-    }
-    reader.onerror = () => {
-      setIsUploadingImage(false)
-      toast.error('Không thể đọc file ảnh')
-    }
-    reader.readAsDataURL(file)
+      })
+    // Reset input value to allow selecting same file again
+    // eslint-disable-next-line no-param-reassign
+    ;(document.activeElement as HTMLInputElement | null)?.blur()
   }
 
   const submitItem = async () => {

@@ -6,6 +6,8 @@ import api from '@/utils/api'
 import { disconnectSocket, getSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { useUiStore } from '@/stores/uiStore'
+import { useAuthStore } from '@/stores/authStore'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 import { maDonHangNgan, trangThaiDonHang } from '@/utils/display'
@@ -51,6 +53,7 @@ interface StaffNotificationPayload {
   type: StaffNotificationType
   title: string
   message: string
+  branchId?: string
 }
 
 type KdsStage = 'WAITING' | 'PREPARING' | 'READY'
@@ -119,13 +122,16 @@ export default function Kitchen() {
   const [socketConnected, setSocketConnected] = useState(false)
   const soundEnabled = useUiStore((state) => state.soundEnabled)
   const setSoundEnabled = useUiStore((state) => state.setSoundEnabled)
+  const currentUser = useAuthStore((state) => state.user)
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
+  const effectiveBranchId = String(selectedBranchId || currentUser?.branchId || '').trim()
 
   const loadData = async () => {
     try {
       const [ordersRes, tablesRes, menuRes] = await Promise.all([
-        api.get('/orders'),
-        api.get('/tables'),
-        api.get('/orders/menu'),
+        api.get('/orders', { params: { branchId: effectiveBranchId || undefined } }),
+        api.get('/tables', { params: { branchId: effectiveBranchId || undefined } }),
+        api.get('/orders/menu', { params: { branchId: effectiveBranchId || undefined } }),
       ])
       const normalizedOrders: OrderApi[] = (ordersRes.data || [])
         .filter((order: OrderApi) => KITCHEN_ORDER_STATUSES.has(order.status))
@@ -151,14 +157,18 @@ export default function Kitchen() {
     loadData()
     const timer = setInterval(loadData, 15000)
     return () => clearInterval(timer)
-  }, [])
+  }, [effectiveBranchId])
 
   useEffect(() => {
     const socket = getSocket()
 
     const onConnect = () => {
       setSocketConnected(true)
-      socket.emit('join-staff')
+      socket.emit('join-staff', {
+        staffId: currentUser?.id,
+        staffName: currentUser?.name,
+        branchId: effectiveBranchId || undefined,
+      })
     }
 
     const onDisconnect = () => setSocketConnected(false)
@@ -192,7 +202,7 @@ export default function Kitchen() {
       socket.off('staff-notification', onNotification)
       disconnectSocket()
     }
-  }, [soundEnabled])
+  }, [soundEnabled, currentUser?.id, currentUser?.name, effectiveBranchId])
 
   const updateItemStatus = async (
     orderId: string,

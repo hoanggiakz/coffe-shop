@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UsePipes, ValidationPipe, HttpCode, HttpStatus, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UsePipes, ValidationPipe, HttpCode, HttpStatus, Headers, BadRequestException, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -207,6 +208,29 @@ export class OrderController {
     return this.orderService.deleteMenuItemForAdmin(id, { role: actorRole, branchId: actorBranchId });
   }
 
+  @Post('admin/menu/images/upload')
+  @UseInterceptors(FileInterceptor('file'))
+  @HttpCode(HttpStatus.CREATED)
+  uploadMenuImage(@UploadedFile() file?: any) {
+    if (!file) {
+      throw new BadRequestException('Thieu file anh');
+    }
+    if (!String(file.mimetype || '').startsWith('image/')) {
+      throw new BadRequestException('Chi chap nhan file anh');
+    }
+    if ((file.size || 0) > 5 * 1024 * 1024) {
+      throw new BadRequestException('Anh toi da 5MB');
+    }
+    const base64 = file.buffer.toString('base64');
+    const dataUrl = `data:${file.mimetype};base64,${base64}`;
+    return {
+      dataUrl,
+      mimeType: file.mimetype,
+      size: file.size,
+      fileName: file.originalname,
+    };
+  }
+
   // ── Promotion Management (M-17..M-18) ───────────────────
   @Get('admin/promotions')
   listPromotions(@Query() query: QueryPromotionDto) {
@@ -336,9 +360,25 @@ export class OrderController {
     return this.orderService.updateStatus(id, dto);
   }
 
+  @Get(':id/status')
+  async getStatus(@Param('id') id: string) {
+    const order = await this.orderService.findOne(id) as any;
+    return {
+      orderId: order.id,
+      status: order.status,
+      updatedAt: order.updatedAt,
+    };
+  }
+
   @Patch(':id/items')
   updateItems(@Param('id') id: string, @Body() dto: StaffUpdateOrderItemsDto) {
     return this.orderService.updateOrderItems(id, dto);
+  }
+
+  @Get(':id/items')
+  async getOrderItems(@Param('id') id: string) {
+    const order = await this.orderService.findOne(id) as any;
+    return order?.orderItems || [];
   }
 
   @Post(':id/items')

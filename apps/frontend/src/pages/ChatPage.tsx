@@ -14,7 +14,9 @@ import { maDonHangNgan } from '@/utils/display'
 interface ChatItem {
   id: string
   tableId: string
+  customerName?: string | null
   status: 'OPEN' | 'CLOSED'
+  unreadCount?: number
   messages?: ChatMessage[]
   updatedAt?: string
 }
@@ -26,7 +28,7 @@ interface TableApi {
 
 interface ChatMessage {
   id: string
-  chatId: string
+  sessionId: string
   senderType: 'CUSTOMER' | 'STAFF'
   senderName: string
   content: string
@@ -109,10 +111,12 @@ export default function ChatPage() {
   const [newTableId, setNewTableId] = useState('')
   const [sending, setSending] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [statusFilter, setStatusFilter] = useState<'OPEN' | 'ALL'>('OPEN')
   const [socketConnected, setSocketConnected] = useState(false)
   const [lastSeenMap, setLastSeenMap] = useState<Record<string, string>>(() => loadLastSeenMap())
   const activeChatIdRef = useRef('')
   const messageEndRef = useRef<HTMLDivElement | null>(null)
+  const staffTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId),
@@ -129,6 +133,7 @@ export default function ChatPage() {
   }
 
   const hasUnread = (chat: ChatItem) => {
+    if ((chat.unreadCount || 0) > 0) return true
     const latest = getLatestMessage(chat)
     if (!latest || latest.senderType !== 'CUSTOMER') return false
     const lastSeen = lastSeenMap[chat.id]
@@ -194,8 +199,11 @@ export default function ChatPage() {
 
   const loadChats = async () => {
     try {
+      const branchId = String(user?.branchId || '').trim()
       const [chatRes, tableRes] = await Promise.all([
-        api.get('/chats'),
+        branchId
+          ? api.get(`/branches/${branchId}/chat/sessions?status=${statusFilter}&page=1&limit=100`)
+          : api.get('/chats'),
         api.get('/tables'),
       ])
       const nextChats: ChatItem[] = Array.isArray(chatRes.data) ? chatRes.data : []
@@ -227,7 +235,7 @@ export default function ChatPage() {
 
   const loadMessages = async (chatId: string) => {
     try {
-      const { data } = await api.get(`/chats/${chatId}/messages`)
+      const { data } = await api.get(`/chat/sessions/${chatId}/messages?page=1&limit=200`)
       const nextMessages: ChatMessage[] = Array.isArray(data) ? data : []
       setMessages(nextMessages)
       const latest = nextMessages[nextMessages.length - 1]
@@ -245,7 +253,7 @@ export default function ChatPage() {
     loadChats()
     const timer = setInterval(loadChats, 10000)
     return () => clearInterval(timer)
-  }, [])
+  }, [statusFilter, user?.branchId])
 
   useEffect(() => {
     if (!activeChatId) return
@@ -268,16 +276,19 @@ export default function ChatPage() {
       socket.emit('join-staff', {
         staffId: user?.id,
         staffName: user?.name,
+        branchId: user?.branchId || undefined,
+        role: user?.role || undefined,
       })
     }
 
     const onDisconnect = () => setSocketConnected(false)
 
-    const onNewMessage = (message: ChatMessage) => {
+    const onNewMessage = (payload: ChatMessage | { message?: ChatMessage }) => {
+      const message = (payload as any)?.message ? (payload as any).message as ChatMessage : payload as ChatMessage
       setChats((prev) =>
         prev
           .map((chat) => {
-            if (chat.id !== message.chatId) return chat
+            if (chat.id !== message.sessionId) return chat
             return {
               ...chat,
               updatedAt: message.createdAt,
@@ -290,11 +301,11 @@ export default function ChatPage() {
           ),
       )
 
-      if (message.chatId === activeChatIdRef.current) {
+      if (message.sessionId === activeChatIdRef.current) {
         setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]))
-        markChatSeen(message.chatId, message.createdAt)
+        markChatSeen(message.sessionId, message.createdAt)
       } else if (message.senderType === 'CUSTOMER') {
-        const relatedChat = chats.find((chat) => chat.id === message.chatId)
+        const relatedChat = chats.find((chat) => chat.id === message.sessionId)
         showRealtimeNotification(
           relatedChat ? tv(`Chat ${tableLabel(relatedChat.tableId)}`, `Chat ${tableLabel(relatedChat.tableId)}`) : tv('Chat mới từ khách', 'New customer chat'),
           message.content,
@@ -311,6 +322,7 @@ export default function ChatPage() {
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
     socket.on('new-message', onNewMessage)
+    socket.on('chat-closed', loadChats)
     socket.on('staff-notification', onStaffNotification)
 
     if (!socket.connected) {
@@ -323,16 +335,19 @@ export default function ChatPage() {
       socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
       socket.off('new-message', onNewMessage)
+      socket.off('chat-closed', loadChats)
       socket.off('staff-notification', onStaffNotification)
+      if (staffTypingTimerRef.current) clearTimeout(staffTypingTimerRef.current)
       disconnectSocket()
     }
   }, [user?.id, user?.name])
 
   useEffect(() => {
-    if (!activeChat?.tableId) return
+    if (!activeChat?.id) return
     const socket = getSocket()
-    socket.emit('join', { tableId: activeChat.tableId, senderType: 'STAFF' })
-  }, [activeChat?.tableId])
+    socket.emit('join-chat-room', { sessionId: activeChat.id })
+    api.post(`/chat/sessions/${activeChat.id}/mark-read`).catch(() => {})
+  }, [activeChat?.id])
 
   const createChat = async () => {
     if (!newTableId.trim()) {
@@ -340,7 +355,7 @@ export default function ChatPage() {
       return
     }
     try {
-      const { data } = await api.post('/chats', { tableId: newTableId.trim() })
+      const { data } = await api.post('/chats', { tableId: newTableId.trim(), branchId: user?.branchId || undefined })
       setNewTableId('')
       await loadChats()
       setActiveChatId(data.id)
@@ -356,12 +371,19 @@ export default function ChatPage() {
     try {
       const socket = getSocket()
       socket.emit('send-message', {
+        sessionId: activeChat.id,
         content: messageText.trim(),
         senderType: 'STAFF',
         senderName: user?.name || 'Staff',
         senderId: user?.id,
       })
       setMessageText('')
+      socket.emit('typing', {
+        sessionId: activeChat.id,
+        senderType: 'STAFF',
+        senderName: user?.name || 'Staff',
+        isTyping: false,
+      })
       markChatSeen(activeChat.id)
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Gửi tin nhắn thất bại', 'Failed to send message'))
@@ -370,9 +392,31 @@ export default function ChatPage() {
     }
   }
 
+  const onTypingInput = (value: string) => {
+    setMessageText(value)
+    if (!activeChat?.id) return
+    const socket = getSocket()
+    if (!socket.connected) return
+    socket.emit('typing', {
+      sessionId: activeChat.id,
+      senderType: 'STAFF',
+      senderName: user?.name || 'Staff',
+      isTyping: value.trim().length > 0,
+    })
+    if (staffTypingTimerRef.current) clearTimeout(staffTypingTimerRef.current)
+    staffTypingTimerRef.current = setTimeout(() => {
+      socket.emit('typing', {
+        sessionId: activeChat.id,
+        senderType: 'STAFF',
+        senderName: user?.name || 'Staff',
+        isTyping: false,
+      })
+    }, 1200)
+  }
+
   const closeChat = async (chatId: string) => {
     try {
-      await api.patch(`/chats/${chatId}/close`)
+      await api.post(`/chat/sessions/${chatId}/close`)
       toast.success(tv('Đã đóng chat', 'Chat closed'))
       setMessages([])
       setActiveChatId('')
@@ -392,13 +436,29 @@ export default function ChatPage() {
     <div className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">{tv('Chat hỗ trợ', 'Support chat')}</h1>
-        <span
-          className={`rounded-full px-3 py-1 text-xs font-medium ${
-            socketConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
-          }`}
-        >
-          {socketConnected ? tv('Realtime ON', 'Realtime ON') : tv('Realtime OFF', 'Realtime OFF')}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className={`rounded-full px-3 py-1 text-xs font-medium ${statusFilter === 'OPEN' ? 'bg-amber-200 text-amber-900' : 'bg-gray-100 text-gray-600'}`}
+            onClick={() => setStatusFilter('OPEN')}
+          >
+            {tv('Đang mở', 'Open')}
+          </button>
+          <button
+            type="button"
+            className={`rounded-full px-3 py-1 text-xs font-medium ${statusFilter === 'ALL' ? 'bg-amber-200 text-amber-900' : 'bg-gray-100 text-gray-600'}`}
+            onClick={() => setStatusFilter('ALL')}
+          >
+            {tv('Tất cả', 'All')}
+          </button>
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-medium ${
+              socketConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            {socketConnected ? tv('Realtime ON', 'Realtime ON') : tv('Realtime OFF', 'Realtime OFF')}
+          </span>
+        </div>
       </div>
 
       <Card>
@@ -439,8 +499,9 @@ export default function ChatPage() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-medium text-slate-900">{tableLabel(chat.tableId)}</p>
-                    {unread && <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-semibold text-white">{tv('Mới', 'New')}</span>}
+                    {unread && <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-semibold text-white">{chat.unreadCount || tv('Mới', 'New')}</span>}
                   </div>
+                  <p className="mt-1 text-xs text-slate-500">{chat.customerName || tv('Khách vãng lai', 'Walk-in customer')}</p>
                   <p className="mt-1 text-xs text-slate-500">{chat.status}</p>
                   <p className="mt-1 line-clamp-1 text-xs text-slate-600">
                     {latest ? formatSystemMessage(latest).preview : tv('Chưa có tin nhắn', 'No messages yet')}
@@ -525,7 +586,7 @@ export default function ChatPage() {
               <div className="mt-2 flex flex-col gap-2 border-t border-amber-100 pt-3 dark:border-gray-700 sm:flex-row">
                 <Input
                   value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
+                  onChange={(e) => onTypingInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                   placeholder={tv('Nhập tin nhắn...', 'Type a message...')}
                   className="flex-1"

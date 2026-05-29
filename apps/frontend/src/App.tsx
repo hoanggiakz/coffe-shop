@@ -9,11 +9,13 @@ const Login = lazy(() => import('./pages/auth/Login'))
 const Register = lazy(() => import('./pages/auth/Register'))
 const CustomerMenu = lazy(() => import('./pages/CustomerMenu'))
 const PaymentReturn = lazy(() => import('./pages/PaymentReturn'))
+const PublicInvoice = lazy(() => import('./pages/PublicInvoice'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Menu = lazy(() => import('./pages/Menu'))
 const Tables = lazy(() => import('./pages/Tables'))
 const Orders = lazy(() => import('./pages/Orders'))
 const Payments = lazy(() => import('./pages/Payments'))
+const Invoices = lazy(() => import('./pages/Invoices'))
 const Inventory = lazy(() => import('./pages/Inventory'))
 const Promotions = lazy(() => import('./pages/Promotions'))
 const Reports = lazy(() => import('./pages/Reports'))
@@ -58,6 +60,7 @@ function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/menu" element={<CustomerMenu />} />
           <Route path="/payment/return" element={<PaymentReturn />} />
+          <Route path="/invoice/public/:id" element={<PublicInvoice />} />
 
           <Route element={<DashboardLayout />}>
             <Route path="/" element={<Dashboard />} />
@@ -65,6 +68,7 @@ function App() {
             <Route path="/tables" element={<Tables />} />
             <Route path="/orders" element={<Orders />} />
             <Route path="/payments" element={<Payments />} />
+            <Route path="/invoices" element={<Invoices />} />
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/promotions" element={<Promotions />} />
             <Route path="/reports" element={<Reports />} />

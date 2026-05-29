@@ -29,8 +29,10 @@ import com.coffeeshop.userservice.dto.StaffResponse;
 import com.coffeeshop.userservice.dto.StaffShiftRequest;
 import com.coffeeshop.userservice.dto.StaffShiftResponse;
 import com.coffeeshop.userservice.dto.StaffUpdateRequest;
+import com.coffeeshop.userservice.dto.UpdateProfileRequest;
 import com.coffeeshop.userservice.dto.UserProfile;
 import com.coffeeshop.userservice.dto.WeekScheduleResponse;
+import com.coffeeshop.userservice.dto.ChangePasswordRequest;
 import com.coffeeshop.userservice.entity.AttendanceRecord;
 import com.coffeeshop.userservice.entity.Branch;
 import com.coffeeshop.userservice.entity.ShiftType;
@@ -45,8 +47,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -57,6 +61,7 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.TemporalAdjusters;
+import java.util.Base64;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -144,6 +149,66 @@ public class UserService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));
         return UserProfile.from(user);
+    }
+
+    public UserProfile updateProfile(String userId, UpdateProfileRequest req) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));
+
+        if (req.getName() != null) {
+            String name = req.getName().trim();
+            if (name.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ten khong duoc de trong");
+            }
+            user.setName(name);
+        }
+
+        if (req.getPhone() != null) {
+            user.setPhone(normalizePhone(req.getPhone()));
+        }
+
+        if (req.getAvatarUrl() != null) {
+            String avatarUrl = req.getAvatarUrl().trim();
+            user.setAvatarUrl(avatarUrl.isBlank() ? null : avatarUrl);
+        }
+
+        return UserProfile.from(userRepository.save(user));
+    }
+
+    public void changePassword(String userId, ChangePasswordRequest req) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));
+        if (!passwordEncoder.matches(req.getCurrentPassword(), user.getPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mat khau hien tai khong dung");
+        }
+        if (passwordEncoder.matches(req.getNewPassword(), user.getPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mat khau moi phai khac mat khau cu");
+        }
+        user.setPassword(passwordEncoder.encode(req.getNewPassword()));
+        userRepository.save(user);
+    }
+
+    public UserProfile uploadProfileAvatar(String userId, MultipartFile file) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Thieu file anh");
+        }
+        String contentType = String.valueOf(file.getContentType());
+        if (!contentType.startsWith("image/")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Chi chap nhan file anh");
+        }
+        if (file.getSize() > 5L * 1024L * 1024L) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Anh toi da 5MB");
+        }
+        try {
+            String base64 = Base64.getEncoder().encodeToString(file.getBytes());
+            user.setAvatarUrl("data:" + contentType + ";base64," + base64);
+            userRepository.save(user);
+            return UserProfile.from(user);
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khong doc duoc file anh");
+        }
     }
 
     public OtpResponse requestCustomerOtp(OtpRequest req) {
