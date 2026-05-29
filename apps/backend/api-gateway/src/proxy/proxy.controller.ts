@@ -521,7 +521,7 @@ export class ProxyController {
     }
 
     const tableStatus = String(payload?.status || '').toUpperCase();
-    if (tableStatus === 'MAINTENANCE' || tableStatus === 'UNAVAILABLE') {
+    if (tableStatus === 'MAINTENANCE' || tableStatus === 'UNAVAILABLE' || tableStatus === 'CLEANING') {
       throw new ForbiddenException('Ban hien khong kha dung');
     }
   }
