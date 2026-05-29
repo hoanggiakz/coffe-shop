@@ -125,10 +125,22 @@ public class TestAccountSeeder {
         Branch branch = branchRepository.findByNameIgnoreCase(name)
                 .orElseGet(() -> Branch.builder().name(name).build());
         branch.setName(name);
+        branch.setCode(branchCodeForName(name));
         branch.setAddress(address);
         branch.setPhone(phone);
         branch.setIsActive(true);
         return branchRepository.save(branch);
+    }
+
+    private String branchCodeForName(String name) {
+        String normalized = name == null ? "" : name.toLowerCase();
+        if (normalized.contains("trung tam")) {
+            return "BR-CENTRAL";
+        }
+        if (normalized.contains("riverside")) {
+            return "BR-RIVERSIDE";
+        }
+        return "BR-DEFAULT";
     }
 
     private User upsertStaff(
