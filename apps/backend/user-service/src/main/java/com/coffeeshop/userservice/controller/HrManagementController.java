@@ -44,24 +44,6 @@ public class HrManagementController {
 
     private final HrManagementService hrManagementService;
 
-    @GetMapping("/branches/{branchId}/staff")
-    public ResponseEntity<List<StaffResponse>> listBranchStaff(
-            @RequestHeader("Authorization") String authHeader,
-            @PathVariable String branchId
-    ) {
-        return ResponseEntity.ok(hrManagementService.listBranchStaff(extractToken(authHeader), branchId));
-    }
-
-    @PostMapping("/branches/{branchId}/staff")
-    public ResponseEntity<StaffResponse> createBranchStaff(
-            @RequestHeader("Authorization") String authHeader,
-            @PathVariable String branchId,
-            @Valid @RequestBody StaffCreateRequest request
-    ) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(hrManagementService.createBranchStaff(extractToken(authHeader), branchId, request));
-    }
-
     @GetMapping("/staff/{userId}")
     public ResponseEntity<StaffResponse> getStaff(
             @RequestHeader("Authorization") String authHeader,

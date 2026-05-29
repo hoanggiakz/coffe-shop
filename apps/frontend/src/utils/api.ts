@@ -14,20 +14,33 @@ const AUTH_STORAGE_KEY = 'auth-storage'
 const isPublicCustomerRoute = () => {
   if (typeof window === 'undefined') return false
   const path = window.location.pathname
-  return path === '/menu' || path.startsWith('/menu/') || path === '/payment/return' || path.startsWith('/payment/return/')
+  return (
+    path === '/menu' ||
+    path.startsWith('/menu/') ||
+    path === '/payment/return' ||
+    path.startsWith('/payment/return/') ||
+    path === '/invoice/public' ||
+    path.startsWith('/invoice/public/')
+  )
 }
 
 const getTokenFromPersistedStorage = (): string | null => {
   if (typeof window === 'undefined') return null
 
   try {
-    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY)
+    const raw = window.sessionStorage.getItem(AUTH_STORAGE_KEY)
     if (!raw) return null
 
     const parsed = JSON.parse(raw)
-    const state = parsed?.state ?? parsed
-    const token = state?.token
-    return typeof token === 'string' && token.trim().length > 0 ? token : null
+    const firstState = parsed?.state ?? parsed
+    const secondState = firstState?.state ?? firstState
+    const candidates = [firstState?.token, secondState?.token]
+    for (const token of candidates) {
+      if (typeof token === 'string' && token.trim().length > 0) {
+        return token
+      }
+    }
+    return null
   } catch {
     return null
   }

@@ -1,0 +1,223 @@
+﻿Tài liệu chi tiết: Quản lý chi nhánh và phân quyền
+1. Giới thiệu
+Hệ thống Coffee Shop Manager hỗ trợ nhiều chi nhánh (cửa hàng) với khả năng phân lập dữ liệu, phân quyền truy cập và báo cáo tổng hợp. Tài liệu này mô tả cách thiết kế cơ sở dữ liệu, xác định chi nhánh cho đơn hàng, quản lý nhân viên theo chi nhánh và cơ chế phân quyền hiển thị.
+2. Cấu trúc dữ liệu
+2.1 Bảng branch
+Trường
+Kiểu
+Ràng buộc
+Mô tả
+id
+UUID
+PRIMARY KEY
+Mã định danh duy nhất của chi nhánh
+code
+VARCHAR(20)
+NOT NULL, UNIQUE
+Mã ngắn gọn (VD: HN01, SG02)
+name
+VARCHAR(100)
+NOT NULL
+Tên chi nhánh (VD: "Chi nhánh Trung Tâm")
+address
+TEXT
+Địa chỉ chi nhánh
+phone
+VARCHAR(20)
+Số điện thoại liên hệ
+manager_id
+UUID
+REFERENCES user(id)
+Quản lý chi nhánh
+created_at
+TIMESTAMP
+DEFAULT NOW()
+updated_at
+TIMESTAMP
+2.2 Bảng user (bổ sung trường branch_id)
+Trường
+Kiểu
+Ràng buộc
+Mô tả
+id
+UUID
+PRIMARY KEY
+email
+VARCHAR(100)
+NOT NULL, UNIQUE
+password
+VARCHAR(255)
+NOT NULL
+name
+VARCHAR(100)
+NOT NULL
+role
+VARCHAR(20)
+NOT NULL
+ADMIN, MANAGER, BARISTA, WAITER, CUSTOMER
+phone
+VARCHAR(20)
+branch_id
+UUID
+REFERENCES branch(id)
+Chi nhánh trực thuộc (NULL nếu là ADMIN)
+created_at
+TIMESTAMP
+DEFAULT NOW()
+ADMIN (toàn hệ thống): branch_id = NULL
+MANAGER, BARISTA, WAITER: branch_id chỉ định chi nhánh làm việc.
+2.3 Bảng order (có branch_id)
+Đơn hàng bắt buộc phải gắn với chi nhánh. Trường branch_id được xác định theo một trong các cách sau:
+Cách xác định
+Mô tả
+Từ QR code
+Khi khách quét QR, URL chứa tham số branchId. Frontend gửi branchId này khi tạo order.
+Từ nhân viên tạo đơn
+Khi nhân viên đăng nhập và tạo đơn hộ khách, hệ thống tự động lấy branch_id từ profile của nhân viên.
+Từ subdomain
+Nếu dùng subdomain riêng (vd: hanoi.order.cafexuan.com), có thể parse từ host.
+3. Phân quyền truy cập dữ liệu
+3.1 Nguyên tắc chung
+ADMIN: Có quyền xem và quản lý dữ liệu của tất cả chi nhánh.
+MANAGER: Chỉ được xem và quản lý dữ liệu thuộc chi nhánh mình quản lý.
+BARISTA / WAITER: Chỉ được xem dữ liệu cần thiết cho công việc (bàn, đơn hàng, KDS, chat) trong chi nhánh của mình, không có quyền sửa cấu hình hay xem báo cáo tài chính.
+3.2 Xác thực và phân quyền qua JWT
+Khi người dùng đăng nhập, hệ thống tạo JWT token có payload:
+json
+{
+  "sub": "user-uuid",
+  "email": "manager@branch.com",
+  "role": "MANAGER",
+  "branchId": "branch-uuid",    // null nếu role ADMIN
+  "iat": 1716000000,
+  "exp": 1716086400
+}
+Mỗi request đến API (sau khi qua Gateway) sẽ được gắn thông tin user. Các service (Order, Table, Inventory, Report) sẽ kiểm tra quyền:
+Nếu role === 'ADMIN' → cho phép truy cập tất cả dữ liệu (có thể có tham số branchId để lọc).
+Nếu role !== 'ADMIN' → chỉ được truy cập dữ liệu có branch_id = token.branchId.
+3.3 Ví dụ kiểm tra trong Guard (NestJS)
+typescript
+@Injectable()
+export class BranchGuard implements CanActivate {
+constructor(private reflector: Reflector) {}
+canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest();
+    const user = request.user; // từ JWT (được gắn bởi AuthGuard)
+    // Nếu là ADMIN, cho phép tất cả
+    if (user.role === 'ADMIN') return true;
+    // Lấy branchId từ request params, query, hoặc body
+    const targetBranchId = request.params.branchId || request.query.branchId || request.body.branchId;
+    if (!targetBranchId) {
+      // Nếu không có branchId trong request, mặc định dùng branchId của user
+request.branchId = user.branchId;
+      return true;
+    }
+    // Kiểm tra targetBranchId có khớp với branchId của user không
+    if (user.branchId === targetBranchId) {
+request.branchId = targetBranchId;
+      return true;
+    }
+    return false; // từ chối truy cập
+  }
+}
+3.4 Giao diện người dùng
+Role
+Dropdown chọn chi nhánh
+Dữ liệu hiển thị
+ADMIN
+Có, hiển thị tất cả chi nhánh
+Theo chi nhánh được chọn
+MANAGER
+Không
+Mặc định chi nhánh của họ
+WAITER / BARISTA
+Không
+Chỉ các chức năng phục vụ (bàn, KDS, chat) của chi nhánh họ
+4. Quy trình xác định chi nhánh cho đơn hàng
+graph TD
+A[Khách quét QR] --> B[URL có branchId & tableId]
+    B --> C[Frontend lấy branchId từ URL]
+    C --> D[Khách tạo đơn hàng]
+    D --> E[Frontend gửi POST /orders với branchId & tableId]
+    E --> F[API Gateway kiểm tra JWT]
+    F --> G{Request từ khách?}
+    G -->|Có| H[Order Service lưu branchId từ body]
+    G -->|Không (nhân viên tạo đơn hộ)|I[Lấy branchId từ token của nhân viên]
+    H --> J[Lưu order]
+    I --> J
+Lưu ý: Đối với request từ khách (không đăng nhập), không có JWT. Cần cho phép tạo order mà không cần xác thực nhưng vẫn phải có branchId và tableId hợp lệ. API Gateway nên có cơ chế cho phép endpoint /orders với phương thức POST nhưng vẫn kiểm tra branchId và tableId tồn tại (gọi Table Service để xác thực).
+5. Quản lý nhân viên theo chi nhánh
+5.1 Thêm nhân viên mới (chỉ ADMIN hoặc MANAGER)
+ADMIN: Có thể chọn chi nhánh bất kỳ để gán nhân viên.
+MANAGER: Chỉ được thêm nhân viên vào chi nhánh của mình.
+5.2 Danh sách nhân viên của một chi nhánh
+sql
+SELECT id, name, email, role, phone
+FROM "user"
+WHERE branch_id = :branchId AND role IN ('MANAGER', 'BARISTA', 'WAITER');
+5.3 Phân ca và chấm công
+Mỗi nhân viên chỉ làm việc tại một chi nhánh, nên bảng attendance có thể tham chiếu đến user và suy ra chi nhánh. Không cần lưu trực tiếp branchId trong bảng chấm công.
+6. Báo cáo theo chi nhánh
+6.1 Báo cáo doanh thu
+ADMIN: Có thể chọn một hoặc nhiều chi nhánh để xem báo cáo tổng hợp.
+MANAGER: Chỉ xem được doanh thu của chi nhánh mình.
+6.2 Báo cáo tồn kho
+Mỗi chi nhánh có kho riêng (bảng ingredient có branch_id), do đó báo cáo tồn kho tự động theo chi nhánh.
+7. API cho quản lý chi nhánh
+Method
+Endpoint
+Mô tả
+Quyền
+GET
+/api/branches
+Lấy danh sách chi nhánh (có thể lọc)
+ADMIN
+GET
+/api/branches/:id
+Chi tiết chi nhánh
+ADMIN/MANAGER (chỉ chi nhánh của mình)
+POST
+/api/branches
+Tạo chi nhánh mới
+ADMIN
+PUT
+/api/branches/:id
+Cập nhật chi nhánh
+ADMIN
+DELETE
+/api/branches/:id
+Xóa chi nhánh (chỉ khi không còn dữ liệu)
+ADMIN
+GET
+/api/branches/:id/staff
+Danh sách nhân viên của chi nhánh
+ADMIN/MANAGER
+POST
+/api/branches/:id/staff
+Thêm nhân viên vào chi nhánh
+ADMIN/MANAGER
+GET
+/api/branches/:id/reports/sales
+Báo cáo doanh thu chi nhánh
+ADMIN/MANAGER
+8. Giao diện quản lý chi nhánh
+8.1 Màn hình chính (ADMIN)
+Dropdown chọn chi nhánh (như ảnh bạn cung cấp).
+Khi chọn chi nhánh, toàn bộ nội dung bên dưới (bàn, đơn hàng, báo cáo) cập nhật theo chi nhánh đó.
+Nút "Thêm chi nhánh" mở form nhập code, tên, địa chỉ, phone, chọn quản lý.
+8.2 Màn hình của MANAGER
+Không có dropdown chi nhánh, tiêu đề hiển thị tên chi nhánh.
+Các mục menu: Quản lý bàn, Quản lý nhân viên, Báo cáo, Quản lý kho, Quản lý menu.
+9. Xử lý đơn hàng khi chuyển chi nhánh (nâng cao)
+Nếu một đơn hàng cần chuyển từ chi nhánh A sang chi nhánh B (hiếm gặp), hệ thống cần:
+Tạo đơn mới tại chi nhánh B.
+Hủy đơn cũ tại chi nhánh A.
+Cập nhật lại tableId và branchId cho các item.
+Tính năng này không thuộc MVP, nhưng có thể phát triển sau.
+10. Tổng kết
+Với thiết kế trên, hệ thống có thể:
+Xác định chính xác đơn hàng thuộc chi nhánh nào qua branchId trong QR hoặc từ token nhân viên.
+Phân quyền rõ ràng giữa ADMIN, MANAGER và nhân viên.
+Hỗ trợ mở rộng thêm chi nhánh mà không ảnh hưởng đến dữ liệu hiện có.
+Dễ dàng lập báo cáo tổng hợp và chi tiết.
+Tài liệu này sẽ được tích hợp vào SRS tổng thể của dự án Coffee Shop Manager

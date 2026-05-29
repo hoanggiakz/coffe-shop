@@ -142,7 +142,8 @@ public class TestAccountSeeder {
             ShiftType preferredShift,
             String branchId
     ) {
-        User user = userRepository.findByEmail(email)
+        User user = userRepository.findByEmployeeCode(employeeCode)
+                .or(() -> userRepository.findByEmail(email))
                 .orElseGet(() -> User.builder().email(email).build());
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode(password));

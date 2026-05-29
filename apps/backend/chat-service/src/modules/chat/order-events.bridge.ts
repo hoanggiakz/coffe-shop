@@ -15,6 +15,7 @@ export class OrderEventsBridge implements OnModuleInit {
     this.kafkaService.registerOrderCreatedHandler(async (payload) => {
       const orderId = String(payload?.id || '').trim();
       const tableId = String(payload?.tableId || '').trim();
+      const branchId = String(payload?.branchId || '').trim() || undefined;
       const totalAmount = Number(payload?.totalAmount || 0);
       const items = Array.isArray(payload?.items) ? payload.items : [];
       const itemCount = items.reduce((sum, item) => sum + Number(item?.quantity || 0), 0);
@@ -31,6 +32,7 @@ export class OrderEventsBridge implements OnModuleInit {
         message: `${itemCount} món - ${totalAmount.toLocaleString('vi-VN')}đ`,
         orderId,
         tableId,
+        branchId,
       });
     });
   }

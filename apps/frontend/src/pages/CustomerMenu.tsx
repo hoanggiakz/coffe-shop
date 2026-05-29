@@ -7,7 +7,7 @@ import { showRealtimeNotification } from '@/utils/notifications'
 import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 import { ChatBubbleLeftRightIcon, ShoppingBagIcon, XMarkIcon, MinusIcon } from '@heroicons/react/24/outline'
 
-type PaymentMode = 'POSTPAY' | 'PREPAY'
+type PaymentMode = 'POST_PAY' | 'ONLINE_PAY'
 type PaymentProvider = 'SEPAY'
 
 interface CustomizationOption {
@@ -26,6 +26,7 @@ interface CustomizationGroup {
 
 interface MenuItem {
   id: string
+  branchMenuItemId?: string
   name: string
   description?: string
   price: number
@@ -184,6 +185,36 @@ interface CustomerOfferResponse {
   offers: string[]
 }
 
+interface SpecMenuCategory {
+  id: string
+  name: string
+  emoji?: string
+  sortOrder?: number
+  items: any[]
+}
+
+interface SpecMenuResponse {
+  branchId?: string
+  branchName?: string
+  tableId?: string
+  tableName?: string
+  categories?: SpecMenuCategory[]
+}
+
+interface PublicInvoiceLinkResponse {
+  invoiceId: string
+  invoiceNumber: string
+  url: string
+  token: string
+  expiresAt: string
+}
+
+interface PendingChatMessage {
+  content: string
+  senderName: string
+  createdAt: string
+}
+
 interface MenuRecommendation extends MenuItem {
   recommendationReason?: string
   recommendationScore?: number
@@ -319,6 +350,41 @@ function normalizeVietnameseText(input: unknown): string {
   return map[lower] || raw
 }
 
+function inferSelectedOptions(menuItem: MenuItem | undefined, selections: CartSelections, note: string) {
+  if (!menuItem) return { note: String(note || '').trim() || undefined }
+  let size: { name: string; priceModifier: number } | undefined
+  const toppings: Array<{ name: string; priceModifier: number }> = []
+
+  ;(menuItem.customizations || []).forEach((group) => {
+    const normalizedLabel = String(group.label || '').toLowerCase()
+    const isSizeGroup = group.type === 'single' && normalizedLabel.includes('size')
+    const isToppingGroup = group.type === 'multi' && normalizedLabel.includes('topping')
+    const selected = selections[group.id]
+
+    if (isSizeGroup && typeof selected === 'string' && selected) {
+      const match = group.options?.find((option) => option.value === selected)
+      if (match) {
+        size = { name: match.label, priceModifier: Number(match.priceDelta || 0) }
+      }
+    }
+
+    if (isToppingGroup && Array.isArray(selected)) {
+      selected.forEach((value) => {
+        const match = group.options?.find((option) => option.value === value)
+        if (match) {
+          toppings.push({ name: match.label, priceModifier: Number(match.priceDelta || 0) })
+        }
+      })
+    }
+  })
+
+  return {
+    ...(size ? { size } : {}),
+    toppings,
+    note: String(note || '').trim() || undefined,
+  }
+}
+
 function trangThaiMonTrongDon(status?: string | null): string {
   switch (status) {
     case 'WAITING':
@@ -363,7 +429,7 @@ export default function CustomerMenu() {
   const [cart, setCart] = useState<Record<string, CartItem>>({})
   const [cartDrafts, setCartDrafts] = useState<Record<string, CartDraft>>({})
   const [cartLoaded, setCartLoaded] = useState(false)
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('POSTPAY')
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('POST_PAY')
   const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('SEPAY')
   const [promoCode, setPromoCode] = useState('')
   const [promoPreview, setPromoPreview] = useState<PromotionPreview | null>(null)
@@ -377,6 +443,8 @@ export default function CustomerMenu() {
   const [loadingOrderStatus, setLoadingOrderStatus] = useState(false)
   const [currentPayment, setCurrentPayment] = useState<PaymentStatusResponse | null>(null)
   const [loadingPaymentStatus, setLoadingPaymentStatus] = useState(false)
+  const [publicInvoiceUrl, setPublicInvoiceUrl] = useState('')
+  const [loadingPublicInvoiceUrl, setLoadingPublicInvoiceUrl] = useState(false)
   const [requestingCashPayment, setRequestingCashPayment] = useState(false)
 
   const [staffReason, setStaffReason] = useState('Cần hỗ trợ')
@@ -391,6 +459,8 @@ export default function CustomerMenu() {
   const [chatConnecting, setChatConnecting] = useState(false)
   const [chatCustomerName, setChatCustomerName] = useState('')
   const [chatCustomerPhone, setChatCustomerPhone] = useState('')
+  const [chatSessionId, setChatSessionId] = useState('')
+  const [staffTyping, setStaffTyping] = useState(false)
   const [cartDrawerOpen, setCartDrawerOpen] = useState(false)
 
   const [customerToken, setCustomerToken] = useState('')
@@ -415,6 +485,9 @@ export default function CustomerMenu() {
   const cartPanelRef = useRef<HTMLDivElement | null>(null)
   const previousOrderStatusRef = useRef('')
   const syncedCompletedOrderIdRef = useRef('')
+  const staffTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingChatFlushRef = useRef(false)
+  const customerTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let ignore = false
@@ -481,6 +554,44 @@ export default function CustomerMenu() {
     }
   }, [qrTableId, qrBranchId, qrTableNumber])
 
+  const normalizeMenuPayload = (payload: any): MenuItem[] => {
+    const fromFlat = (rows: any[]) =>
+      rows.map((item: any) => ({
+        ...item,
+        id: item.menu_item_id || item.id,
+        branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || item.id,
+        name: normalizeVietnameseText(item.name),
+        description: normalizeVietnameseText(item.description),
+        image: item.image || item.image_url || null,
+        price: normalizeVndAmount(item.price),
+        available: item.available ?? item.is_available,
+        category: item.category || item.category_name || 'Khac',
+        customizations: normalizeCustomizations(item.customizations ?? item.custom_options),
+      }))
+
+    if (Array.isArray(payload)) return fromFlat(payload)
+
+    const spec = payload as SpecMenuResponse
+    if (Array.isArray(spec?.categories)) {
+      return spec.categories.flatMap((category) =>
+        (Array.isArray(category.items) ? category.items : []).map((item: any) => ({
+          ...item,
+          id: item.id || item.menu_item_id,
+          branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || item.id,
+          name: normalizeVietnameseText(item.name),
+          description: normalizeVietnameseText(item.description),
+          image: item.image || item.imageUrl || item.image_url || null,
+          price: normalizeVndAmount(item.price),
+          available: item.available ?? item.isAvailable ?? item.is_available,
+          category: category.name || 'Khac',
+          customizations: normalizeCustomizations(item.customizations ?? item.custom_options ?? item.options),
+        })),
+      )
+    }
+
+    return []
+  }
+
   useEffect(() => {
     const loadMenu = async () => {
       if (resolvingTable) {
@@ -506,15 +617,7 @@ export default function CustomerMenu() {
               },
             })
         const { data } = await request
-        const normalized = (Array.isArray(data) ? data : []).map((item: any) => ({
-          ...item,
-          id: item.id || item.menu_item_id,
-          name: normalizeVietnameseText(item.name),
-          description: normalizeVietnameseText(item.description),
-          price: normalizeVndAmount(item.price),
-          available: item.available ?? item.is_available,
-          customizations: normalizeCustomizations(item.customizations ?? item.custom_options),
-        }))
+        const normalized = normalizeMenuPayload(data)
         setMenuItems(normalized)
       } catch (error: any) {
         toast.error(error.response?.data?.message || 'Không tải được menu')
@@ -525,7 +628,11 @@ export default function CustomerMenu() {
     loadMenu()
   }, [tableId, qrBranchId, resolvingTable])
 
-  const cartStorageKey = useMemo(() => (tableId ? `customer-cart:${tableId}` : ''), [tableId])
+  const cartStorageKey = useMemo(() => {
+    if (!tableId) return ''
+    const branchPart = String(qrBranchId || 'unknown').trim() || 'unknown'
+    return `cart_${branchPart}_${tableId}`
+  }, [tableId, qrBranchId])
   const orderStorageKey = useMemo(() => (tableId ? `customer-last-order:${tableId}` : ''), [tableId])
   const chatProfileStorageKey = useMemo(() => (tableId ? `customer-chat-profile:${tableId}` : ''), [tableId])
   const customerAuthStorageKey = 'customer-auth-session'
@@ -836,11 +943,76 @@ export default function CustomerMenu() {
       socket.connect()
     }
     setChatConnecting(true)
-    socket.emit('join', {
+    socket.emit('join-chat', {
       tableId,
+      branchId: qrBranchId,
       customerName,
       customerPhone: customerPhone || undefined,
     })
+  }
+
+  const chatPendingStorageKey = useMemo(() => {
+    if (!tableId) return ''
+    return `customer-chat-pending:${tableId}`
+  }, [tableId])
+
+  const readPendingMessages = (): PendingChatMessage[] => {
+    if (!chatPendingStorageKey) return []
+    try {
+      const raw = localStorage.getItem(chatPendingStorageKey)
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed
+        .map((item) => ({
+          content: String(item?.content || '').trim(),
+          senderName: String(item?.senderName || chatCustomerName || 'Khách'),
+          createdAt: String(item?.createdAt || new Date().toISOString()),
+        }))
+        .filter((item) => item.content.length > 0)
+    } catch {
+      return []
+    }
+  }
+
+  const writePendingMessages = (items: PendingChatMessage[]) => {
+    if (!chatPendingStorageKey) return
+    if (!items.length) {
+      localStorage.removeItem(chatPendingStorageKey)
+      return
+    }
+    localStorage.setItem(chatPendingStorageKey, JSON.stringify(items.slice(-50)))
+  }
+
+  const enqueuePendingMessage = (item: PendingChatMessage) => {
+    const next = [...readPendingMessages(), item]
+    writePendingMessages(next)
+  }
+
+  const flushPendingMessages = () => {
+    if (pendingChatFlushRef.current) return
+    if (!chatSessionId) return
+    const socket = getSocket()
+    if (!socket.connected) return
+    const queue = readPendingMessages()
+    if (!queue.length) return
+    pendingChatFlushRef.current = true
+    queue.forEach((item) => {
+      socket.emit('send-message', {
+        sessionId: chatSessionId,
+        content: item.content,
+        senderType: 'CUSTOMER',
+        senderName: item.senderName,
+      })
+    })
+    writePendingMessages([])
+    pendingChatFlushRef.current = false
+  }
+
+  const onChatClosed = () => {
+    toast.error('Phiên chat đã kết thúc, vui lòng gọi nhân viên')
+    setChatSessionId('')
+    setStaffTyping(false)
   }
 
   useEffect(() => {
@@ -851,18 +1023,30 @@ export default function CustomerMenu() {
       socket.connect()
     }
 
-    const onJoined = (payload: { messages?: ChatMessage[] }) => {
+    const onJoined = (payload: { sessionId?: string; messages?: ChatMessage[] }) => {
+      if (payload?.sessionId) {
+        setChatSessionId(payload.sessionId)
+      }
       setMessages(payload.messages || [])
       setChatConnecting(false)
     }
-    const onNewMessage = (message: ChatMessage) => {
-      setMessages((prev) => [...prev, message])
+    const onNewMessage = (payload: ChatMessage | { message?: ChatMessage }) => {
+      const message = (payload as any)?.message ? (payload as any).message as ChatMessage : payload as ChatMessage
+      setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]))
       if (message.senderType === 'STAFF') {
         const isSystem = String(message.senderName || '').trim().toUpperCase() === 'SYSTEM'
         showRealtimeNotification(
           isSystem ? 'Hệ thống' : message.senderName || 'Nhân viên',
           isSystem ? formatSystemChatContent(message.content) : message.content,
         )
+      }
+    }
+    const onTyping = (payload: { senderType?: string; isTyping?: boolean }) => {
+      if (String(payload?.senderType || '').toUpperCase() !== 'STAFF') return
+      setStaffTyping(Boolean(payload?.isTyping))
+      if (staffTypingTimerRef.current) clearTimeout(staffTypingTimerRef.current)
+      if (payload?.isTyping) {
+        staffTypingTimerRef.current = setTimeout(() => setStaffTyping(false), 2000)
       }
     }
     const onSocketError = (payload: { message?: string }) => {
@@ -872,8 +1056,10 @@ export default function CustomerMenu() {
       }
     }
 
-    socket.on('joined', onJoined)
-    socket.on('new-message', onNewMessage)
+    socket.on('chat-joined', onJoined)
+    socket.on('message-received', onNewMessage)
+    socket.on('chat-closed', onChatClosed)
+    socket.on('chat-typing', onTyping)
     socket.on('error', onSocketError)
 
     if (chatCustomerName.trim()) {
@@ -885,15 +1071,33 @@ export default function CustomerMenu() {
     }
 
     return () => {
-      socket.off('joined', onJoined)
-      socket.off('new-message', onNewMessage)
+      socket.off('chat-joined', onJoined)
+      socket.off('message-received', onNewMessage)
+      socket.off('chat-closed', onChatClosed)
+      socket.off('chat-typing', onTyping)
       socket.off('error', onSocketError)
       disconnectSocket()
       setChatConnecting(false)
+      if (staffTypingTimerRef.current) clearTimeout(staffTypingTimerRef.current)
     }
-  }, [chatOpen, tableId])
+  }, [chatOpen, tableId, qrBranchId, chatCustomerName, chatCustomerPhone])
+
+  useEffect(() => {
+    flushPendingMessages()
+  }, [chatSessionId, chatOpen])
 
   const menuMap = useMemo(() => new Map(menuItems.map((item) => [item.id, item])), [menuItems])
+
+  useEffect(() => {
+    if (!cartLoaded) return
+    if (!menuMap.size) return
+    setCart((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([, line]) => menuMap.has(String(line?.menuItemId || ''))),
+      )
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next
+    })
+  }, [cartLoaded, menuMap])
   const recommendationItems = useMemo(
     () => customerRecommendations.filter((item) => menuMap.has(item.id)),
     [customerRecommendations, menuMap],
@@ -1161,9 +1365,25 @@ export default function CustomerMenu() {
         payment = verified as PaymentStatusResponse
       }
       setCurrentPayment(payment)
+      if (payment?.status === 'PAID') {
+        setLoadingPublicInvoiceUrl(true)
+        try {
+          const { data: invoiceLink } = await api.get<PublicInvoiceLinkResponse>(
+            `/public/orders/${orderId}/invoice-link`,
+          )
+          setPublicInvoiceUrl(String(invoiceLink?.url || '').trim())
+        } catch {
+          setPublicInvoiceUrl('')
+        } finally {
+          setLoadingPublicInvoiceUrl(false)
+        }
+      } else {
+        setPublicInvoiceUrl('')
+      }
     } catch (error: any) {
       if (error.response?.status === 404) {
         setCurrentPayment(null)
+        setPublicInvoiceUrl('')
       } else {
         toast.error(error.response?.data?.message || 'Khong tai duoc trang thai thanh toan')
       }
@@ -1193,15 +1413,16 @@ export default function CustomerMenu() {
         ),
       )
 
-      const { data } = await api.get('/orders/promotions/validate', {
-        params: {
-          code,
-          subtotal: cartTotal,
-          menuItemIds: selectedMenuItemIds.join(','),
-          tableId: tableId || undefined,
-          branchId: qrBranchId || undefined,
-        },
+      const { data } = await api.post('/discount/validate', {
+        code,
+        subtotal: cartTotal,
+        menuItemIds: selectedMenuItemIds,
+        tableId: tableId || undefined,
+        branchId: qrBranchId || undefined,
       })
+      if (!data?.valid) {
+        throw new Error(String(data?.message || 'Ma khuyen mai khong hop le'))
+      }
       setPromoPreview({
         code: String(data?.code || code).toUpperCase(),
         description: data?.description || undefined,
@@ -1247,6 +1468,7 @@ export default function CustomerMenu() {
     if (!currentOrderId) {
       setCurrentOrder(null)
       setCurrentPayment(null)
+      setPublicInvoiceUrl('')
       return
     }
     fetchOrderStatus(currentOrderId)
@@ -1268,10 +1490,13 @@ export default function CustomerMenu() {
       .filter((cartItem) => cartItem.quantity > 0)
       .map((cartItem) => {
         const menuItem = menuMap.get(cartItem.menuItemId)
+        const selectedOptions = inferSelectedOptions(menuItem, cartItem.selections, cartItem.note || '')
         return {
+          branchMenuItemId: menuItem?.branchMenuItemId || undefined,
           menuItemId: cartItem.menuItemId,
           quantity: cartItem.quantity,
           note: cartItem.note || undefined,
+          selectedOptions,
           options: JSON.stringify({
             selections: cartItem.selections,
             extraAmount: menuItem ? getCustomizationDelta(menuItem, cartItem.selections) : 0,
@@ -1297,33 +1522,53 @@ export default function CustomerMenu() {
         await fetchOrderStatus(currentOrderId)
         await fetchPaymentStatus(currentOrderId)
       } else {
-        const { data: order } = await api.post('/orders', {
-          tableId,
-          branchId: qrBranchId || undefined,
-          customerId: customerSession?.id || undefined,
-          customerEmail: customerSession?.email || undefined,
-          customerName: customerSession?.name || chatCustomerName || tableName,
-          customerPhone: customerSession?.phone || chatCustomerPhone || undefined,
-          promoCode: promoPreview?.code || promoCode.trim() || undefined,
-          items,
-        })
+        const idempotencyKey = `cart_${String(qrBranchId || 'unknown').trim() || 'unknown'}_${tableId}_${Date.now()}`
+        const { data: order } = await api.post(
+          '/orders',
+          {
+            tableId,
+            branchId: qrBranchId || undefined,
+            customerId: customerSession?.id || undefined,
+            customerEmail: customerSession?.email || undefined,
+            customerName: customerSession?.name || chatCustomerName || tableName,
+            customerPhone: customerSession?.phone || chatCustomerPhone || undefined,
+            paymentMethod: paymentMode,
+            discountCode: promoPreview?.code || promoCode.trim() || undefined,
+            promoCode: promoPreview?.code || promoCode.trim() || undefined,
+            items,
+          },
+          { headers: { 'Idempotency-Key': idempotencyKey } },
+        )
         const newOrderId = String(order.id)
         setCurrentOrderId(newOrderId)
         if (orderStorageKey) localStorage.setItem(orderStorageKey, newOrderId)
 
-        if (paymentMode === 'PREPAY') {
-          const { data: payment } = await api.post(
-            '/v1/payments',
-            {
+        if (paymentMode === 'ONLINE_PAY') {
+          let payment: any = null
+          try {
+            const paymentInit = await api.post('/payments/online/init', {
               orderId: newOrderId,
-              amount: Number(order.totalAmount),
               provider: paymentProvider,
-              tableId,
-              branchId: qrBranchId || undefined,
-              customerName: customerSession?.name || tableName,
-            },
-            customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
-          )
+            })
+            const redirectUrl = String(paymentInit.data?.redirectUrl || '').trim()
+            if (redirectUrl) {
+              window.location.href = redirectUrl
+            }
+          } catch {
+            const fallback = await api.post(
+              '/v1/payments',
+              {
+                orderId: newOrderId,
+                amount: Number(order.totalAmount),
+                provider: paymentProvider,
+                tableId,
+                branchId: qrBranchId || undefined,
+                customerName: customerSession?.name || tableName,
+              },
+              customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
+            )
+            payment = fallback.data
+          }
           setCurrentPayment(payment)
           toast.success('Da tao don va hien ma QR thanh toan')
         } else {
@@ -1360,13 +1605,46 @@ export default function CustomerMenu() {
       setChatNeedProfile(true)
       return
     }
+    const content = chatText.trim()
     const socket = getSocket()
+    if (!socket.connected || !chatSessionId) {
+      enqueuePendingMessage({
+        content,
+        senderName: chatCustomerName.trim(),
+        createdAt: new Date().toISOString(),
+      })
+      toast('Tin nhắn sẽ được gửi khi kết nối lại')
+      setChatText('')
+      return
+    }
     socket.emit('send-message', {
-      content: chatText,
+      sessionId: chatSessionId || undefined,
+      content,
       senderType: 'CUSTOMER',
       senderName: chatCustomerName.trim(),
     })
     setChatText('')
+  }
+
+  const emitCustomerTyping = (value: string) => {
+    setChatText(value)
+    const socket = getSocket()
+    if (!socket.connected || !chatSessionId) return
+    socket.emit('typing', {
+      sessionId: chatSessionId,
+      senderType: 'CUSTOMER',
+      senderName: chatCustomerName.trim() || 'Khách',
+      isTyping: value.trim().length > 0,
+    })
+    if (customerTypingTimerRef.current) clearTimeout(customerTypingTimerRef.current)
+    customerTypingTimerRef.current = setTimeout(() => {
+      socket.emit('typing', {
+        sessionId: chatSessionId,
+        senderType: 'CUSTOMER',
+        senderName: chatCustomerName.trim() || 'Khách',
+        isTyping: false,
+      })
+    }, 1200)
   }
 
   const toggleChatWidget = () => {
@@ -1803,22 +2081,22 @@ export default function CustomerMenu() {
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setPaymentMode('POSTPAY')}
+                  onClick={() => setPaymentMode('POST_PAY')}
                   disabled={editingCurrentOrder}
-                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'POSTPAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
+                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'POST_PAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
                 >
                   Trả sau
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPaymentMode('PREPAY')}
+                  onClick={() => setPaymentMode('ONLINE_PAY')}
                   disabled={editingCurrentOrder}
-                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'PREPAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
+                  className={`rounded-xl px-3 py-2 text-sm ${paymentMode === 'ONLINE_PAY' ? 'bg-sky-700 text-white' : 'border border-sky-200'}`}
                 >
                   Trả trước
                 </button>
               </div>
-              {paymentMode === 'PREPAY' && (
+              {paymentMode === 'ONLINE_PAY' && (
                 <select
                   value={paymentProvider}
                   onChange={(e) => setPaymentProvider(e.target.value as PaymentProvider)}
@@ -1878,7 +2156,7 @@ export default function CustomerMenu() {
                 ? 'Đang gửi...'
                 : editingCurrentOrder
                   ? 'Cập nhật đơn hàng'
-                  : paymentMode === 'PREPAY'
+                  : paymentMode === 'ONLINE_PAY'
                     ? 'Đặt món và thanh toán'
                     : 'Gửi đơn chờ xác nhận'}
             </button>
@@ -2039,6 +2317,21 @@ export default function CustomerMenu() {
                             )}
                           </div>
                         )}
+                      {currentPayment.status === 'PAID' && (
+                        <div className="pt-1">
+                          {loadingPublicInvoiceUrl && <p className="text-gray-500">Đang tạo link hóa đơn...</p>}
+                          {!loadingPublicInvoiceUrl && publicInvoiceUrl && (
+                            <a
+                              href={publicInvoiceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-block rounded border border-sky-300 bg-sky-50 px-2 py-1 text-sky-700"
+                            >
+                              Xem hóa đơn
+                            </a>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2427,7 +2720,7 @@ export default function CustomerMenu() {
                   <div className="mt-2 flex gap-2">
                     <input
                       value={chatText}
-                      onChange={(e) => setChatText(e.target.value)}
+                      onChange={(e) => emitCustomerTyping(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendChat()}
                       className={`${fieldClass} flex-1`}
                       placeholder="Nhập tin nhắn..."
@@ -2436,6 +2729,7 @@ export default function CustomerMenu() {
                       Gửi
                     </button>
                   </div>
+                  {staffTyping && <p className="mt-1 text-xs text-slate-500">Nhân viên đang gõ...</p>}
                 </>
               )}
             </>

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
+import { useNavigate } from 'react-router-dom'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import api from '@/utils/api'
@@ -7,6 +8,9 @@ import { TableStatus } from '@/types'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { maDonHangNgan, trangThaiBan, trangThaiDonHang } from '@/utils/display'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
+import { clearPosMenuCache, readPosMenuCache, writePosMenuCache } from '@/utils/posMenuCache'
+import { disconnectSocket, getSocket } from '@/utils/socket'
+import { showRealtimeNotification } from '@/utils/notifications'
 
 interface TableApi {
   id: string
@@ -38,6 +42,18 @@ interface OrderApi {
 
 type TableActionMode = 'TRANSFER' | 'MERGE'
 type TableGridState = 'AVAILABLE' | 'OCCUPIED' | 'WAITING_PAYMENT' | 'MAINTENANCE'
+type StaffNotificationType = 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'LOW_STOCK' | 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY'
+
+interface StaffNotificationPayload {
+  id: string
+  type: StaffNotificationType
+  title: string
+  message: string
+  branchId?: string
+  tableId?: string
+  orderId?: string
+  createdAt: string
+}
 
 const statuses: TableStatus[] = ['AVAILABLE', 'OCCUPIED', 'RESERVED', 'CLEANING', 'MAINTENANCE']
 const activeStatuses: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY']
@@ -45,6 +61,7 @@ const fieldClass =
   'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
 
 export default function Tables() {
+  const navigate = useNavigate()
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const [tables, setTables] = useState<TableApi[]>([])
   const [orders, setOrders] = useState<OrderApi[]>([])
@@ -79,13 +96,18 @@ export default function Tables() {
     branchId: '',
     status: 'AVAILABLE' as TableStatus,
   })
+  const [stateFilter, setStateFilter] = useState<'ALL' | TableGridState>('ALL')
+  const [searchText, setSearchText] = useState('')
 
   const loadTables = async () => {
     try {
+      const cachedMenu = readPosMenuCache<MenuItemApi>(selectedBranchId || undefined)
       const [tableRes, orderRes, menuRes] = await Promise.all([
         api.get('/tables', { params: { branchId: selectedBranchId || undefined } }),
         api.get('/orders', { params: { branchId: selectedBranchId || undefined } }),
-        api.get('/orders/menu', { params: { branchId: selectedBranchId || undefined } }),
+        cachedMenu
+          ? Promise.resolve({ data: cachedMenu })
+          : api.get('/orders/menu', { params: { branchId: selectedBranchId || undefined } }),
       ])
       const nextTables = Array.isArray(tableRes.data) ? (tableRes.data as TableApi[]) : []
       const nextOrders = Array.isArray(orderRes.data) ? (orderRes.data as OrderApi[]) : []
@@ -94,6 +116,9 @@ export default function Tables() {
       setTables(nextTables.sort((a, b) => a.number - b.number))
       setOrders(nextOrders)
       setMenuItems(nextMenu)
+      if (!cachedMenu) {
+        writePosMenuCache(selectedBranchId || undefined, nextMenu)
+      }
 
       if (!orderTableId && nextTables.length > 0) {
         setOrderTableId(nextTables[0].id)
@@ -113,6 +138,68 @@ export default function Tables() {
 
   useEffect(() => {
     loadTables()
+  }, [selectedBranchId])
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'F1') {
+        event.preventDefault()
+        navigate('/tables')
+      }
+      if (event.key === 'F2') {
+        event.preventDefault()
+        const firstAvailable = tables.find((table) => tableGridState(table) === 'AVAILABLE')
+        if (firstAvailable) {
+          setOrderTableId(firstAvailable.id)
+          toast.success(`Đã chọn nhanh Bàn ${firstAvailable.number}`)
+        }
+      }
+      if (event.key === 'F4') {
+        event.preventDefault()
+        navigate('/orders')
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [navigate, tables, orders])
+
+  useEffect(() => {
+    const socket = getSocket()
+
+    const joinStaffRoom = () => {
+      socket.emit('join-staff', {
+        branchId: selectedBranchId || undefined,
+      })
+    }
+
+    const onConnect = () => {
+      joinStaffRoom()
+    }
+
+    const onStaffNotification = (payload: StaffNotificationPayload) => {
+      if (payload.branchId && selectedBranchId && payload.branchId !== selectedBranchId) {
+        return
+      }
+      if (payload.type === 'KDS_ORDER_READY' || payload.type === 'ORDER_NEW' || payload.type === 'KDS_ITEM_STATUS') {
+        showRealtimeNotification(payload.title, payload.message)
+        void loadTables()
+      }
+    }
+
+    socket.on('connect', onConnect)
+    socket.on('staff-notification', onStaffNotification)
+
+    if (!socket.connected) {
+      socket.connect()
+    } else {
+      onConnect()
+    }
+
+    return () => {
+      socket.off('connect', onConnect)
+      socket.off('staff-notification', onStaffNotification)
+      disconnectSocket()
+    }
   }, [selectedBranchId])
 
   const createTable = async (e: FormEvent) => {
@@ -481,9 +568,60 @@ export default function Tables() {
     [orderCart, menuItems],
   )
 
+  const tableStateCounts = useMemo(() => {
+    const counts: Record<TableGridState, number> = {
+      AVAILABLE: 0,
+      OCCUPIED: 0,
+      WAITING_PAYMENT: 0,
+      MAINTENANCE: 0,
+    }
+    for (const table of tables) {
+      counts[tableGridState(table)] += 1
+    }
+    return counts
+  }, [tables, orders])
+
+  const filteredTables = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase()
+    return tables.filter((table) => {
+      const state = tableGridState(table)
+      if (stateFilter !== 'ALL' && state !== stateFilter) return false
+      if (!keyword) return true
+      return String(table.number).includes(keyword) || String(table.area || '').toLowerCase().includes(keyword)
+    })
+  }, [tables, orders, stateFilter, searchText])
+
   return (
     <div className="space-y-5 sm:space-y-6">
       <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Quản lý bàn</h1>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Card className="text-center"><p className="text-xs text-slate-500">Trống</p><p className="text-xl font-bold text-emerald-600">{tableStateCounts.AVAILABLE}</p></Card>
+        <Card className="text-center"><p className="text-xs text-slate-500">Đang dùng</p><p className="text-xl font-bold text-amber-600">{tableStateCounts.OCCUPIED}</p></Card>
+        <Card className="text-center"><p className="text-xs text-slate-500">Chờ TT</p><p className="text-xl font-bold text-red-600">{tableStateCounts.WAITING_PAYMENT}</p></Card>
+        <Card className="text-center"><p className="text-xs text-slate-500">Bảo trì</p><p className="text-xl font-bold text-slate-600">{tableStateCounts.MAINTENANCE}</p></Card>
+      </div>
+
+      <Card>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+          <input
+            className={fieldClass}
+            placeholder="Tìm bàn..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+          <select className={fieldClass} value={stateFilter} onChange={(e) => setStateFilter(e.target.value as any)}>
+            <option value="ALL">Tất cả</option>
+            <option value="AVAILABLE">Trống</option>
+            <option value="OCCUPIED">Đang dùng</option>
+            <option value="WAITING_PAYMENT">Chờ thanh toán</option>
+            <option value="MAINTENANCE">Bảo trì</option>
+          </select>
+          <Button variant="secondary" onClick={() => { clearPosMenuCache(selectedBranchId || undefined); void loadTables() }}>
+            Làm mới menu cache
+          </Button>
+        </div>
+      </Card>
 
       <Card>
         <form onSubmit={createTable} className="grid grid-cols-1 gap-3 md:grid-cols-5">
@@ -687,7 +825,7 @@ export default function Tables() {
       </Card>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {tables.map((table) => (
+        {filteredTables.map((table) => (
           <Card key={table.id} className={`${stateMeta(tableGridState(table)).borderClass}`}>
             <div className="flex items-start justify-between">
               <div>
@@ -753,6 +891,10 @@ export default function Tables() {
             </div>
           </Card>
         ))}
+      </div>
+
+      <div className="rounded-xl border border-amber-100 bg-white/85 px-4 py-2 text-xs text-slate-600">
+        F1: Sơ đồ bàn | F2: Chọn bàn trống nhanh | F4: Màn hình đơn hàng
       </div>
     </div>
   )

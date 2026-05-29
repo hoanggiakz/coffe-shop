@@ -12,13 +12,14 @@ const routeAccessMap: Record<string, readonly StaffRole[]> = {
   '/tables': ['ADMIN', 'MANAGER', 'WAITER', 'STAFF'],
   '/orders': ['ADMIN', 'MANAGER', 'WAITER', 'STAFF'],
   '/payments': ['ADMIN', 'MANAGER', 'WAITER', 'STAFF'],
+  '/invoices': ['ADMIN', 'MANAGER', 'WAITER', 'STAFF'],
   '/inventory': ['ADMIN', 'MANAGER'],
   '/promotions': ['ADMIN', 'MANAGER'],
   '/reports': ['ADMIN', 'MANAGER'],
-  '/staff': STAFF_ROLES,
+  '/staff': ['ADMIN', 'MANAGER'],
   '/branches': ['ADMIN'],
   '/kitchen': ['ADMIN', 'MANAGER', 'BARISTA'],
-  '/chat': STAFF_ROLES,
+  '/chat': ['ADMIN', 'MANAGER', 'WAITER', 'STAFF'],
   '/settings': STAFF_ROLES,
 }
 

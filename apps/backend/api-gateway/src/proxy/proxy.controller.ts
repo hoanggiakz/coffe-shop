@@ -30,11 +30,22 @@ export class ProxyController {
     // Tạo proxy middleware cho mỗi service route
     for (const route of SERVICE_ROUTES) {
       const target = this.resolveRouteTarget(route.path);
+      const pathRewrite =
+        route.path === '/api/v1/payments'
+          ? (path: string) => {
+              if (/^\/api\/v1\/payments\/webhook(?:\/|$)/.test(path)) {
+                return path.replace(/^\/api\/v1\/payments\/webhook/, '/api/payment/webhook/sepay');
+              }
+              return path;
+            }
+          : route.path === '/api/invoices'
+            ? (path: string) => (path.startsWith('/api/v1/') ? path : path.replace(/^\/api/, '/api/v1'))
+          : undefined;
       const proxy = createProxyMiddleware({
         target,
         changeOrigin: true,
-        // Giữ nguyên path – backend service cũng lắng nghe /api/...
-        pathRewrite: undefined,
+        // Keep /api/v1/payments for normal payment APIs, but bridge webhook to compat endpoint.
+        pathRewrite,
         onError: (err, req, res: any) => {
           this.logger.error(`Proxy error → ${target}: ${err.message}`);
           if (!res.headersSent) {
@@ -58,9 +69,19 @@ export class ProxyController {
   @All('api/*path')
   async handleProxy(@Req() req: Request, @Res() res: Response) {
     const isBranchOrdersPath = /^\/api\/branches\/[^/]+\/orders(\/|$)/.test(req.path);
+    const isBranchInvoicesPath = /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(req.path);
+    const isBranchChatPath = /^\/api\/branches\/[^/]+\/chat\/sessions(\/|$)/.test(req.path);
+    const isChatSessionPath = /^\/api\/chat\/sessions\/[^/]+(\/|$)/.test(req.path);
+    const isOrderInvoiceRegeneratePath = /^\/api\/orders\/[^/]+\/invoice\/regenerate(\/|$)/.test(req.path);
+    const isPublicInvoicePath = /^\/api\/public\/invoices\/[^/]+(\/|$)/.test(req.path);
+    const isPublicOrderInvoiceLinkPath = /^\/api\/public\/orders\/[^/]+\/invoice-link(\/|$)/.test(req.path);
     const inventoryCompatPath = this.isInventoryCompatPath(req.path);
     const route = inventoryCompatPath
       ? ({ path: '__inventory_compat__' } as any)
+      : isBranchInvoicesPath || isOrderInvoiceRegeneratePath || isPublicInvoicePath || isPublicOrderInvoiceLinkPath
+        ? ({ path: '/api/invoices' } as any)
+      : isBranchChatPath || isChatSessionPath
+        ? ({ path: '/api/chats' } as any)
       : isBranchOrdersPath
         ? ({ path: '/api/orders' } as any)
       : SERVICE_ROUTES.find((r) => req.originalUrl.startsWith(r.path));
@@ -89,12 +110,23 @@ export class ProxyController {
   private authorizeRequest(req: Request) {
     const path = req.path;
     const method = req.method.toUpperCase();
+    const isBranchChatPath = /^\/api\/branches\/[^/]+\/chat\/sessions(\/|$)/.test(path);
+    const isChatSessionPath = /^\/api\/chat\/sessions\/[^/]+(\/|$)/.test(path);
+    const isBranchInvoicesPath = /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(path);
+    const isInvoiceDetailPath = /^\/api\/invoices\/[^/]+(\/|$)/.test(path);
+    const isOrderInvoiceRegeneratePath = /^\/api\/orders\/[^/]+\/invoice\/regenerate(\/|$)/.test(path);
+    const isPublicInvoicePath = /^\/api\/public\/invoices\/[^/]+(\/|$)/.test(path);
+    const isPublicOrderInvoiceLinkPath = /^\/api\/public\/orders\/[^/]+\/invoice-link(\/|$)/.test(path);
 
     // Public auth/customer endpoints
     if (
       path === '/api/users/login' ||
       path.startsWith('/api/users/customer/')
     ) {
+      return;
+    }
+
+    if (isPublicInvoicePath || isPublicOrderInvoiceLinkPath) {
       return;
     }
 
@@ -146,6 +178,10 @@ export class ProxyController {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
       return;
     }
+    if (method === 'GET' && /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(path)) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
     if (method === 'GET' && path.startsWith('/api/branches')) {
       this.requireRoles(req, ['ADMIN', 'MANAGER'])
       return
@@ -169,6 +205,18 @@ export class ProxyController {
     // Staff management module (manager/admin)
     if (path.startsWith('/api/users/staff')) {
       this.requireRoles(req, ['ADMIN', 'MANAGER']);
+      return;
+    }
+    if (path.startsWith('/api/staff')) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER']);
+      return;
+    }
+    if (path.startsWith('/api/attendance')) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
+      return;
+    }
+    if (path.startsWith('/api/payroll')) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
       return;
     }
 
@@ -263,8 +311,17 @@ export class ProxyController {
     }
 
     // Chat staff module (S-16..S-18)
-    if (path.startsWith('/api/chats')) {
-      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
+    if (path.startsWith('/api/chats') || isBranchChatPath || isChatSessionPath) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
+
+    if (isBranchInvoicesPath || isInvoiceDetailPath || path.startsWith('/api/invoices')) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
+    if (isOrderInvoiceRegeneratePath) {
+      this.requireRoles(req, ['ADMIN']);
       return;
     }
 
@@ -356,8 +413,10 @@ export class ProxyController {
       const roles = this.parseRolesFromToken(req);
       const primaryRole = roles[0] || '';
       const branchId = String(payload?.branchId || '').trim();
+      const userId = String(payload?.sub || payload?.userId || '').trim();
       req.headers['x-actor-role'] = primaryRole;
       req.headers['x-actor-branch-id'] = branchId;
+      req.headers['x-actor-user-id'] = userId;
     } catch {
       // ignore: auth errors are handled by authorizeRequest
     }
@@ -375,10 +434,15 @@ export class ProxyController {
     switch (path) {
       case '/api/users':
       case '/api/branches':
+      case '/api/staff':
+      case '/api/attendance':
+      case '/api/payroll':
         return this.configService.get<string>('USER_SERVICE_URL') || 'http://user-service:3000';
       case '/api/tables':
         return this.configService.get<string>('TABLE_SERVICE_URL') || 'http://table-service:3003';
       case '/api/orders':
+        return this.configService.get<string>('ORDER_SERVICE_URL') || 'http://order-service:3001';
+      case '/api/discount':
         return this.configService.get<string>('ORDER_SERVICE_URL') || 'http://order-service:3001';
       case '/api/chats':
         return this.configService.get<string>('CHAT_SERVICE_URL') || 'http://chat-service:3007';
@@ -387,6 +451,8 @@ export class ProxyController {
       case '/api/v1/payments':
         return this.configService.get<string>('PAYMENT_SERVICE_URL') || 'http://payment-service:3004';
       case '/api/payment':
+        return this.configService.get<string>('PAYMENT_SERVICE_URL') || 'http://payment-service:3004';
+      case '/api/invoices':
         return this.configService.get<string>('PAYMENT_SERVICE_URL') || 'http://payment-service:3004';
       case '/api/reports':
         return this.configService.get<string>('REPORT_SERVICE_URL') || 'http://report-service:3006';

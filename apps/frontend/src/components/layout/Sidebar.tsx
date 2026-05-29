@@ -9,6 +9,7 @@ import {
   TableCellsIcon,
   ShoppingCartIcon,
   CreditCardIcon,
+  DocumentTextIcon,
   ArchiveBoxIcon,
   TicketIcon,
   ChartBarIcon,
@@ -25,6 +26,7 @@ type NavLabelKey =
   | 'tables'
   | 'orders'
   | 'payments'
+  | 'invoices'
   | 'inventory'
   | 'promotions'
   | 'reports'
@@ -39,6 +41,7 @@ const navigation = [
   { key: 'tables', href: '/tables', icon: TableCellsIcon, roles: getAllowedRolesForPath('/tables') },
   { key: 'orders', href: '/orders', icon: ShoppingCartIcon, roles: getAllowedRolesForPath('/orders') },
   { key: 'payments', href: '/payments', icon: CreditCardIcon, roles: getAllowedRolesForPath('/payments') },
+  { key: 'invoices', href: '/invoices', icon: DocumentTextIcon, roles: getAllowedRolesForPath('/invoices') },
   { key: 'inventory', href: '/inventory', icon: ArchiveBoxIcon, roles: getAllowedRolesForPath('/inventory') },
   { key: 'promotions', href: '/promotions', icon: TicketIcon, roles: getAllowedRolesForPath('/promotions') },
   { key: 'reports', href: '/reports', icon: ChartBarIcon, roles: getAllowedRolesForPath('/reports') },

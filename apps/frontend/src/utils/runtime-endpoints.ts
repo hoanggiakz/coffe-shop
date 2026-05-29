@@ -44,9 +44,10 @@ export function resolveWebsocketBaseUrl(): string {
     return ''
   }
 
-  // Local compose default: frontend :8088, chat-service :13007
+  // Local compose: prefer same-origin and let nginx proxy /socket.io to chat-service.
+  // This avoids noisy cross-port websocket handshake failures in the browser console.
   if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
-    return `${window.location.protocol}//${window.location.hostname}:13007`
+    return window.location.origin
   }
 
   if (!isCodespacesHost(window.location.hostname)) {

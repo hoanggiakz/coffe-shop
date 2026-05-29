@@ -8,24 +8,30 @@ import com.coffeeshop.userservice.dto.CustomerOffersResponse;
 import com.coffeeshop.userservice.dto.CustomerOtpLoginRequest;
 import com.coffeeshop.userservice.dto.CustomerOtpRegisterRequest;
 import com.coffeeshop.userservice.dto.LoginRequest;
+import com.coffeeshop.userservice.dto.ChangePasswordRequest;
 import com.coffeeshop.userservice.dto.OtpRequest;
 import com.coffeeshop.userservice.dto.OtpResponse;
 import com.coffeeshop.userservice.dto.PointsAccrualRequest;
 import com.coffeeshop.userservice.dto.PointsAccrualResponse;
 import com.coffeeshop.userservice.dto.RegisterRequest;
 import com.coffeeshop.userservice.dto.StaffResponse;
+import com.coffeeshop.userservice.dto.UpdateProfileRequest;
 import com.coffeeshop.userservice.dto.UserProfile;
 import com.coffeeshop.userservice.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/users")
@@ -62,6 +68,37 @@ public class AuthController {
         String token = extractToken(authHeader);
         String userId = jwtUtil.getUserIdFromToken(token);
         return ResponseEntity.ok(userService.getProfile(userId));
+    }
+
+    @PatchMapping("/profile")
+    public ResponseEntity<UserProfile> updateProfile(
+            @RequestHeader("Authorization") String authHeader,
+            @Valid @RequestBody UpdateProfileRequest request
+    ) {
+        String token = extractToken(authHeader);
+        String userId = jwtUtil.getUserIdFromToken(token);
+        return ResponseEntity.ok(userService.updateProfile(userId, request));
+    }
+
+    @PostMapping("/change-password")
+    public ResponseEntity<Object> changePassword(
+            @RequestHeader("Authorization") String authHeader,
+            @Valid @RequestBody ChangePasswordRequest request
+    ) {
+        String token = extractToken(authHeader);
+        String userId = jwtUtil.getUserIdFromToken(token);
+        userService.changePassword(userId, request);
+        return ResponseEntity.ok(java.util.Map.of("message", "Cap nhat mat khau thanh cong"));
+    }
+
+    @PostMapping(value = "/profile/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<UserProfile> uploadAvatar(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestParam("file") MultipartFile file
+    ) {
+        String token = extractToken(authHeader);
+        String userId = jwtUtil.getUserIdFromToken(token);
+        return ResponseEntity.ok(userService.uploadProfileAvatar(userId, file));
     }
 
     @PostMapping("/customer/request-otp")
