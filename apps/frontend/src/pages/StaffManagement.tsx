@@ -5,6 +5,7 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import { useAuthStore } from '@/stores/authStore'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import api from '@/utils/api'
 import { TableSkeleton } from '@/components/ui/PageSkeleton'
 import {
@@ -137,6 +138,7 @@ const roleBadgeClass: Record<StaffRole, string> = {
 
 export default function StaffManagement() {
   const currentUser = useAuthStore((state) => state.user)
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const currentRole = normalizeRole(currentUser?.role)
   const canManageAccounts = currentRole === 'ADMIN' || currentRole === 'MANAGER'
   const canManagePrivilegedAccounts = currentRole === 'ADMIN'
@@ -203,9 +205,10 @@ export default function StaffManagement() {
   const [staffQrImages, setStaffQrImages] = useState<Record<string, string>>({})
   const activeBranchId = useMemo(() => {
     if (currentRole === 'MANAGER') return currentUser?.branchId || ''
+    if (selectedBranchId) return selectedBranchId
     if (staffBranchFilter) return staffBranchFilter
     return branches[0]?.id || ''
-  }, [branches, currentRole, currentUser?.branchId, staffBranchFilter])
+  }, [branches, currentRole, currentUser?.branchId, selectedBranchId, staffBranchFilter])
 
   const activeStaffs = useMemo(
     () => staffs.filter((item) => item.isActive),
@@ -495,6 +498,13 @@ export default function StaffManagement() {
   }, [canManageAccounts, activeBranchId])
 
   useEffect(() => {
+    if (currentRole !== 'ADMIN') return
+    if (!selectedBranchId) return
+    if (staffBranchFilter === selectedBranchId) return
+    setStaffBranchFilter(selectedBranchId)
+  }, [currentRole, selectedBranchId, staffBranchFilter])
+
+  useEffect(() => {
     if (editingStaffId) {
       setEmailExists(null)
       setEmployeeCodeExists(null)
@@ -589,7 +599,7 @@ export default function StaffManagement() {
       employeeCode: '',
       personalQrCode: '',
       preferredShift: 'MORNING',
-      branchId: '',
+      branchId: activeBranchId || '',
       isActive: true,
     })
     setEmailExists(null)
