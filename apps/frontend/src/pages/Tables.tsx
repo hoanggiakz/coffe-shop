@@ -181,7 +181,11 @@ export default function Tables() {
         return
       }
       if (payload.type === 'KDS_ORDER_READY' || payload.type === 'ORDER_NEW' || payload.type === 'KDS_ITEM_STATUS') {
-        showRealtimeNotification(payload.title, payload.message)
+        showRealtimeNotification(
+          payload.title,
+          payload.message,
+          payload.type === 'ORDER_NEW' ? 'NEW_ORDER' : 'ITEM_READY',
+        )
         void loadTables()
       }
     }

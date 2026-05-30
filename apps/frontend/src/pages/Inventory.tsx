@@ -266,7 +266,7 @@ export default function Inventory() {
 
     const onNotification = (payload: StaffNotificationPayload) => {
       if (payload.type === 'LOW_STOCK') {
-        void showRealtimeNotification(payload.title, payload.message)
+        void showRealtimeNotification(payload.title, payload.message, 'LOW_INVENTORY')
         refreshRealtimeData()
         return
       }

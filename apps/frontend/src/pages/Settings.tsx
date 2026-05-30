@@ -38,6 +38,10 @@ export default function Settings() {
   const setDarkMode = useUiStore((state) => state.setDarkMode)
   const soundEnabled = useUiStore((state) => state.soundEnabled)
   const setSoundEnabled = useUiStore((state) => state.setSoundEnabled)
+  const notificationMasterVolume = useUiStore((state) => state.notificationMasterVolume)
+  const notificationSoundPrefs = useUiStore((state) => state.notificationSoundPrefs)
+  const setNotificationMasterVolume = useUiStore((state) => state.setNotificationMasterVolume)
+  const setNotificationSoundPreference = useUiStore((state) => state.setNotificationSoundPreference)
   const desktopNotifications = useUiStore((state) => state.desktopNotifications)
   const setDesktopNotifications = useUiStore((state) => state.setDesktopNotifications)
   const density = useUiStore((state) => state.density)
@@ -265,6 +269,45 @@ export default function Settings() {
               className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
             />
           </label>
+
+          <label className="flex flex-col gap-2 rounded-xl border border-amber-100 px-4 py-3 lg:col-span-2">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-slate-900 dark:text-white">Âm lượng thông báo</p>
+              <span className="text-xs text-slate-500">{Math.round(notificationMasterVolume * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={notificationMasterVolume}
+              onChange={(e) => setNotificationMasterVolume(Number(e.target.value || 0))}
+              className="w-full"
+            />
+          </label>
+
+          <div className="rounded-xl border border-amber-100 px-4 py-3 lg:col-span-2">
+            <p className="text-sm font-medium text-slate-900 dark:text-white">Âm thanh theo loại thông báo</p>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {[
+                { key: 'NEW_ORDER', label: 'Đơn mới' },
+                { key: 'CALL_WAITER', label: 'Gọi phục vụ' },
+                { key: 'NEW_MESSAGE', label: 'Tin nhắn mới' },
+                { key: 'ITEM_READY', label: 'Món sẵn sàng' },
+                { key: 'LOW_INVENTORY', label: 'Cảnh báo kho' },
+              ].map((item) => (
+                <label key={item.key} className="flex items-center justify-between rounded-lg border border-amber-100 px-3 py-2 text-sm">
+                  <span>{item.label}</span>
+                  <input
+                    type="checkbox"
+                    checked={notificationSoundPrefs[item.key] !== false}
+                    onChange={(e) => setNotificationSoundPreference(item.key, e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
 
           <label className="flex items-center justify-between gap-3 rounded-xl border border-amber-100 px-4 py-3">
             <div>

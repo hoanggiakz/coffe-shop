@@ -6,6 +6,7 @@ import Header from './Header'
 import { cn } from '@/utils/cn'
 import { canAccessPath, getDefaultPathForRole, normalizeRole } from '@/utils/rbac'
 import toast from 'react-hot-toast'
+import { useNotificationStore } from '@/stores/notificationStore'
 
 function AccessDeniedRedirect({ to, message }: { to: string; message: string }) {
   useEffect(() => {
@@ -20,6 +21,7 @@ export default function DashboardLayout() {
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const notificationsCount = useNotificationStore((state) => state.unreadCount)
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
@@ -66,6 +68,7 @@ export default function DashboardLayout() {
         <Header
           onToggleSidebar={() => setCollapsed((prev) => !prev)}
           onToggleMobileSidebar={() => setMobileOpen((prev) => !prev)}
+          notificationsCount={notificationsCount}
         />
         <main className="safe-bottom px-3 py-3 sm:px-5 sm:py-5 lg:px-6 lg:py-6">
           <div className="smooth-page mx-auto w-full max-w-[1480px]">

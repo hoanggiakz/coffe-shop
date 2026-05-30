@@ -309,6 +309,7 @@ export default function ChatPage() {
         showRealtimeNotification(
           relatedChat ? tv(`Chat ${tableLabel(relatedChat.tableId)}`, `Chat ${tableLabel(relatedChat.tableId)}`) : tv('Chat mới từ khách', 'New customer chat'),
           message.content,
+          'NEW_MESSAGE',
         )
       }
     }

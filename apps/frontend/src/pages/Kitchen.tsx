@@ -175,7 +175,11 @@ export default function Kitchen() {
 
     const onNotification = (payload: StaffNotificationPayload) => {
       if (payload.type === 'ORDER_NEW') {
-        showRealtimeNotification(payload.title || tv('Có đơn mới', 'New order'), payload.message || tv('KDS vừa nhận đơn mới', 'KDS received a new order'))
+        showRealtimeNotification(
+          payload.title || tv('Có đơn mới', 'New order'),
+          payload.message || tv('KDS vừa nhận đơn mới', 'KDS received a new order'),
+          'NEW_ORDER',
+        )
         playKitchenOrderSound(soundEnabled)
         loadData()
         return

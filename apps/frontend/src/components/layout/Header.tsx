@@ -6,6 +6,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { vaiTroNhanVien } from '@/utils/display'
 import BranchScopeSelector from './BranchScopeSelector'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
+import { useNotificationStore } from '@/stores/notificationStore'
 
 interface HeaderProps {
   onToggleSidebar: () => void
@@ -25,6 +26,7 @@ export default function Header({
   const { t } = useI18n()
   const avatarSrc = useMemo(() => user?.avatarUrl || user?.avatar || '', [user?.avatarUrl, user?.avatar])
   const [avatarBroken, setAvatarBroken] = useState(false)
+  const markAllNotificationsRead = useNotificationStore((state) => state.markAllRead)
 
   useEffect(() => {
     setAvatarBroken(false)
@@ -69,6 +71,7 @@ export default function Header({
         </button>
 
         <button
+          onClick={() => markAllNotificationsRead()}
           className="relative inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 hover:bg-amber-50 dark:text-slate-200 dark:hover:bg-slate-800"
           aria-label="Thông báo"
         >
