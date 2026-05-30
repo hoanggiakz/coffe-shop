@@ -1,4 +1,6 @@
+import asyncio
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -27,6 +29,8 @@ AI_ROLLOUT_PERCENT = int(os.getenv("AI_ROLLOUT_PERCENT", "10"))
 AI_ACTIVE_MODEL_VERSION = os.getenv("AI_ACTIVE_MODEL_VERSION", "baseline_v1")
 AI_STAGING_MODEL_VERSION = os.getenv("AI_STAGING_MODEL_VERSION", "baseline_v2_candidate")
 KB_REFRESH_INTERVAL_MINUTES = int(os.getenv("AI_KB_REFRESH_INTERVAL_MINUTES", "30"))
+AI_FORECAST_CRON_ENABLED = os.getenv("AI_FORECAST_CRON_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+AI_FORECAST_CRON_HOUR_UTC = int(os.getenv("AI_FORECAST_CRON_HOUR_UTC", "19"))  # 02:00 ICT ~= 19:00 UTC (previous day)
 
 DEFAULT_MENU_KB = [
     {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
@@ -94,6 +98,7 @@ KB_STATE: dict[str, Any] = {
     "lastReloadAt": datetime.now(timezone.utc).isoformat(),
     "source": "bootstrap",
 }
+FORECAST_CRON_STATE: dict[str, Any] = {"running": False, "lastRunAt": None}
 
 
 def metric_guard(endpoint: str):
@@ -325,6 +330,66 @@ def decimal_from_any(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def top_negative_issues(texts: list[str], limit: int = 3) -> list[dict[str, Any]]:
+    stop_words = {
+        "la",
+        "va",
+        "cho",
+        "khong",
+        "qua",
+        "rat",
+        "bi",
+        "toi",
+        "ban",
+        "quan",
+        "phuc",
+        "vu",
+        "mon",
+        "nhan",
+        "vien",
+        "khach",
+    }
+    counts: dict[str, int] = {}
+    for text in texts:
+        normalized = re.sub(r"[^a-zA-Z0-9À-ỹà-ỹ\s]", " ", str(text or "").lower())
+        for token in normalized.split():
+            token = token.strip()
+            if len(token) < 3 or token in stop_words:
+                continue
+            counts[token] = counts.get(token, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)[: max(1, min(limit, 10))]
+    return [{"issue": key, "count": value} for key, value in ranked]
+
+
+async def forecast_cron_loop():
+    if not AI_FORECAST_CRON_ENABLED:
+        return
+    FORECAST_CRON_STATE["running"] = True
+    while True:
+        now = datetime.now(timezone.utc)
+        if now.hour == AI_FORECAST_CRON_HOUR_UTC and now.minute < 5:
+            try:
+                branch_rows = execute_sql('SELECT DISTINCT "branchId" FROM sales_forecast WHERE "branchId" IS NOT NULL LIMIT 200')
+                branch_ids = [str(row.get("branchId") or "").strip() for row in branch_rows if str(row.get("branchId") or "").strip()]
+                if not branch_ids:
+                    branch_ids = ["branch-e2e"]
+                for branch_id in branch_ids:
+                    rebuild_revenue_forecast(ForecastRebuildPayload(branchId=branch_id, days=7, granularity="daily"))
+                FORECAST_CRON_STATE["lastRunAt"] = datetime.now(timezone.utc).isoformat()
+                await asyncio.sleep(360)
+            except Exception:
+                await asyncio.sleep(60)
+        else:
+            await asyncio.sleep(30)
+
+
+@app.on_event("startup")
+async def startup_tasks():
+    reload_knowledge_base(source="startup")
+    if AI_FORECAST_CRON_ENABLED:
+        asyncio.create_task(forecast_cron_loop())
+
+
 def map_question_to_sql(question: str, branch_id: str | None) -> str:
     q = question.lower()
     where = 'WHERE "branchId" = %s' if branch_id else ""
@@ -396,6 +461,11 @@ def health() -> dict[str, Any]:
             "lastReloadAt": KB_STATE.get("lastReloadAt"),
             "refreshIntervalMinutes": KB_REFRESH_INTERVAL_MINUTES,
             "itemCount": KB_STATE.get("itemCount", len(DEFAULT_MENU_KB)),
+        },
+        "forecastCron": {
+            "enabled": AI_FORECAST_CRON_ENABLED,
+            "hourUtc": AI_FORECAST_CRON_HOUR_UTC,
+            "lastRunAt": FORECAST_CRON_STATE.get("lastRunAt"),
         },
     }
 
@@ -780,6 +850,34 @@ def sentiment_trend(branchId: str, days: int = 7) -> dict[str, Any]:
         points.append({"date": d.isoformat(), "positive": 0.7 + (i % 3) * 0.03, "neutral": 0.2 - (i % 2) * 0.02, "negative": 0.1 - (i % 2) * 0.01})
     log_audit("/api/ai/sentiment/trend", "trend", True, branchId)
     return {"branchId": branchId, "points": list(reversed(points)), "source": "fallback"}
+
+
+@app.get("/api/ai/sentiment/issues-top")
+@metric_guard("sentiment_issues_top")
+def sentiment_issues_top(branchId: str, days: int = 7, limit: int = 3) -> dict[str, Any]:
+    branchId = normalize_branch_id(branchId)
+    safe_days = max(1, min(days, 30))
+    safe_limit = max(1, min(limit, 10))
+    if REPORT_DATABASE_URL:
+        try:
+            rows = execute_sql(
+                """
+                SELECT "originalText"
+                FROM sentiment_analysis
+                WHERE "branchId" = %s
+                  AND label = 'NEGATIVE'
+                  AND "analyzedAt" >= (CURRENT_DATE - (%s::int || ' days')::interval)
+                ORDER BY "analyzedAt" DESC
+                LIMIT 500
+                """,
+                [branchId, safe_days],
+            )
+            issues = top_negative_issues([str(row.get("originalText") or "") for row in rows], safe_limit)
+            return {"branchId": branchId, "days": safe_days, "issues": issues, "source": "db"}
+        except Exception:
+            pass
+    issues = [{"issue": "cho-lau", "count": 5}, {"issue": "het-mon", "count": 4}, {"issue": "thai-do", "count": 3}]
+    return {"branchId": branchId, "days": safe_days, "issues": issues[:safe_limit], "source": "fallback"}
 
 
 @app.post("/api/ai/sentiment/analyze")

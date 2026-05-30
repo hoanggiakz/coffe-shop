@@ -108,3 +108,11 @@ def test_forecast_rebuild_endpoint():
     assert payload.get('branchId') == 'branch-e2e'
     assert int(payload.get('days', 0)) == 3
     assert isinstance(payload.get('items'), list)
+
+
+def test_sentiment_issues_top_contract():
+    response = client.get('/api/ai/sentiment/issues-top', params={'branchId': 'branch-e2e', 'days': 7, 'limit': 3})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get('branchId') == 'branch-e2e'
+    assert isinstance(payload.get('issues'), list)
