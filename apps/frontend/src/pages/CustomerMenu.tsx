@@ -317,6 +317,11 @@ function restoreCartFromStorage(raw: unknown): Record<string, CartItem> {
   return next
 }
 
+type DiscountValidationCachePayload = {
+  savedAt: number
+  data: PromotionPreview
+}
+
 const fieldClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60'
 
@@ -633,6 +638,7 @@ export default function CustomerMenu() {
     const branchPart = String(qrBranchId || 'unknown').trim() || 'unknown'
     return `cart_${branchPart}_${tableId}`
   }, [tableId, qrBranchId])
+  const cartSessionFallbackKey = useMemo(() => (cartStorageKey ? `session_fallback_${cartStorageKey}` : ''), [cartStorageKey])
   const orderStorageKey = useMemo(() => (tableId ? `customer-last-order:${tableId}` : ''), [tableId])
   const chatProfileStorageKey = useMemo(() => (tableId ? `customer-chat-profile:${tableId}` : ''), [tableId])
   const customerAuthStorageKey = 'customer-auth-session'
@@ -641,22 +647,40 @@ export default function CustomerMenu() {
     if (!cartStorageKey) return
     try {
       const raw = localStorage.getItem(cartStorageKey)
-      if (raw) {
-        setCart(restoreCartFromStorage(JSON.parse(raw)))
-      } else {
-        setCart({})
-      }
+      const fallbackRaw = cartSessionFallbackKey ? sessionStorage.getItem(cartSessionFallbackKey) : null
+      const source = raw || fallbackRaw
+      setCart(source ? restoreCartFromStorage(JSON.parse(source)) : {})
     } catch {
       setCart({})
     } finally {
       setCartLoaded(true)
     }
-  }, [cartStorageKey])
+  }, [cartStorageKey, cartSessionFallbackKey])
 
   useEffect(() => {
     if (!cartStorageKey || !cartLoaded) return
-    localStorage.setItem(cartStorageKey, JSON.stringify(cart))
-  }, [cartStorageKey, cart, cartLoaded])
+    const serialized = JSON.stringify(cart)
+    try {
+      localStorage.setItem(cartStorageKey, serialized)
+      if (cartSessionFallbackKey) {
+        sessionStorage.removeItem(cartSessionFallbackKey)
+      }
+    } catch {
+      if (cartSessionFallbackKey) {
+        sessionStorage.setItem(cartSessionFallbackKey, serialized)
+      }
+      toast.error('Bo nho localStorage day, da tam luu gio hang trong session hien tai')
+    }
+  }, [cartStorageKey, cart, cartLoaded, cartSessionFallbackKey])
+
+  useEffect(() => {
+    const onEscCloseDrawer = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setCartDrawerOpen(false)
+    }
+    window.addEventListener('keydown', onEscCloseDrawer)
+    return () => window.removeEventListener('keydown', onEscCloseDrawer)
+  }, [])
 
   useEffect(() => {
     if (!orderStorageKey) return
@@ -1230,6 +1254,46 @@ export default function CustomerMenu() {
     })
   }
 
+  const increaseLineQuantity = (lineKey: string) => {
+    setCart((prev) => {
+      const current = prev[lineKey]
+      if (!current) return prev
+      return {
+        ...prev,
+        [lineKey]: {
+          ...current,
+          quantity: Number(current.quantity || 0) + 1,
+        },
+      }
+    })
+  }
+
+  const decreaseLineQuantity = (lineKey: string) => {
+    setCart((prev) => {
+      const current = prev[lineKey]
+      if (!current) return prev
+      if (current.quantity <= 1) {
+        return prev
+      }
+      return {
+        ...prev,
+        [lineKey]: {
+          ...current,
+          quantity: Number(current.quantity || 0) - 1,
+        },
+      }
+    })
+  }
+
+  const removeCartLine = (lineKey: string) => {
+    setCart((prev) => {
+      if (!prev[lineKey]) return prev
+      const next = { ...prev }
+      delete next[lineKey]
+      return next
+    })
+  }
+
   const decrease = (menuItemId: string) => {
     const draft = getDraftForMenuItem(menuItemId)
     const preferredKey = buildCartLineKey(menuItemId, draft.selections, draft.note)
@@ -1405,6 +1469,17 @@ export default function CustomerMenu() {
 
     setApplyingPromo(true)
     try {
+      const cacheKey = `discount_validate_${code.toUpperCase()}_${Math.floor(cartTotal)}`
+      const cachedRaw = sessionStorage.getItem(cacheKey)
+      if (cachedRaw) {
+        const cached = JSON.parse(cachedRaw) as DiscountValidationCachePayload
+        if (cached?.savedAt && Date.now() - Number(cached.savedAt) <= 5 * 60 * 1000 && cached?.data) {
+          setPromoPreview(cached.data)
+          toast.success('Đã áp dụng mã khuyến mãi (cache)')
+          return
+        }
+      }
+
       const selectedMenuItemIds = Array.from(
         new Set(
           cartLines
@@ -1429,6 +1504,18 @@ export default function CustomerMenu() {
         discountAmount: Number(data?.discountAmount || 0),
         finalAmount: Number(data?.finalAmount || cartTotal),
       })
+      sessionStorage.setItem(
+        cacheKey,
+        JSON.stringify({
+          savedAt: Date.now(),
+          data: {
+            code: String(data?.code || code).toUpperCase(),
+            description: data?.description || undefined,
+            discountAmount: Number(data?.discountAmount || 0),
+            finalAmount: Number(data?.finalAmount || cartTotal),
+          },
+        } as DiscountValidationCachePayload),
+      )
       toast.success('Đã áp dụng mã khuyến mãi')
     } catch (error: any) {
       setPromoPreview(null)
@@ -2044,28 +2131,62 @@ export default function CustomerMenu() {
             <p className="font-semibold text-slate-900">Giỏ hàng</p>
             <div className="mt-3 space-y-2 text-sm">
               {cartLines.length === 0 && (
-                <p className="text-gray-500">Chưa có món</p>
+                <div className="rounded-xl border border-dashed border-sky-200 bg-sky-50/30 px-3 py-5 text-center">
+                  <p className="text-gray-500">Giỏ hàng trống. Hãy thêm món từ thực đơn.</p>
+                  <button
+                    type="button"
+                    onClick={() => setCartDrawerOpen(false)}
+                    className="mt-2 rounded-lg border border-sky-200 bg-white px-3 py-1.5 text-xs font-medium text-sky-700"
+                  >
+                    Tiếp tục chọn món
+                  </button>
+                </div>
               )}
               {cartLines.map((entry) => {
                 const item = menuMap.get(entry.menuItemId)
                 if (!item) return null
                 const delta = getCustomizationDelta(item, entry.selections)
                 const detailLines = formatSelectionDetails(item, entry.selections)
+                const lineKey = buildCartLineKey(entry.menuItemId, entry.selections, entry.note)
                 return (
-                  <div
-                    key={buildCartLineKey(entry.menuItemId, entry.selections, entry.note)}
-                    className="rounded border border-gray-100 p-2"
-                  >
-                    <div className="flex justify-between">
+                  <div key={lineKey} className="rounded border border-gray-100 p-2">
+                    <div className="flex items-start justify-between gap-2">
                       <span>
                         {entry.quantity}x {item.name}
                       </span>
-                      <span>{formatVnd((item.price + delta) * entry.quantity)}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeCartLine(lineKey)}
+                        className="rounded border border-red-200 px-2 py-0.5 text-xs text-red-600"
+                      >
+                        Xóa
+                      </button>
                     </div>
                     {detailLines.length > 0 && (
                       <p className="mt-1 text-xs text-gray-500">Chi tiết: {detailLines.join(' | ')}</p>
                     )}
                     {!!entry.note && <p className="mt-1 text-xs text-gray-500">Ghi chú: {entry.note}</p>}
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="font-medium text-amber-700">{formatVnd((item.price + delta) * entry.quantity)}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => decreaseLineQuantity(lineKey)}
+                          disabled={entry.quantity <= 1}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-sky-200 disabled:opacity-50"
+                        >
+                          -
+                        </button>
+                        <span className="min-w-6 text-center text-sm font-semibold">{entry.quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => increaseLineQuantity(lineKey)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-sky-200"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )
               })}
@@ -2114,6 +2235,12 @@ export default function CustomerMenu() {
                 <input
                   value={promoCode}
                   onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void applyPromotion()
+                    }
+                  }}
                   className={`${fieldClass} flex-1`}
                   placeholder="Nhap ma giam gia"
                 />
@@ -2127,9 +2254,21 @@ export default function CustomerMenu() {
                 </button>
               </div>
               {promoPreview && (
-                <p className="mt-2 text-xs text-emerald-700">
-                  Đã áp dụng {promoPreview.code}: -{formatVnd(promoPreview.discountAmount)}
-                </p>
+                <div className="mt-2 flex items-center justify-between gap-2 text-xs text-emerald-700">
+                  <p>
+                    Đã áp dụng {promoPreview.code}: -{formatVnd(promoPreview.discountAmount)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPromoCode('')
+                      setPromoPreview(null)
+                    }}
+                    className="rounded border border-emerald-200 px-2 py-0.5 text-emerald-700"
+                  >
+                    Xóa mã
+                  </button>
+                </div>
               )}
             </div>
 
