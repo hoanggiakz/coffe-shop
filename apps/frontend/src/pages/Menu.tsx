@@ -132,6 +132,7 @@ export default function Menu() {
   const [editingItemBranchId, setEditingItemBranchId] = useState<string | null>(null)
   const [itemForm, setItemForm] = useState(defaultItemForm)
   const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [statusUpdatingByItemId, setStatusUpdatingByItemId] = useState<Record<string, boolean>>({})
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [recipeRows, setRecipeRows] = useState<RecipeRow[]>([emptyRecipeRow()])
 
@@ -418,6 +419,30 @@ export default function Menu() {
       .slice(0, 2)
       .map((entry) => `${entry.ingredientName || entry.ingredientId} (${entry.quantity} ${entry.unit || ''})`.trim())
       .join(', ')
+  }
+
+  const updateItemAvailability = async (item: MenuItem, nextAvailable: boolean) => {
+    if (item.available === nextAvailable || statusUpdatingByItemId[item.id]) {
+      return
+    }
+
+    setStatusUpdatingByItemId((prev) => ({ ...prev, [item.id]: true }))
+    const previousItems = items
+    setItems((prev) =>
+      prev.map((entry) => (entry.id === item.id ? { ...entry, available: nextAvailable } : entry)),
+    )
+
+    try {
+      await api.patch(`/orders/admin/menu/items/${item.id}`, {
+        available: nextAvailable,
+      })
+      toast.success(`Đã cập nhật trạng thái: ${nextAvailable ? 'Đang bán' : 'Ngừng bán'}`)
+    } catch (error: any) {
+      setItems(previousItems)
+      toast.error(error.response?.data?.message || 'Không cập nhật được trạng thái món')
+    } finally {
+      setStatusUpdatingByItemId((prev) => ({ ...prev, [item.id]: false }))
+    }
   }
 
   return (
@@ -895,7 +920,17 @@ export default function Menu() {
                       <p className="truncate text-xs text-gray-500">{recipeSummary(item)}</p>
                     </div>
                   </td>
-                  <td>{item.available ? 'Đang bán' : 'Ngừng bán'}</td>
+                  <td>
+                    <select
+                      className="min-h-9 rounded-lg border border-amber-100 bg-white px-2 py-1 text-sm"
+                      value={item.available ? 'AVAILABLE' : 'UNAVAILABLE'}
+                      disabled={Boolean(statusUpdatingByItemId[item.id])}
+                      onChange={(event) => void updateItemAvailability(item, event.target.value === 'AVAILABLE')}
+                    >
+                      <option value="AVAILABLE">Đang bán</option>
+                      <option value="UNAVAILABLE">Ngừng bán</option>
+                    </select>
+                  </td>
                   <td className="flex gap-2 py-2">
                     <Button
                       size="sm"
