@@ -116,6 +116,8 @@ interface AiInsightState {
   forecasts: AiRevenueForecast[]
   anomalies: Array<{ id: string; severity: string; description: string; isResolved: boolean }>
   sentiment: { positive: number; neutral: number; negative: number } | null
+  forecastSource?: string
+  sentimentSource?: string
   fallbackReason?: string
 }
 
@@ -167,6 +169,7 @@ export default function Reports() {
     anomalies: [],
     sentiment: null,
   })
+  const [rebuildingForecast, setRebuildingForecast] = useState(false)
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
@@ -230,6 +233,8 @@ export default function Reports() {
           available: aiAvailable,
           forecasts: Array.isArray(forecastData?.forecasts) ? (forecastData.forecasts as AiRevenueForecast[]) : [],
           anomalies: Array.isArray(anomalyData?.items) ? anomalyData.items : [],
+          forecastSource: String(forecastData?.source || ''),
+          sentimentSource: String(sentimentData?.source || ''),
           sentiment: sentimentData
             ? {
                 positive: Number(sentimentData.positive || 0),
@@ -245,6 +250,8 @@ export default function Reports() {
           forecasts: [],
           anomalies: [],
           sentiment: null,
+          forecastSource: '',
+          sentimentSource: '',
           fallbackReason: aiError?.response?.data?.message || 'AI service unavailable',
         })
       }
@@ -349,6 +356,27 @@ export default function Reports() {
     }
   }
 
+  const handleRebuildForecast = async () => {
+    if (!effectiveAiBranchId) {
+      toast.error('Thiếu branchId để rebuild forecast')
+      return
+    }
+    setRebuildingForecast(true)
+    try {
+      await api.post('/ai/forecast/revenue/rebuild', {
+        branchId: effectiveAiBranchId,
+        days: 7,
+        granularity: 'daily',
+      })
+      toast.success('Đã rebuild forecast, đang tải lại AI insights')
+      await loadReports()
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Rebuild forecast thất bại')
+    } finally {
+      setRebuildingForecast(false)
+    }
+  }
+
   return (
     <div className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-amber-100 bg-white/85 p-3 backdrop-blur sm:p-4">
@@ -413,6 +441,16 @@ export default function Reports() {
       </div>}
 
       <Card title="AI Insights" subtitle={aiInsight.available ? 'Dự báo & cảnh báo thông minh' : 'Fallback rule-based'}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-slate-500">
+            Branch AI: <span className="font-medium text-slate-700">{effectiveAiBranchId}</span>
+            {aiInsight.forecastSource ? ` · Forecast source: ${aiInsight.forecastSource}` : ''}
+            {aiInsight.sentimentSource ? ` · Sentiment source: ${aiInsight.sentimentSource}` : ''}
+          </p>
+          <Button size="sm" variant="secondary" onClick={() => void handleRebuildForecast()} loading={rebuildingForecast}>
+            Rebuild forecast
+          </Button>
+        </div>
         {!aiInsight.available && (
           <p className="text-sm text-amber-700">
             AI tạm thời không khả dụng. Đang fallback về báo cáo truyền thống. {aiInsight.fallbackReason ? `(${aiInsight.fallbackReason})` : ''}
