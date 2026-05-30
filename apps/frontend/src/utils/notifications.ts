@@ -25,7 +25,7 @@ const toneProfile: Record<RealtimeNotificationType, { from: number; to: number; 
   SYSTEM: { from: 700, to: 860, duration: 0.2 },
 }
 
-export function playNotificationTone(type: RealtimeNotificationType = 'SYSTEM') {
+export async function playNotificationTone(type: RealtimeNotificationType = 'SYSTEM') {
   const uiState = useUiStore.getState()
   if (!uiState.soundEnabled) return
   if (uiState.notificationSoundPrefs[String(type || 'SYSTEM').toUpperCase()] === false) return
@@ -33,6 +33,13 @@ export function playNotificationTone(type: RealtimeNotificationType = 'SYSTEM') 
   try {
     const context = getAudioContext()
     if (!context) return
+    if (context.state === 'suspended') {
+      try {
+        await context.resume()
+      } catch {
+        return
+      }
+    }
 
     const oscillator = context.createOscillator()
     const gainNode = context.createGain()
@@ -61,7 +68,7 @@ export function playNotificationTone(type: RealtimeNotificationType = 'SYSTEM') 
 export async function showRealtimeNotification(title: string, message: string, type: RealtimeNotificationType = 'SYSTEM') {
   useNotificationStore.getState().push({ title, message, type })
   toast(`${title}: ${message}`)
-  playNotificationTone(type)
+  void playNotificationTone(type)
 
   if (typeof window === 'undefined') return
   if (!useUiStore.getState().desktopNotifications) return
