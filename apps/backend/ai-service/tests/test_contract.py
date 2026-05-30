@@ -64,3 +64,47 @@ def test_chat_contract():
     assert payload['intent'] in ['FAQ', 'ORDER', 'ESCALATE']
     assert isinstance(payload['confidence'], float)
     assert 'reply' in payload
+
+
+def test_recommend_invalid_limit():
+    response = client.get('/api/ai/recommend', params={'branchId': 'branch-e2e', 'limit': 99})
+    assert response.status_code == 400
+    assert 'limit' in response.json().get('detail', '')
+
+
+def test_recommend_missing_branch():
+    response = client.post(
+        '/api/ai/recommend',
+        json={
+            'branchId': '',
+            'cartItemIds': ['item-1'],
+            'limit': 3,
+        },
+    )
+    assert response.status_code == 400
+    assert 'branchId' in response.json().get('detail', '')
+
+
+def test_chat_missing_message():
+    response = client.post('/api/ai/chat', json={'branchId': 'branch-e2e'})
+    assert response.status_code == 400
+
+
+def test_kb_reload_endpoint():
+    response = client.post('/api/ai/kb/reload')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get('success') is True
+    assert int(payload.get('itemCount', 0)) > 0
+
+
+def test_forecast_rebuild_endpoint():
+    response = client.post(
+        '/api/ai/forecast/revenue/rebuild',
+        json={'branchId': 'branch-e2e', 'days': 3, 'granularity': 'daily'},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get('branchId') == 'branch-e2e'
+    assert int(payload.get('days', 0)) == 3
+    assert isinstance(payload.get('items'), list)

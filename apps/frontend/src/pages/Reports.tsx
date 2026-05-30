@@ -170,6 +170,19 @@ export default function Reports() {
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
+  const effectiveAiBranchId = selectedBranchId || currentUserBranchId || 'branch-e2e'
+
+  const requestAiWithRetry = async (path: string, params: Record<string, any>) => {
+    try {
+      return await api.get(path, { params, timeout: 1800 })
+    } catch (error: any) {
+      const status = Number(error?.response?.status || 0)
+      const timeout = error?.code === 'ECONNABORTED'
+      const retryable = timeout || status >= 500 || status === 0
+      if (!retryable) throw error
+      return api.get(path, { params, timeout: 1800 })
+    }
+  }
 
   const loadReports = async () => {
     setLoading(true)
@@ -199,22 +212,32 @@ export default function Reports() {
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
 
       try {
-        const [forecastRes, anomalyRes, sentimentRes] = await Promise.all([
-          api.get('/ai/forecast/revenue', { params: { branchId: selectedBranchId || currentUserBranchId || 'branch-e2e', days: 7 } }),
-          api.get('/ai/anomalies', { params: { branchId: selectedBranchId || currentUserBranchId || 'branch-e2e' } }),
-          api.get('/ai/sentiment/summary', { params: { branchId: selectedBranchId || currentUserBranchId || 'branch-e2e' } }),
+        const [forecastResult, anomalyResult, sentimentResult] = await Promise.allSettled([
+          requestAiWithRetry('/ai/forecast/revenue', { branchId: effectiveAiBranchId, days: 7 }),
+          requestAiWithRetry('/ai/anomalies', { branchId: effectiveAiBranchId }),
+          requestAiWithRetry('/ai/sentiment/summary', { branchId: effectiveAiBranchId }),
         ])
+
+        const forecastData = forecastResult.status === 'fulfilled' ? forecastResult.value.data : null
+        const anomalyData = anomalyResult.status === 'fulfilled' ? anomalyResult.value.data : null
+        const sentimentData = sentimentResult.status === 'fulfilled' ? sentimentResult.value.data : null
+        const aiAvailable = Boolean(forecastData || anomalyData || sentimentData)
+        const reasons = [forecastResult, anomalyResult, sentimentResult]
+          .filter((item): item is PromiseRejectedResult => item.status === 'rejected')
+          .map((item) => item.reason?.response?.data?.message || item.reason?.message || 'request_failed')
+
         setAiInsight({
-          available: true,
-          forecasts: Array.isArray(forecastRes.data?.forecasts) ? (forecastRes.data.forecasts as AiRevenueForecast[]) : [],
-          anomalies: Array.isArray(anomalyRes.data?.items) ? anomalyRes.data.items : [],
-          sentiment: sentimentRes.data
+          available: aiAvailable,
+          forecasts: Array.isArray(forecastData?.forecasts) ? (forecastData.forecasts as AiRevenueForecast[]) : [],
+          anomalies: Array.isArray(anomalyData?.items) ? anomalyData.items : [],
+          sentiment: sentimentData
             ? {
-                positive: Number(sentimentRes.data.positive || 0),
-                neutral: Number(sentimentRes.data.neutral || 0),
-                negative: Number(sentimentRes.data.negative || 0),
+                positive: Number(sentimentData.positive || 0),
+                neutral: Number(sentimentData.neutral || 0),
+                negative: Number(sentimentData.negative || 0),
               }
             : null,
+          fallbackReason: reasons.length ? reasons.join('; ') : undefined,
         })
       } catch (aiError: any) {
         setAiInsight({

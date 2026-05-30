@@ -44,6 +44,8 @@ export class ProxyController {
       const proxy = createProxyMiddleware({
         target,
         changeOrigin: true,
+        proxyTimeout: route.path === '/api/ai' ? 2000 : undefined,
+        timeout: route.path === '/api/ai' ? 2000 : undefined,
         // Keep /api/v1/payments for normal payment APIs, but bridge webhook to compat endpoint.
         pathRewrite,
         onError: (err, req, res: any) => {

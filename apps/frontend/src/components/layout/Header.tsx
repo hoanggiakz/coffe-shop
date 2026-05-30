@@ -163,9 +163,13 @@ export default function Header({
                   onClick={async () => {
                     const branchId = String(selectedBranchId || user?.branchId || '').trim()
                     if (!branchId) return
-                    await api.patch('/notifications/read-all', null, { params: { branchId } })
-                    setNotifItems((prev) => prev.map((item) => ({ ...item, isRead: true })))
-                    markAllNotificationsRead()
+                    try {
+                      await api.patch('/notifications/read-all', {}, { params: { branchId } })
+                      setNotifItems((prev) => prev.map((item) => ({ ...item, isRead: true })))
+                      markAllNotificationsRead()
+                    } catch (error: any) {
+                      setNotifError(error?.response?.data?.message || 'Khong the danh dau tat ca thong bao da doc')
+                    }
                   }}
                 >
                   Đánh dấu đã đọc
