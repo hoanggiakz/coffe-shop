@@ -578,7 +578,7 @@ export default function CustomerMenu() {
       rows.map((item: any) => ({
         ...item,
         id: item.menu_item_id || item.id,
-        branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || item.id,
+        branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || undefined,
         name: normalizeVietnameseText(item.name),
         description: normalizeVietnameseText(item.description),
         image: item.image || item.image_url || null,
@@ -596,7 +596,7 @@ export default function CustomerMenu() {
         (Array.isArray(category.items) ? category.items : []).map((item: any) => ({
           ...item,
           id: item.id || item.menu_item_id,
-          branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || item.id,
+          branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || undefined,
           name: normalizeVietnameseText(item.name),
           description: normalizeVietnameseText(item.description),
           image: item.image || item.imageUrl || item.image_url || null,
