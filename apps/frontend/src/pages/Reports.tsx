@@ -172,6 +172,7 @@ export default function Reports() {
     sentimentTopIssues: [],
   })
   const [rebuildingForecast, setRebuildingForecast] = useState(false)
+  const [testingAnomaly, setTestingAnomaly] = useState(false)
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
@@ -390,6 +391,31 @@ export default function Reports() {
     }
   }
 
+  const handleTestAnomaly = async () => {
+    if (!effectiveAiBranchId) {
+      toast.error('Thiếu branchId để test anomaly')
+      return
+    }
+    setTestingAnomaly(true)
+    try {
+      await api.post('/ai/anomalies/detect', {
+        branchId: effectiveAiBranchId,
+        type: 'ORDER_QTY',
+        value: 120,
+        baselineMean: 20,
+        baselineStd: 10,
+        referenceType: 'ORDER',
+        referenceId: `test-${Date.now()}`,
+      })
+      toast.success('Đã tạo anomaly test, đang tải lại AI insights')
+      await loadReports()
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Tạo anomaly test thất bại')
+    } finally {
+      setTestingAnomaly(false)
+    }
+  }
+
   return (
     <div className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-amber-100 bg-white/85 p-3 backdrop-blur sm:p-4">
@@ -460,9 +486,14 @@ export default function Reports() {
             {aiInsight.forecastSource ? ` · Forecast source: ${aiInsight.forecastSource}` : ''}
             {aiInsight.sentimentSource ? ` · Sentiment source: ${aiInsight.sentimentSource}` : ''}
           </p>
-          <Button size="sm" variant="secondary" onClick={() => void handleRebuildForecast()} loading={rebuildingForecast}>
-            Rebuild forecast
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => void handleRebuildForecast()} loading={rebuildingForecast}>
+              Rebuild forecast
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => void handleTestAnomaly()} loading={testingAnomaly}>
+              Test anomaly
+            </Button>
+          </div>
         </div>
         {!aiInsight.available && (
           <p className="text-sm text-amber-700">
