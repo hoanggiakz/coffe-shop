@@ -6,6 +6,7 @@ import Input from '@/components/ui/Input'
 import api from '@/utils/api'
 import { disconnectSocket, getSocket } from '@/utils/socket'
 import { useAuthStore } from '@/stores/authStore'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { ChatSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
@@ -102,7 +103,9 @@ interface FormattedMessage {
 
 export default function ChatPage() {
   const user = useAuthStore((state) => state.user)
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const { tv } = useI18n()
+  const effectiveBranchId = String(selectedBranchId || user?.branchId || '').trim()
   const [chats, setChats] = useState<ChatItem[]>([])
   const [tables, setTables] = useState<TableApi[]>([])
   const [activeChatId, setActiveChatId] = useState('')
@@ -199,12 +202,12 @@ export default function ChatPage() {
 
   const loadChats = async () => {
     try {
-      const branchId = String(user?.branchId || '').trim()
+      const branchId = effectiveBranchId
       const [chatRes, tableRes] = await Promise.all([
         branchId
           ? api.get(`/branches/${branchId}/chat/sessions?status=${statusFilter}&page=1&limit=100`)
           : api.get('/chats'),
-        api.get('/tables'),
+        api.get('/tables', { params: { branchId: branchId || undefined } }),
       ])
       const nextChats: ChatItem[] = Array.isArray(chatRes.data) ? chatRes.data : []
       const nextTables: TableApi[] = Array.isArray(tableRes.data) ? tableRes.data : []
@@ -253,7 +256,7 @@ export default function ChatPage() {
     loadChats()
     const timer = setInterval(loadChats, 10000)
     return () => clearInterval(timer)
-  }, [statusFilter, user?.branchId])
+  }, [statusFilter, effectiveBranchId])
 
   useEffect(() => {
     if (!activeChatId) return
@@ -276,7 +279,7 @@ export default function ChatPage() {
       socket.emit('join-staff', {
         staffId: user?.id,
         staffName: user?.name,
-        branchId: user?.branchId || undefined,
+        branchId: effectiveBranchId || undefined,
         role: user?.role || undefined,
       })
     }
@@ -341,7 +344,7 @@ export default function ChatPage() {
       if (staffTypingTimerRef.current) clearTimeout(staffTypingTimerRef.current)
       disconnectSocket()
     }
-  }, [user?.id, user?.name])
+  }, [user?.id, user?.name, user?.role, effectiveBranchId])
 
   useEffect(() => {
     if (!activeChat?.id) return
@@ -356,7 +359,7 @@ export default function ChatPage() {
       return
     }
     try {
-      const { data } = await api.post('/chats', { tableId: newTableId.trim(), branchId: user?.branchId || undefined })
+      const { data } = await api.post('/chats', { tableId: newTableId.trim(), branchId: effectiveBranchId || undefined })
       setNewTableId('')
       await loadChats()
       setActiveChatId(data.id)

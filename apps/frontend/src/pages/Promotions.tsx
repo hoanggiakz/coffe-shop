@@ -5,6 +5,8 @@ import Button from '@/components/ui/Button'
 import api from '@/utils/api'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { loaiGiamGia, phamViKhuyenMai, trangThaiHoatDong } from '@/utils/display'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
+import { useAuthStore } from '@/stores/authStore'
 
 type DiscountType = 'PERCENT' | 'FIXED'
 type PromotionScope = 'ORDER' | 'ITEM'
@@ -66,6 +68,9 @@ const fieldClass =
   'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
 
 export default function Promotions() {
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
+  const user = useAuthStore((state) => state.user)
+  const effectiveBranchId = String(selectedBranchId || user?.branchId || '').trim()
   const [promotions, setPromotions] = useState<PromotionApi[]>([])
   const [menuItems, setMenuItems] = useState<MenuItemApi[]>([])
   const [includeInactive, setIncludeInactive] = useState(false)
@@ -78,6 +83,7 @@ export default function Promotions() {
 
   const loadPromotions = async () => {
     const params: Record<string, string | boolean> = { includeInactive }
+    if (effectiveBranchId) params.branchId = effectiveBranchId
     if (keyword.trim()) params.keyword = keyword.trim()
     if (scopeFilter !== 'ALL') params.appliesTo = scopeFilter
     const { data } = await api.get('/orders/admin/promotions', { params })
@@ -85,7 +91,9 @@ export default function Promotions() {
   }
 
   const loadMenuItems = async () => {
-    const { data } = await api.get('/orders/admin/menu/items')
+    const { data } = await api.get('/orders/admin/menu/items', {
+      params: { branchId: effectiveBranchId || undefined },
+    })
     setMenuItems(Array.isArray(data) ? data : [])
   }
 
@@ -101,7 +109,7 @@ export default function Promotions() {
       }
     }
     run()
-  }, [includeInactive, scopeFilter])
+  }, [includeInactive, scopeFilter, effectiveBranchId])
 
   const menuNameById = useMemo(() => {
     const map = new Map<string, string>()
@@ -169,6 +177,7 @@ export default function Promotions() {
       startAt: form.startAt ? new Date(form.startAt).toISOString() : null,
       endAt: form.endAt ? new Date(form.endAt).toISOString() : null,
       isActive: form.isActive,
+      branchId: effectiveBranchId || null,
     }
 
     setSaving(true)
