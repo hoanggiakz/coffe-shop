@@ -127,6 +127,14 @@ const selectClass =
 
 const softPanelClass = 'rounded-xl border border-amber-100 bg-white/90 p-4'
 
+const roleBadgeClass: Record<StaffRole, string> = {
+  ADMIN: 'bg-rose-100 text-rose-700',
+  MANAGER: 'bg-violet-100 text-violet-700',
+  WAITER: 'bg-sky-100 text-sky-700',
+  BARISTA: 'bg-amber-100 text-amber-700',
+  STAFF: 'bg-slate-100 text-slate-700',
+}
+
 export default function StaffManagement() {
   const currentUser = useAuthStore((state) => state.user)
   const currentRole = normalizeRole(currentUser?.role)
@@ -197,6 +205,19 @@ export default function StaffManagement() {
 
   const activeStaffs = useMemo(
     () => staffs.filter((item) => item.isActive),
+    [staffs],
+  )
+  const inactiveStaffCount = useMemo(() => staffs.filter((item) => !item.isActive).length, [staffs])
+  const roleBreakdown = useMemo(
+    () =>
+      staffs.reduce<Record<StaffRole, number>>(
+        (acc, item) => {
+          const role = (item.role || 'STAFF') as StaffRole
+          acc[role] = (acc[role] || 0) + 1
+          return acc
+        },
+        { ADMIN: 0, MANAGER: 0, WAITER: 0, BARISTA: 0, STAFF: 0 },
+      ),
     [staffs],
   )
   const currentStaffEntry = useMemo(
@@ -848,6 +869,27 @@ export default function StaffManagement() {
       <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Quản lý nhân sự (Quản lý / Quản trị)</h1>
 
       <Card title="M-01 Quản lý nhân sự" subtitle="Chi ADMIN/MANAGER moi duoc them, sua, xoa tai khoan nhan vien">
+        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className={softPanelClass}>
+            <p className="text-xs font-semibold uppercase text-slate-500">Tổng nhân sự</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900">{staffs.length}</p>
+          </div>
+          <div className={softPanelClass}>
+            <p className="text-xs font-semibold uppercase text-slate-500">Đang làm</p>
+            <p className="mt-1 text-2xl font-bold text-emerald-700">{activeStaffs.length}</p>
+          </div>
+          <div className={softPanelClass}>
+            <p className="text-xs font-semibold uppercase text-slate-500">Vô hiệu hóa</p>
+            <p className="mt-1 text-2xl font-bold text-amber-700">{inactiveStaffCount}</p>
+          </div>
+          <div className={softPanelClass}>
+            <p className="text-xs font-semibold uppercase text-slate-500">Phân role</p>
+            <p className="mt-1 text-sm text-slate-700">
+              M:{roleBreakdown.MANAGER} W:{roleBreakdown.WAITER} B:{roleBreakdown.BARISTA} S:{roleBreakdown.STAFF}
+            </p>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <Input
             placeholder="Tìm theo tên/email/mã NV"
@@ -1000,7 +1042,7 @@ export default function StaffManagement() {
                     <p className="font-semibold text-slate-900">{staff.name}</p>
                     <p className="text-xs text-slate-500">{staff.email}</p>
                   </div>
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">{vaiTroNhanVien(staff.role)}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${roleBadgeClass[staff.role] || roleBadgeClass.STAFF}`}>{vaiTroNhanVien(staff.role)}</span>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
                   <p>Chi nhánh: <span className="font-medium">{staff.branchName || staff.branchId || '-'}</span></p>
@@ -1048,7 +1090,11 @@ export default function StaffManagement() {
                   <tr key={staff.id} className="border-b">
                     <td className="py-2 pr-3">{staff.name}</td>
                     <td className="py-2 pr-3">{staff.email}</td>
-                    <td className="py-2 pr-3">{vaiTroNhanVien(staff.role)}</td>
+                    <td className="py-2 pr-3">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${roleBadgeClass[staff.role] || roleBadgeClass.STAFF}`}>
+                        {vaiTroNhanVien(staff.role)}
+                      </span>
+                    </td>
                     <td className="py-2 pr-3">{staff.branchName || staff.branchId || '-'}</td>
                     <td className="py-2 pr-3">{staff.employeeCode || '-'}</td>
                     <td className="py-2 pr-3">{staff.personalQrCode || '-'}</td>
@@ -1070,6 +1116,13 @@ export default function StaffManagement() {
                     </td>
                   </tr>
                 ))}
+                {staffs.length === 0 && (
+                  <tr>
+                    <td className="py-3 text-sm text-gray-500" colSpan={9}>
+                      Chưa có nhân sự khớp bộ lọc hiện tại
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           )}
@@ -1084,7 +1137,7 @@ export default function StaffManagement() {
                 <div key={`card-${staff.id}`} className="rounded-xl border border-amber-100 bg-white/90 p-4 shadow-sm">
                   <p className="text-base font-semibold text-slate-900">{staff.name}</p>
                   <p className="mt-1 text-sm text-slate-600">Mã NV: {staff.employeeCode || '-'}</p>
-                  <p className="text-sm text-slate-600">Vai trò: {vaiTroNhanVien(staff.role)}</p>
+                  <p className="text-sm text-slate-600">Vai trò: <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${roleBadgeClass[staff.role] || roleBadgeClass.STAFF}`}>{vaiTroNhanVien(staff.role)}</span></p>
                   <p className="text-sm text-slate-600">Chi nhánh: {staff.branchName || staff.branchId || '-'}</p>
                   <p className="mt-1 break-all text-xs text-slate-500">ID: {staff.id}</p>
                   <div className="mt-3 flex justify-center rounded-lg border border-amber-100 bg-amber-50/40 p-2">
