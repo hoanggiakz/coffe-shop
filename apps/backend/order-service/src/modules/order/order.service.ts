@@ -2182,6 +2182,7 @@ export class OrderService {
     });
 
     const menuItemIds = normalizedInputItems.map((i) => i.menuItemId);
+    const uniqueMenuItemIds = [...new Set(menuItemIds.map((id) => String(id || '').trim()).filter(Boolean))];
     const menuItems = await this.prisma.menuItem.findMany({
       select: {
         id: true,
@@ -2194,30 +2195,30 @@ export class OrderService {
         },
       },
       where: {
-        id: { in: menuItemIds },
+        id: { in: uniqueMenuItemIds },
         available: true,
       },
     });
 
-    if (menuItems.length !== menuItemIds.length) {
+    if (menuItems.length !== uniqueMenuItemIds.length) {
       throw new BadRequestException('Một hoặc nhiều món không hợp lệ hoặc đã hết');
     }
     if (resolvedBranchId) {
       const branchMappings = await this.prisma.branchMenuItem.count({
         where: {
           branchId: resolvedBranchId,
-          menuItemId: { in: menuItemIds },
+          menuItemId: { in: uniqueMenuItemIds },
           isAvailable: true,
         },
       });
-      if (branchMappings !== menuItemIds.length) {
+      if (branchMappings !== uniqueMenuItemIds.length) {
         throw new BadRequestException('Một hoặc nhiều món chưa được bật tại chi nhánh');
       }
     }
     this.ensureSellableMenuItemsHaveRecipe(menuItems);
 
     const promoCode = String(dto.discountCode || dto.promoCode || '').trim() || undefined;
-    const priceMap = await this.buildMenuPriceMap(menuItemIds, resolvedBranchId, menuItems);
+    const priceMap = await this.buildMenuPriceMap(uniqueMenuItemIds, resolvedBranchId, menuItems);
     const normalizedItems = normalizedInputItems.map((item) => {
       const basePrice = priceMap.get(item.menuItemId) || 0;
       const extraAmount = item.selectedOptions
