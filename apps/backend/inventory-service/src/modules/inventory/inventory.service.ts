@@ -642,10 +642,15 @@ export class InventoryService {
   async syncMenuItems(items: { id: string; name: string; unit?: string }[], branchIdRaw?: string) {
     const branchId = this.normalizeBranchId(branchIdRaw);
     const results = [];
+    const skipped: Array<{ id: string; reason: string }> = [];
     for (const item of items) {
       const ingredientId = String(item.id || '').trim();
       const ingredientName = String(item.name || '').trim();
       if (!ingredientId || !ingredientName) {
+        skipped.push({
+          id: ingredientId || '(empty)',
+          reason: 'Thieu id hoac ten mon',
+        });
         continue;
       }
 
@@ -654,9 +659,11 @@ export class InventoryService {
       });
 
       if (existing && branchId && existing.branchId && existing.branchId !== branchId) {
-        throw new BadRequestException(
-          `Ingredient ${ingredientId} dang thuoc chi nhanh khac (${existing.branchId})`,
-        );
+        skipped.push({
+          id: ingredientId,
+          reason: `Ingredient ${ingredientId} dang thuoc chi nhanh khac (${existing.branchId})`,
+        });
+        continue;
       }
 
       const ingredient = existing
@@ -685,6 +692,8 @@ export class InventoryService {
     }
     return {
       synced: results.length,
+      skipped: skipped.length,
+      skippedItems: skipped,
       items: results,
     };
   }
