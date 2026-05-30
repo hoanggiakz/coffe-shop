@@ -122,6 +122,16 @@ interface AiInsightState {
   fallbackReason?: string
 }
 
+interface ReportChatResponse {
+  answer: string
+  sql?: string | null
+  executionTimeMs: number
+  intent: string
+  isSuccessful: boolean
+  rowCount: number
+  sampleRows?: Array<Record<string, unknown>>
+}
+
 function formatMoney(value: number): string {
   return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, value || 0))}đ`
 }
@@ -173,10 +183,14 @@ export default function Reports() {
   })
   const [rebuildingForecast, setRebuildingForecast] = useState(false)
   const [testingAnomaly, setTestingAnomaly] = useState(false)
+  const [reportChatQuestion, setReportChatQuestion] = useState('')
+  const [reportChatLoading, setReportChatLoading] = useState(false)
+  const [reportChatResult, setReportChatResult] = useState<ReportChatResponse | null>(null)
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
   const effectiveAiBranchId = selectedBranchId || currentUserBranchId || 'branch-e2e'
+  const currentUserRole = String(useAuthStore((state) => state.user?.role || '')).toUpperCase()
 
   const requestAiWithRetry = async (path: string, params: Record<string, any>) => {
     try {
@@ -413,6 +427,28 @@ export default function Reports() {
       toast.error(error?.response?.data?.message || 'Tạo anomaly test thất bại')
     } finally {
       setTestingAnomaly(false)
+    }
+  }
+
+  const handleReportChatSubmit = async () => {
+    const question = reportChatQuestion.trim()
+    if (!question) {
+      toast.error('Vui lòng nhập câu hỏi báo cáo')
+      return
+    }
+    setReportChatLoading(true)
+    try {
+      const { data } = await api.post('/ai/report-chat', {
+        branchId: effectiveAiBranchId,
+        userId: String(useAuthStore.getState().user?.id || ''),
+        role: currentUserRole || 'MANAGER',
+        question,
+      })
+      setReportChatResult((data || null) as ReportChatResponse | null)
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Không truy vấn được Report Chat')
+    } finally {
+      setReportChatLoading(false)
     }
   }
 
@@ -693,6 +729,39 @@ export default function Reports() {
               ))}
             </tbody>
           </table>
+        </div>
+      </Card>
+
+      <Card title="Report Chat (AI)" subtitle="Hỏi đáp dữ liệu báo cáo bằng ngôn ngữ tự nhiên">
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Input
+              value={reportChatQuestion}
+              onChange={(e) => setReportChatQuestion(e.target.value)}
+              className="min-w-[260px] flex-1"
+              placeholder="Ví dụ: Doanh thu hôm nay là bao nhiêu?"
+            />
+            <Button onClick={() => void handleReportChatSubmit()} loading={reportChatLoading}>
+              Gửi câu hỏi
+            </Button>
+          </div>
+          <p className="text-xs text-slate-500">
+            Branch scope: <span className="font-medium text-slate-700">{effectiveAiBranchId}</span>
+          </p>
+          {!reportChatResult && <p className="text-sm text-slate-500">Chưa có kết quả truy vấn.</p>}
+          {reportChatResult && (
+            <div className="space-y-2 rounded-xl border border-amber-100 bg-white/90 p-3 text-sm">
+              <p><span className="font-semibold">Intent:</span> {reportChatResult.intent}</p>
+              <p><span className="font-semibold">Thời gian xử lý:</span> {reportChatResult.executionTimeMs} ms</p>
+              <p><span className="font-semibold">Số dòng dữ liệu:</span> {reportChatResult.rowCount}</p>
+              <p><span className="font-semibold">Trả lời:</span> {reportChatResult.answer}</p>
+              {reportChatResult.sql && (
+                <p className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                  <span className="font-semibold">SQL (ADMIN):</span> {reportChatResult.sql}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </Card>
 
