@@ -5,6 +5,7 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import { useAuthStore } from '@/stores/authStore'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import api from '@/utils/api'
 import { TableSkeleton } from '@/components/ui/PageSkeleton'
 import {
@@ -127,8 +128,17 @@ const selectClass =
 
 const softPanelClass = 'rounded-xl border border-amber-100 bg-white/90 p-4'
 
+const roleBadgeClass: Record<StaffRole, string> = {
+  ADMIN: 'bg-rose-100 text-rose-700',
+  MANAGER: 'bg-violet-100 text-violet-700',
+  WAITER: 'bg-sky-100 text-sky-700',
+  BARISTA: 'bg-amber-100 text-amber-700',
+  STAFF: 'bg-slate-100 text-slate-700',
+}
+
 export default function StaffManagement() {
   const currentUser = useAuthStore((state) => state.user)
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const currentRole = normalizeRole(currentUser?.role)
   const canManageAccounts = currentRole === 'ADMIN' || currentRole === 'MANAGER'
   const canManagePrivilegedAccounts = currentRole === 'ADMIN'
@@ -154,6 +164,9 @@ export default function StaffManagement() {
     isActive: true,
   })
   const [savingStaff, setSavingStaff] = useState(false)
+  const [checkingExists, setCheckingExists] = useState(false)
+  const [emailExists, setEmailExists] = useState<boolean | null>(null)
+  const [employeeCodeExists, setEmployeeCodeExists] = useState<boolean | null>(null)
 
   const [weekStart, setWeekStart] = useState(getMondayDateString())
   const [scheduleStaffId, setScheduleStaffId] = useState('')
@@ -179,6 +192,7 @@ export default function StaffManagement() {
   const scannerStreamRef = useRef<MediaStream | null>(null)
   const scannerTimerRef = useRef<number | null>(null)
   const scannerLockRef = useRef(false)
+  const checkExistsTimerRef = useRef<number | null>(null)
   const [shiftOverviewDate, setShiftOverviewDate] = useState(new Date().toISOString().split('T')[0])
   const [shiftOverviewStaffId, setShiftOverviewStaffId] = useState('')
   const [shiftOverview, setShiftOverview] = useState<ShiftOverviewItem | null>(null)
@@ -191,12 +205,26 @@ export default function StaffManagement() {
   const [staffQrImages, setStaffQrImages] = useState<Record<string, string>>({})
   const activeBranchId = useMemo(() => {
     if (currentRole === 'MANAGER') return currentUser?.branchId || ''
+    if (selectedBranchId) return selectedBranchId
     if (staffBranchFilter) return staffBranchFilter
     return branches[0]?.id || ''
-  }, [branches, currentRole, currentUser?.branchId, staffBranchFilter])
+  }, [branches, currentRole, currentUser?.branchId, selectedBranchId, staffBranchFilter])
 
   const activeStaffs = useMemo(
     () => staffs.filter((item) => item.isActive),
+    [staffs],
+  )
+  const inactiveStaffCount = useMemo(() => staffs.filter((item) => !item.isActive).length, [staffs])
+  const roleBreakdown = useMemo(
+    () =>
+      staffs.reduce<Record<StaffRole, number>>(
+        (acc, item) => {
+          const role = (item.role || 'STAFF') as StaffRole
+          acc[role] = (acc[role] || 0) + 1
+          return acc
+        },
+        { ADMIN: 0, MANAGER: 0, WAITER: 0, BARISTA: 0, STAFF: 0 },
+      ),
     [staffs],
   )
   const currentStaffEntry = useMemo(
@@ -470,6 +498,60 @@ export default function StaffManagement() {
   }, [canManageAccounts, activeBranchId])
 
   useEffect(() => {
+    if (currentRole !== 'ADMIN') return
+    if (!selectedBranchId) return
+    if (staffBranchFilter === selectedBranchId) return
+    setStaffBranchFilter(selectedBranchId)
+  }, [currentRole, selectedBranchId, staffBranchFilter])
+
+  useEffect(() => {
+    if (editingStaffId) {
+      setEmailExists(null)
+      setEmployeeCodeExists(null)
+      return
+    }
+    if (checkExistsTimerRef.current !== null) {
+      window.clearTimeout(checkExistsTimerRef.current)
+      checkExistsTimerRef.current = null
+    }
+    const email = staffForm.email.trim()
+    const employeeCode = staffForm.employeeCode.trim()
+    const branchId = (staffForm.branchId || activeBranchId || '').trim()
+    if (!email && !employeeCode) {
+      setEmailExists(null)
+      setEmployeeCodeExists(null)
+      return
+    }
+
+    checkExistsTimerRef.current = window.setTimeout(async () => {
+      setCheckingExists(true)
+      try {
+        const { data } = await api.get('/staff/check-exists', {
+          params: {
+            email: email || undefined,
+            employeeCode: employeeCode || undefined,
+            branchId: branchId || undefined,
+          },
+        })
+        setEmailExists(Boolean(data?.email?.exists))
+        setEmployeeCodeExists(Boolean(data?.employeeCode?.exists))
+      } catch {
+        setEmailExists(null)
+        setEmployeeCodeExists(null)
+      } finally {
+        setCheckingExists(false)
+      }
+    }, 500)
+
+    return () => {
+      if (checkExistsTimerRef.current !== null) {
+        window.clearTimeout(checkExistsTimerRef.current)
+        checkExistsTimerRef.current = null
+      }
+    }
+  }, [staffForm.email, staffForm.employeeCode, staffForm.branchId, activeBranchId, editingStaffId])
+
+  useEffect(() => {
     let cancelled = false
     const generateStaffQrImages = async () => {
       try {
@@ -517,9 +599,11 @@ export default function StaffManagement() {
       employeeCode: '',
       personalQrCode: '',
       preferredShift: 'MORNING',
-      branchId: '',
+      branchId: activeBranchId || '',
       isActive: true,
     })
+    setEmailExists(null)
+    setEmployeeCodeExists(null)
   }
 
   const startEditStaff = (staff: StaffItem) => {
@@ -552,36 +636,80 @@ export default function StaffManagement() {
       toast.error('Role da chon vuot qua quyen hien tai')
       return
     }
+    const email = staffForm.email.trim().toLowerCase()
+    const password = staffForm.password.trim()
+    const employeeCode = staffForm.employeeCode.trim().toUpperCase()
+    const branchId = (staffForm.branchId || activeBranchId || '').trim()
+    const isManager = currentRole === 'MANAGER'
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!staffForm.name.trim()) {
+      toast.error('Họ tên không được để trống')
+      return
+    }
+    if (!emailRegex.test(email)) {
+      toast.error('Email không hợp lệ')
+      return
+    }
+    if (!editingStaffId && !password) {
+      toast.error('Mật khẩu không được để trống khi tạo mới')
+      return
+    }
+    if (password) {
+      const hasUpper = /[A-Z]/.test(password)
+      const hasDigit = /\d/.test(password)
+      if (password.length < 8 || !hasUpper || !hasDigit) {
+        toast.error('Mật khẩu tối thiểu 8 ký tự, có chữ hoa và số')
+        return
+      }
+    }
+    if (employeeCode && !/^[A-Z0-9-]+$/.test(employeeCode)) {
+      toast.error('Mã nhân viên chỉ gồm chữ, số, dấu gạch ngang')
+      return
+    }
+    if (!branchId) {
+      toast.error('Vui lòng chọn chi nhánh cho nhân viên')
+      return
+    }
+    if (!editingStaffId && emailExists) {
+      toast.error('Email đã tồn tại trong hệ thống')
+      return
+    }
+    if (!editingStaffId && employeeCode && employeeCodeExists) {
+      toast.error('Mã nhân viên đã tồn tại trong chi nhánh')
+      return
+    }
+
     setSavingStaff(true)
     try {
       if (editingStaffId) {
         const payload: any = {
-          name: staffForm.name,
-          email: staffForm.email,
+          name: staffForm.name.trim(),
+          email,
           phone: staffForm.phone || null,
-          role: staffForm.role,
-          employeeCode: staffForm.employeeCode,
           personalQrCode: staffForm.personalQrCode,
           preferredShift: staffForm.preferredShift,
-          branchId: staffForm.branchId || null,
           isActive: staffForm.isActive,
         }
-        if (staffForm.password.trim()) {
-          payload.password = staffForm.password
+        if (!isManager) {
+          payload.role = staffForm.role
+          payload.employeeCode = employeeCode
+          payload.branchId = branchId
+        }
+        if (password) {
+          payload.password = password
         }
         await api.put(`/staff/${editingStaffId}`, payload)
         toast.success('Đã cập nhật nhân viên')
       } else {
-        const targetBranchId = staffForm.branchId || activeBranchId
-        await api.post(`/branches/${targetBranchId}/staff`, {
-          name: staffForm.name,
-          email: staffForm.email,
-          password: staffForm.password,
+        await api.post(`/branches/${branchId}/staff`, {
+          name: staffForm.name.trim(),
+          email,
+          password,
           phone: staffForm.phone || null,
           role: staffForm.role,
-          employeeCode: staffForm.employeeCode || null,
+          employeeCode: employeeCode || null,
           personalQrCode: null,
-          branchId: staffForm.branchId || null,
+          branchId,
         })
         toast.success('Đã thêm nhân viên')
       }
@@ -596,15 +724,20 @@ export default function StaffManagement() {
     }
   }
 
-  const deleteStaff = async (staff: StaffItem) => {
+  const setStaffActiveState = async (staff: StaffItem, active: boolean) => {
     if (!canManageTargetStaff(staff)) {
-      toast.error('Ban khong duoc xoa tai khoan nay')
+      toast.error('Bạn không có quyền thao tác tài khoản này')
       return
     }
-    if (!window.confirm(`Vô hiệu hóa nhân viên ${staff.name}?`)) return
+    const actionLabel = active ? 'kích hoạt lại' : 'vô hiệu hóa'
+    if (!window.confirm(`Xác nhận ${actionLabel} nhân viên ${staff.name}?`)) return
     try {
-      await api.patch(`/staff/${staff.id}/deactivate`)
-      toast.success('Đã vô hiệu hóa nhân viên')
+      if (active) {
+        await api.patch(`/staff/${staff.id}/reactivate`)
+      } else {
+        await api.delete(`/staff/${staff.id}`, { params: { permanent: false } })
+      }
+      toast.success(`Đã ${actionLabel} nhân viên`)
       if (editingStaffId === staff.id) {
         resetStaffForm()
       }
@@ -612,7 +745,22 @@ export default function StaffManagement() {
       await loadSchedules()
       await loadAttendance()
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Vô hiệu hóa nhân viên thất bại')
+      toast.error(error.response?.data?.message || `Không thể ${actionLabel} nhân viên`)
+    }
+  }
+
+  const resetStaffPassword = async (staff: StaffItem) => {
+    if (!canManageTargetStaff(staff)) {
+      toast.error('Bạn không có quyền đặt lại mật khẩu tài khoản này')
+      return
+    }
+    const custom = window.prompt('Nhập mật khẩu mới (để trống để tự sinh):', '')
+    try {
+      const payload = custom && custom.trim() ? { newPassword: custom.trim() } : {}
+      const { data } = await api.post(`/staff/${staff.id}/reset-password`, payload)
+      toast.success(String(data?.message || 'Đã đặt lại mật khẩu'))
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Đặt lại mật khẩu thất bại')
     }
   }
 
@@ -848,6 +996,27 @@ export default function StaffManagement() {
       <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Quản lý nhân sự (Quản lý / Quản trị)</h1>
 
       <Card title="M-01 Quản lý nhân sự" subtitle="Chi ADMIN/MANAGER moi duoc them, sua, xoa tai khoan nhan vien">
+        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className={softPanelClass}>
+            <p className="text-xs font-semibold uppercase text-slate-500">Tổng nhân sự</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900">{staffs.length}</p>
+          </div>
+          <div className={softPanelClass}>
+            <p className="text-xs font-semibold uppercase text-slate-500">Đang làm</p>
+            <p className="mt-1 text-2xl font-bold text-emerald-700">{activeStaffs.length}</p>
+          </div>
+          <div className={softPanelClass}>
+            <p className="text-xs font-semibold uppercase text-slate-500">Vô hiệu hóa</p>
+            <p className="mt-1 text-2xl font-bold text-amber-700">{inactiveStaffCount}</p>
+          </div>
+          <div className={softPanelClass}>
+            <p className="text-xs font-semibold uppercase text-slate-500">Phân role</p>
+            <p className="mt-1 text-sm text-slate-700">
+              M:{roleBreakdown.MANAGER} W:{roleBreakdown.WAITER} B:{roleBreakdown.BARISTA} S:{roleBreakdown.STAFF}
+            </p>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <Input
             placeholder="Tìm theo tên/email/mã NV"
@@ -923,6 +1092,7 @@ export default function StaffManagement() {
               className={selectClass}
               value={staffForm.role}
               onChange={(e) => setStaffForm((prev) => ({ ...prev, role: e.target.value as StaffRole }))}
+              disabled={Boolean(editingStaffId) && currentRole === 'MANAGER'}
             >
               {canManagePrivilegedAccounts && <option value="ADMIN">Quản trị hệ thống</option>}
               {canManagePrivilegedAccounts && <option value="MANAGER">Quản lý</option>}
@@ -943,6 +1113,7 @@ export default function StaffManagement() {
               placeholder="Mã nhân viên (để trống tự sinh)"
               value={staffForm.employeeCode}
               onChange={(e) => setStaffForm((prev) => ({ ...prev, employeeCode: e.target.value }))}
+              disabled={Boolean(editingStaffId) && currentRole === 'MANAGER'}
             />
             {editingStaffId ? (
               <Input
@@ -959,6 +1130,7 @@ export default function StaffManagement() {
               className={selectClass}
               value={staffForm.branchId}
               onChange={(e) => setStaffForm((prev) => ({ ...prev, branchId: e.target.value }))}
+              disabled={currentRole === 'MANAGER'}
             >
               <option value="">-- Chưa gán chi nhánh --</option>
               {branches.map((branch) => (
@@ -983,6 +1155,20 @@ export default function StaffManagement() {
             <Button type="submit" loading={savingStaff}>
               {editingStaffId ? 'Cập nhật nhân viên' : 'Thêm nhân viên'}
             </Button>
+            <div className="md:col-span-3">
+              {checkingExists && !editingStaffId && (
+                <p className="text-xs text-slate-500">Đang kiểm tra email/mã nhân viên...</p>
+              )}
+              {!editingStaffId && emailExists === true && (
+                <p className="text-xs text-rose-600">Email đã tồn tại trong hệ thống.</p>
+              )}
+              {!editingStaffId && emailExists === false && staffForm.email.trim() && (
+                <p className="text-xs text-emerald-600">Email khả dụng.</p>
+              )}
+              {!editingStaffId && employeeCodeExists === true && staffForm.employeeCode.trim() && (
+                <p className="text-xs text-rose-600">Mã nhân viên đã tồn tại trong chi nhánh.</p>
+              )}
+            </div>
           </form>
         ) : (
           <div className="mt-4 rounded-xl border border-amber-100 bg-white/90 px-4 py-3 text-sm text-slate-600">
@@ -1000,7 +1186,7 @@ export default function StaffManagement() {
                     <p className="font-semibold text-slate-900">{staff.name}</p>
                     <p className="text-xs text-slate-500">{staff.email}</p>
                   </div>
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">{vaiTroNhanVien(staff.role)}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${roleBadgeClass[staff.role] || roleBadgeClass.STAFF}`}>{vaiTroNhanVien(staff.role)}</span>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
                   <p>Chi nhánh: <span className="font-medium">{staff.branchName || staff.branchId || '-'}</span></p>
@@ -1014,8 +1200,16 @@ export default function StaffManagement() {
                       <Button size="sm" variant="secondary" className="flex-1" onClick={() => startEditStaff(staff)}>
                         Sửa
                       </Button>
-                      <Button size="sm" variant="danger" className="flex-1" onClick={() => deleteStaff(staff)}>
-                        Xóa
+                      <Button size="sm" variant="secondary" className="flex-1" onClick={() => resetStaffPassword(staff)}>
+                        Reset MK
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={staff.isActive ? 'danger' : 'secondary'}
+                        className="flex-1"
+                        onClick={() => setStaffActiveState(staff, !staff.isActive)}
+                      >
+                        {staff.isActive ? 'Vô hiệu hóa' : 'Kích hoạt lại'}
                       </Button>
                     </>
                   ) : (
@@ -1048,7 +1242,11 @@ export default function StaffManagement() {
                   <tr key={staff.id} className="border-b">
                     <td className="py-2 pr-3">{staff.name}</td>
                     <td className="py-2 pr-3">{staff.email}</td>
-                    <td className="py-2 pr-3">{vaiTroNhanVien(staff.role)}</td>
+                    <td className="py-2 pr-3">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${roleBadgeClass[staff.role] || roleBadgeClass.STAFF}`}>
+                        {vaiTroNhanVien(staff.role)}
+                      </span>
+                    </td>
                     <td className="py-2 pr-3">{staff.branchName || staff.branchId || '-'}</td>
                     <td className="py-2 pr-3">{staff.employeeCode || '-'}</td>
                     <td className="py-2 pr-3">{staff.personalQrCode || '-'}</td>
@@ -1060,8 +1258,15 @@ export default function StaffManagement() {
                           <Button size="sm" variant="secondary" onClick={() => startEditStaff(staff)}>
                             Sửa
                           </Button>
-                          <Button size="sm" variant="danger" onClick={() => deleteStaff(staff)}>
-                            Xóa
+                          <Button size="sm" variant="secondary" onClick={() => resetStaffPassword(staff)}>
+                            Reset MK
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={staff.isActive ? 'danger' : 'secondary'}
+                            onClick={() => setStaffActiveState(staff, !staff.isActive)}
+                          >
+                            {staff.isActive ? 'Vô hiệu hóa' : 'Kích hoạt lại'}
                           </Button>
                         </div>
                       ) : (
@@ -1070,6 +1275,13 @@ export default function StaffManagement() {
                     </td>
                   </tr>
                 ))}
+                {staffs.length === 0 && (
+                  <tr>
+                    <td className="py-3 text-sm text-gray-500" colSpan={9}>
+                      Chưa có nhân sự khớp bộ lọc hiện tại
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           )}
@@ -1084,7 +1296,7 @@ export default function StaffManagement() {
                 <div key={`card-${staff.id}`} className="rounded-xl border border-amber-100 bg-white/90 p-4 shadow-sm">
                   <p className="text-base font-semibold text-slate-900">{staff.name}</p>
                   <p className="mt-1 text-sm text-slate-600">Mã NV: {staff.employeeCode || '-'}</p>
-                  <p className="text-sm text-slate-600">Vai trò: {vaiTroNhanVien(staff.role)}</p>
+                  <p className="text-sm text-slate-600">Vai trò: <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${roleBadgeClass[staff.role] || roleBadgeClass.STAFF}`}>{vaiTroNhanVien(staff.role)}</span></p>
                   <p className="text-sm text-slate-600">Chi nhánh: {staff.branchName || staff.branchId || '-'}</p>
                   <p className="mt-1 break-all text-xs text-slate-500">ID: {staff.id}</p>
                   <div className="mt-3 flex justify-center rounded-lg border border-amber-100 bg-amber-50/40 p-2">

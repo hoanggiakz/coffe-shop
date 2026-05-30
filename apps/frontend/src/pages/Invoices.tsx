@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import api from '@/utils/api'
 import { useAuthStore } from '@/stores/authStore'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
 
 interface InvoiceItem {
   id: string
@@ -28,6 +29,7 @@ interface InvoiceListResponse {
 
 export default function Invoices() {
   const user = useAuthStore((s) => s.user)
+  const selectedBranchId = useBranchScopeStore((s) => s.selectedBranchId)
   const [rows, setRows] = useState<InvoiceItem[]>([])
   const [selected, setSelected] = useState<any>(null)
   const [status, setStatus] = useState<'ALL' | 'ISSUED' | 'VOIDED'>('ALL')
@@ -36,10 +38,11 @@ export default function Invoices() {
   const [loading, setLoading] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
 
-  const branchId = String(user?.branchId || '').trim()
+  const branchId = String(selectedBranchId || user?.branchId || '').trim()
   const role = String(user?.role || '').toUpperCase()
 
   const canVoid = role === 'ADMIN' || role === 'MANAGER'
+  const canViewInvoices = ['ADMIN', 'MANAGER', 'WAITER', 'STAFF'].includes(role)
 
   const params = useMemo(
     () => ({
@@ -53,7 +56,11 @@ export default function Invoices() {
   )
 
   const load = async () => {
-    if (!branchId) return
+    if (!canViewInvoices || !branchId) {
+      setRows([])
+      setSelected(null)
+      return
+    }
     setLoading(true)
     try {
       const { data } = await api.get<InvoiceListResponse>(`/branches/${branchId}/invoices`, { params })
@@ -138,6 +145,11 @@ export default function Invoices() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
+          {!branchId && (
+            <p className="pb-3 text-sm text-amber-700">
+              Không xác định được chi nhánh làm việc. Vui lòng đăng nhập lại hoặc liên hệ quản lý để gán chi nhánh.
+            </p>
+          )}
           <div className="overflow-auto">
             <table className="w-full text-left text-sm">
               <thead>

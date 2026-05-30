@@ -69,9 +69,11 @@ export class ProxyController {
   @All('api/*path')
   async handleProxy(@Req() req: Request, @Res() res: Response) {
     const isBranchOrdersPath = /^\/api\/branches\/[^/]+\/orders(\/|$)/.test(req.path);
+    const isBranchCartValidatePath = /^\/api\/branches\/[^/]+\/cart\/validate(\/|$)/.test(req.path);
     const isBranchInvoicesPath = /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(req.path);
     const isBranchChatPath = /^\/api\/branches\/[^/]+\/chat\/sessions(\/|$)/.test(req.path);
     const isChatSessionPath = /^\/api\/chat\/sessions\/[^/]+(\/|$)/.test(req.path);
+    const isNotificationsPath = /^\/api\/notifications(\/|$)/.test(req.path);
     const isOrderInvoiceRegeneratePath = /^\/api\/orders\/[^/]+\/invoice\/regenerate(\/|$)/.test(req.path);
     const isPublicInvoicePath = /^\/api\/public\/invoices\/[^/]+(\/|$)/.test(req.path);
     const isPublicOrderInvoiceLinkPath = /^\/api\/public\/orders\/[^/]+\/invoice-link(\/|$)/.test(req.path);
@@ -82,7 +84,9 @@ export class ProxyController {
         ? ({ path: '/api/invoices' } as any)
       : isBranchChatPath || isChatSessionPath
         ? ({ path: '/api/chats' } as any)
-      : isBranchOrdersPath
+      : isNotificationsPath
+        ? ({ path: '/api/chats' } as any)
+      : isBranchOrdersPath || isBranchCartValidatePath
         ? ({ path: '/api/orders' } as any)
       : SERVICE_ROUTES.find((r) => req.originalUrl.startsWith(r.path));
     if (!route) {
@@ -117,6 +121,8 @@ export class ProxyController {
     const isOrderInvoiceRegeneratePath = /^\/api\/orders\/[^/]+\/invoice\/regenerate(\/|$)/.test(path);
     const isPublicInvoicePath = /^\/api\/public\/invoices\/[^/]+(\/|$)/.test(path);
     const isPublicOrderInvoiceLinkPath = /^\/api\/public\/orders\/[^/]+\/invoice-link(\/|$)/.test(path);
+    const isBranchCartValidatePath = /^\/api\/branches\/[^/]+\/cart\/validate(\/|$)/.test(path);
+    const isNotificationsPath = /^\/api\/notifications(\/|$)/.test(path);
 
     // Public auth/customer endpoints
     if (
@@ -127,6 +133,11 @@ export class ProxyController {
     }
 
     if (isPublicInvoicePath || isPublicOrderInvoiceLinkPath) {
+      return;
+    }
+
+    // Customer QR flow: validate cart without staff token
+    if (method === 'POST' && isBranchCartValidatePath) {
       return;
     }
 
@@ -179,6 +190,10 @@ export class ProxyController {
       return;
     }
     if (method === 'GET' && /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(path)) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
+    if (method === 'GET' && /^\/api\/branches\/[^/]+\/chat\/sessions(\/|$)/.test(path)) {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
       return;
     }
@@ -313,6 +328,10 @@ export class ProxyController {
     // Chat staff module (S-16..S-18)
     if (path.startsWith('/api/chats') || isBranchChatPath || isChatSessionPath) {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
+    if (isNotificationsPath) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
       return;
     }
 

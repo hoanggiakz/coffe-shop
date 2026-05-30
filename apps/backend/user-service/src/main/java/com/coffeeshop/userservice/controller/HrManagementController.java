@@ -69,6 +69,26 @@ public class HrManagementController {
         return ResponseEntity.ok(hrManagementService.deactivateStaff(extractToken(authHeader), userId));
     }
 
+    @DeleteMapping("/staff/{userId}")
+    public ResponseEntity<Map<String, Object>> softDeleteStaff(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String userId,
+            @RequestParam(value = "permanent", required = false, defaultValue = "false") Boolean permanent
+    ) {
+        if (Boolean.TRUE.equals(permanent)) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Hard delete chua ho tro");
+        }
+        return ResponseEntity.ok(hrManagementService.softDeleteStaff(extractToken(authHeader), userId));
+    }
+
+    @PatchMapping("/staff/{userId}/reactivate")
+    public ResponseEntity<Map<String, Object>> reactivateStaff(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String userId
+    ) {
+        return ResponseEntity.ok(hrManagementService.reactivateStaff(extractToken(authHeader), userId));
+    }
+
     @PostMapping("/staff/{userId}/reset-password")
     public ResponseEntity<Map<String, Object>> resetPassword(
             @RequestHeader("Authorization") String authHeader,
@@ -80,6 +100,16 @@ public class HrManagementController {
                 userId,
                 payload == null ? null : payload.get("newPassword")
         ));
+    }
+
+    @GetMapping("/staff/check-exists")
+    public ResponseEntity<Map<String, Object>> checkStaffExists(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestParam(value = "email", required = false) String email,
+            @RequestParam(value = "employeeCode", required = false) String employeeCode,
+            @RequestParam(value = "branchId", required = false) String branchId
+    ) {
+        return ResponseEntity.ok(hrManagementService.checkStaffExists(extractToken(authHeader), email, employeeCode, branchId));
     }
 
     @GetMapping("/staff/{userId}/qrcode")

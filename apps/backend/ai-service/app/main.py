@@ -1,7 +1,7 @@
 import os
 import time
-from functools import wraps
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from typing import Any
 from uuid import uuid4
 
@@ -10,10 +10,10 @@ import sqlparse
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
-app = FastAPI(title="coffee-ai-service", version="0.2.0")
+app = FastAPI(title="coffee-ai-service", version="0.3.0")
 
 REQUEST_COUNT = Counter("ai_requests_total", "Total AI requests", ["endpoint", "status"])
 REQUEST_LATENCY = Histogram("ai_request_latency_seconds", "AI request latency", ["endpoint"])
@@ -27,12 +27,29 @@ AI_ROLLOUT_PERCENT = int(os.getenv("AI_ROLLOUT_PERCENT", "10"))
 AI_ACTIVE_MODEL_VERSION = os.getenv("AI_ACTIVE_MODEL_VERSION", "baseline_v1")
 AI_STAGING_MODEL_VERSION = os.getenv("AI_STAGING_MODEL_VERSION", "baseline_v2_candidate")
 
+DEFAULT_MENU_KB = [
+    {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
+    {"keyword": "trà", "answer": "Nhóm trà có nhiều lựa chọn trái cây và trà sữa theo chi nhánh."},
+    {"keyword": "giờ mở cửa", "answer": "Quán mở cửa từ 07:00 đến 22:00 hàng ngày."},
+    {"keyword": "khuyến mãi", "answer": "Bạn có thể xem khuyến mãi đang chạy ở mục Khuyến mãi theo chi nhánh."},
+]
+
+POSITIVE_WORDS = {"tốt", "ngon", "tuyệt", "hài lòng", "good", "great", "excellent", "friendly"}
+NEGATIVE_WORDS = {"tệ", "dở", "chậm", "lâu", "không hài lòng", "bad", "poor", "awful"}
+
 
 class RecommendationFeedback(BaseModel):
     branchId: str
     sourceItemId: str | None = None
     targetItemId: str | None = None
     action: str
+
+
+class RecommendationPayload(BaseModel):
+    branchId: str
+    cartItemIds: list[str] = Field(default_factory=list)
+    customerId: str | None = None
+    limit: int = 3
 
 
 class ResolveAnomalyPayload(BaseModel):
@@ -46,7 +63,10 @@ class SentimentAnalyzePayload(BaseModel):
 
 class ChatPayload(BaseModel):
     branchId: str | None = None
-    question: str
+    sessionId: str | None = None
+    tableId: str | None = None
+    question: str | None = None
+    message: str | None = None
 
 
 ANOMALIES: list[dict[str, Any]] = [
@@ -83,6 +103,12 @@ def metric_guard(endpoint: str):
     return decorator
 
 
+def json_dumps(obj: dict[str, Any]) -> str:
+    import json
+
+    return json.dumps(obj, ensure_ascii=False)
+
+
 def log_audit(
     endpoint: str,
     action: str,
@@ -113,14 +139,7 @@ def log_audit(
                     ),
                 )
     except Exception:
-        # Do not break main flow due to audit logging failure.
         return
-
-
-def json_dumps(obj: dict[str, Any]) -> str:
-    import json
-
-    return json.dumps(obj, ensure_ascii=False)
 
 
 def sanitize_sql(sql: str) -> str:
@@ -131,56 +150,176 @@ def sanitize_sql(sql: str) -> str:
         raise HTTPException(status_code=400, detail="Only read-only SQL is allowed")
     if not lowered.startswith("select "):
         raise HTTPException(status_code=400, detail="Only SELECT statements are allowed")
-    for table in ["orders", "order_items", "payments", "daily_revenue", "daily_stats", "item_sales", "sales_forecast", "anomaly_alert", "sentiment_analysis"]:
-        pass
     return normalized
+
+
+def execute_sql(sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
+    if not REPORT_DATABASE_URL:
+        return []
+    normalized = sanitize_sql(sql)
+    with psycopg.connect(REPORT_DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = '{CHATBOT_SQL_TIMEOUT_MS}ms'")
+            cur.execute(normalized, params or [])
+            rows = cur.fetchmany(CHATBOT_MAX_ROWS)
+            cols = [d.name for d in cur.description] if cur.description else []
+    return [{cols[idx]: row[idx] for idx in range(len(cols))} for row in rows]
+
+
+def get_popular_items(branch_id: str, limit: int) -> list[dict[str, Any]]:
+    if not REPORT_DATABASE_URL:
+        return [
+            {
+                "branchMenuItemId": f"popular-{i}",
+                "menuItemId": f"popular-{i}",
+                "name": f"Popular Item {i}",
+                "price": 25000 + i * 5000,
+                "score": round(0.92 - i * 0.08, 2),
+                "reason": "popular",
+            }
+            for i in range(1, limit + 1)
+        ]
+
+    try:
+        rows = execute_sql(
+            """
+            SELECT oi."branchMenuItemId" AS id, COALESCE(SUM(oi.quantity), 0)::int AS qty
+            FROM order_item oi
+            JOIN order_entity o ON o.id = oi."orderId"
+            WHERE o."branchId" = %s
+            GROUP BY oi."branchMenuItemId"
+            ORDER BY qty DESC
+            LIMIT %s
+            """,
+            [branch_id, limit],
+        )
+        items: list[dict[str, Any]] = []
+        for index, row in enumerate(rows):
+            item_id = str(row.get("id") or f"item-{index + 1}")
+            items.append(
+                {
+                    "branchMenuItemId": item_id,
+                    "menuItemId": item_id,
+                    "name": f"Item {item_id[:6]}",
+                    "price": 30000,
+                    "score": round(0.95 - index * 0.08, 2),
+                    "reason": "popular",
+                }
+            )
+        return items
+    except Exception:
+        return []
+
+
+def get_cooccurrence_items(branch_id: str, cart_item_ids: list[str], limit: int) -> list[dict[str, Any]]:
+    if not REPORT_DATABASE_URL or not cart_item_ids:
+        return []
+
+    try:
+        rows = execute_sql(
+            """
+            SELECT oi2."branchMenuItemId" AS id, COUNT(*)::int AS score
+            FROM order_item oi1
+            JOIN order_item oi2 ON oi1."orderId" = oi2."orderId"
+            JOIN order_entity o ON o.id = oi1."orderId"
+            WHERE o."branchId" = %s
+              AND oi1."branchMenuItemId" = ANY(%s)
+              AND oi2."branchMenuItemId" <> ALL(%s)
+            GROUP BY oi2."branchMenuItemId"
+            ORDER BY score DESC
+            LIMIT %s
+            """,
+            [branch_id, cart_item_ids, cart_item_ids, limit],
+        )
+        max_score = max([int(row.get("score") or 1) for row in rows], default=1)
+        return [
+            {
+                "branchMenuItemId": str(row.get("id")),
+                "menuItemId": str(row.get("id")),
+                "name": f"Item {str(row.get('id'))[:6]}",
+                "price": 30000,
+                "score": round((int(row.get("score") or 0) / max_score), 2),
+                "reason": "item_cooccurrence",
+            }
+            for row in rows
+        ]
+    except Exception:
+        return []
+
+
+def classify_sentiment(text: str) -> tuple[str, float, dict[str, float]]:
+    lowered = text.lower()
+    pos_hits = sum(1 for word in POSITIVE_WORDS if word in lowered)
+    neg_hits = sum(1 for word in NEGATIVE_WORDS if word in lowered)
+
+    if pos_hits > neg_hits:
+        label = "POSITIVE"
+        confidence = min(0.95, 0.62 + 0.08 * pos_hits)
+    elif neg_hits > pos_hits:
+        label = "NEGATIVE"
+        confidence = min(0.95, 0.62 + 0.08 * neg_hits)
+    else:
+        label = "NEUTRAL"
+        confidence = 0.65
+
+    scores = {
+        "POSITIVE": round(0.1 + (0.75 if label == "POSITIVE" else 0.15), 2),
+        "NEUTRAL": round(0.1 + (0.75 if label == "NEUTRAL" else 0.15), 2),
+        "NEGATIVE": round(0.1 + (0.75 if label == "NEGATIVE" else 0.15), 2),
+    }
+    total = sum(scores.values())
+    normalized = {key: round(value / total, 2) for key, value in scores.items()}
+    return label, round(confidence, 2), normalized
 
 
 def map_question_to_sql(question: str, branch_id: str | None) -> str:
     q = question.lower()
-    branch_filter = ""
-    params = []
-    if branch_id:
-        branch_filter = 'WHERE "branchId" = %s'
-        params.append(branch_id)
+    where = 'WHERE "branchId" = %s' if branch_id else ""
 
-    if "doanh thu" in q and "hôm nay" in q:
+    if "doanh thu" in q and ("hôm nay" in q or "hom nay" in q):
         return (
-            f'SELECT COALESCE(SUM("predictedRevenue"), 0) AS revenue FROM sales_forecast '
-            f'{branch_filter} AND "forecastDate"::date = CURRENT_DATE' if branch_filter else
-            'SELECT COALESCE(SUM("predictedRevenue"), 0) AS revenue FROM sales_forecast WHERE "forecastDate"::date = CURRENT_DATE'
+            f'SELECT COALESCE(SUM("predictedRevenue"), 0) AS revenue FROM sales_forecast {where} '
+            f'{"AND" if where else "WHERE"} "forecastDate"::date = CURRENT_DATE'
         )
+    if "món" in q and ("bán chạy" in q or "ban chay" in q):
+        return f'SELECT "menuItemId", SUM(quantity)::int AS qty FROM item_sales {where} GROUP BY "menuItemId" ORDER BY qty DESC LIMIT 10'
     if "bất thường" in q or "canh bao" in q or "cảnh báo" in q:
-        return (
-            f'SELECT id, "alertType", severity, description, "isResolved", "detectedAt" FROM anomaly_alert '
-            f'{branch_filter} ORDER BY "detectedAt" DESC LIMIT 20'
-        ) if branch_filter else 'SELECT id, "alertType", severity, description, "isResolved", "detectedAt" FROM anomaly_alert ORDER BY "detectedAt" DESC LIMIT 20'
+        return f'SELECT id, "alertType", severity, description, "isResolved", "detectedAt" FROM anomaly_alert {where} ORDER BY "detectedAt" DESC LIMIT 20'
     if "cảm xúc" in q or "cam xuc" in q or "sentiment" in q:
-        return (
-            f'SELECT label, COUNT(*)::int AS count FROM sentiment_analysis {branch_filter} GROUP BY label ORDER BY label'
-        ) if branch_filter else 'SELECT label, COUNT(*)::int AS count FROM sentiment_analysis GROUP BY label ORDER BY label'
+        return f'SELECT label, COUNT(*)::int AS count FROM sentiment_analysis {where} GROUP BY label ORDER BY label'
 
-    return (
-        f'SELECT "forecastDate", "predictedRevenue", "confidenceLow", "confidenceHigh" FROM sales_forecast '
-        f'{branch_filter} ORDER BY "forecastDate" DESC LIMIT 7'
-    ) if branch_filter else 'SELECT "forecastDate", "predictedRevenue", "confidenceLow", "confidenceHigh" FROM sales_forecast ORDER BY "forecastDate" DESC LIMIT 7'
+    return f'SELECT "forecastDate", "predictedRevenue", "confidenceLow", "confidenceHigh" FROM sales_forecast {where} ORDER BY "forecastDate" DESC LIMIT 7'
 
 
-def execute_readonly_sql(sql: str, branch_id: str | None) -> list[dict[str, Any]]:
+def answer_from_knowledge_base(question: str) -> tuple[str, str, float, bool]:
+    lowered = question.lower()
+    for item in DEFAULT_MENU_KB:
+        if item["keyword"] in lowered:
+            return item["answer"], "FAQ", 0.91, False
+
+    order_tokens = ["đặt", "order", "mua", "thêm vào giỏ"]
+    if any(token in lowered for token in order_tokens):
+        return "Mình đã ghi nhận yêu cầu đặt món. Nhân viên sẽ xác nhận lại ngay.", "ORDER", 0.74, False
+
+    return "Mình chưa chắc câu trả lời. Mình sẽ chuyển yêu cầu này cho nhân viên để hỗ trợ ngay.", "ESCALATE", 0.41, True
+
+
+def load_anomalies_from_db(branch_id: str, severity: str | None) -> list[dict[str, Any]]:
     if not REPORT_DATABASE_URL:
         return []
-    sanitized = sanitize_sql(sql)
-    params = [branch_id] if ("%s" in sanitized and branch_id) else []
-    with psycopg.connect(REPORT_DATABASE_URL) as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"SET LOCAL statement_timeout = '{CHATBOT_SQL_TIMEOUT_MS}ms'")
-            cur.execute(sanitized, params)
-            rows = cur.fetchmany(CHATBOT_MAX_ROWS)
-            cols = [d.name for d in cur.description] if cur.description else []
-    result = []
-    for row in rows:
-        result.append({cols[idx]: row[idx] for idx in range(len(cols))})
-    return result
+    try:
+        sql = (
+            'SELECT id, "alertType", severity, description, "isResolved", "detectedAt" '
+            'FROM anomaly_alert WHERE "branchId" = %s '
+        )
+        params: list[Any] = [branch_id]
+        if severity:
+            sql += "AND severity = %s "
+            params.append(severity.upper())
+        sql += 'ORDER BY "detectedAt" DESC LIMIT 50'
+        return execute_sql(sql, params)
+    except Exception:
+        return []
 
 
 @app.get("/metrics")
@@ -280,20 +419,47 @@ def forecast_staffing(branchId: str) -> dict[str, Any]:
 @app.get("/api/ai/recommend")
 @metric_guard("recommend")
 def recommend(branchId: str, limit: int = 5, customerId: str | None = None) -> dict[str, Any]:
-    limit = max(1, min(limit, 10))
-    items = [
-        {"menuItemId": f"item-{idx}", "name": f"Recommended Item {idx}", "score": round(1 - (idx * 0.08), 2), "reason": "history_preference" if customerId else "popular"}
-        for idx in range(1, limit + 1)
-    ]
-    log_audit("/api/ai/recommend", "recommend", True, branchId, metadata={"limit": limit})
-    return {"branchId": branchId, "limit": limit, "items": items, "modelVersion": AI_ACTIVE_MODEL_VERSION}
+    safe_limit = max(1, min(limit, 10))
+    items = get_popular_items(branchId, safe_limit)
+    strategy = "user-history" if customerId else "popularity"
+    log_audit("/api/ai/recommend", "recommend", True, branchId, metadata={"limit": safe_limit, "strategy": strategy})
+    return {
+        "branchId": branchId,
+        "limit": safe_limit,
+        "items": items,
+        "recommendations": items,
+        "strategy": strategy,
+        "modelVersion": AI_ACTIVE_MODEL_VERSION,
+    }
+
+
+@app.post("/api/ai/recommend")
+@metric_guard("recommend_post")
+def recommend_post(payload: RecommendationPayload) -> dict[str, Any]:
+    safe_limit = max(1, min(payload.limit, 10))
+    cooccurrence_items = get_cooccurrence_items(payload.branchId, payload.cartItemIds, safe_limit)
+    strategy = "item-based-cf" if cooccurrence_items else "popularity"
+    items = cooccurrence_items if cooccurrence_items else get_popular_items(payload.branchId, safe_limit)
+    response_items = items[:safe_limit]
+    log_audit("/api/ai/recommend", "recommend", True, payload.branchId, metadata={"limit": safe_limit, "strategy": strategy})
+    return {
+        "branchId": payload.branchId,
+        "limit": safe_limit,
+        "cartItemIds": payload.cartItemIds,
+        "recommendations": response_items,
+        "items": response_items,
+        "strategy": strategy,
+        "modelVersion": AI_ACTIVE_MODEL_VERSION,
+    }
 
 
 @app.get("/api/ai/recommend/popular")
 @metric_guard("recommend_popular")
 def recommend_popular(branchId: str, limit: int = 5) -> dict[str, Any]:
-    log_audit("/api/ai/recommend/popular", "recommend", True, branchId, metadata={"limit": limit})
-    return {"branchId": branchId, "items": [{"menuItemId": f"popular-{i}", "name": f"Popular Item {i}", "score": round(1 - i * 0.1, 2)} for i in range(1, max(1, min(limit, 10)) + 1)]}
+    safe_limit = max(1, min(limit, 10))
+    items = get_popular_items(branchId, safe_limit)
+    log_audit("/api/ai/recommend/popular", "recommend", True, branchId, metadata={"limit": safe_limit})
+    return {"branchId": branchId, "items": items, "strategy": "popularity"}
 
 
 @app.post("/api/ai/recommend/feedback")
@@ -306,6 +472,10 @@ def recommend_feedback(payload: RecommendationFeedback) -> dict[str, Any]:
 @app.get("/api/ai/anomalies")
 @metric_guard("anomalies")
 def anomalies(branchId: str, severity: str | None = None) -> dict[str, Any]:
+    db_items = load_anomalies_from_db(branchId, severity)
+    if db_items:
+        return {"branchId": branchId, "items": db_items}
+
     filtered = [a for a in ANOMALIES if a["branchId"] == branchId]
     if severity:
         filtered = [a for a in filtered if a["severity"] == severity.upper()]
@@ -330,7 +500,7 @@ def resolve_anomaly(anomaly_id: str, payload: ResolveAnomalyPayload) -> dict[str
 @app.get("/api/ai/anomalies/summary")
 @metric_guard("anomaly_summary")
 def anomalies_summary(branchId: str) -> dict[str, Any]:
-    items = [a for a in ANOMALIES if a["branchId"] == branchId]
+    items = anomalies(branchId).get("items", [])
     resolved = sum(1 for a in items if a.get("isResolved"))
     log_audit("/api/ai/anomalies/summary", "summary", True, branchId)
     return {"branchId": branchId, "total": len(items), "resolved": resolved, "open": len(items) - resolved}
@@ -339,6 +509,26 @@ def anomalies_summary(branchId: str) -> dict[str, Any]:
 @app.get("/api/ai/sentiment/summary")
 @metric_guard("sentiment_summary")
 def sentiment_summary(branchId: str) -> dict[str, Any]:
+    if REPORT_DATABASE_URL:
+        try:
+            rows = execute_sql(
+                'SELECT label, COUNT(*)::int AS count FROM sentiment_analysis WHERE "branchId" = %s GROUP BY label',
+                [branchId],
+            )
+            total = sum(int(row.get("count") or 0) for row in rows)
+            if total > 0:
+                mapped = {str(row.get("label")).upper(): int(row.get("count") or 0) for row in rows}
+                return {
+                    "branchId": branchId,
+                    "positive": round(mapped.get("POSITIVE", 0) / total, 4),
+                    "neutral": round(mapped.get("NEUTRAL", 0) / total, 4),
+                    "negative": round(mapped.get("NEGATIVE", 0) / total, 4),
+                    "sampleSize": total,
+                    "modelVersion": AI_ACTIVE_MODEL_VERSION,
+                }
+        except Exception:
+            pass
+
     log_audit("/api/ai/sentiment/summary", "summary", True, branchId)
     return {"branchId": branchId, "positive": 0.78, "neutral": 0.15, "negative": 0.07, "sampleSize": 120, "modelVersion": AI_ACTIVE_MODEL_VERSION}
 
@@ -358,70 +548,71 @@ def sentiment_trend(branchId: str, days: int = 7) -> dict[str, Any]:
 @app.post("/api/ai/sentiment/analyze")
 @metric_guard("sentiment_analyze")
 def sentiment_analyze(payload: SentimentAnalyzePayload) -> dict[str, Any]:
-    text = payload.text.lower()
-    label = "NEUTRAL"
-    if "tệ" in text or "bad" in text:
-        label = "NEGATIVE"
-    elif "tốt" in text or "good" in text:
-        label = "POSITIVE"
+    label, confidence, scores = classify_sentiment(payload.text)
     log_audit("/api/ai/sentiment/analyze", "analyze", True, payload.branchId, metadata={"label": label})
-    return {"branchId": payload.branchId, "label": label, "confidence": 0.82, "reason": "keyword_based_baseline"}
+    return {
+        "branchId": payload.branchId,
+        "label": label,
+        "confidence": confidence,
+        "scores": scores,
+        "reason": "lexicon_baseline_v1",
+    }
 
 
 @app.post("/api/ai/chat")
 @metric_guard("chat")
 def ai_chat(payload: ChatPayload) -> dict[str, Any]:
     start = time.perf_counter()
-    question = str(payload.question or "").strip()
-    sql = map_question_to_sql(question, payload.branchId)
+    question = str(payload.message or payload.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="message/question is required")
+
+    answer, intent, confidence, escalated = answer_from_knowledge_base(question)
+    generated_sql = None
+    sql_result: list[dict[str, Any]] = []
     success = True
     error_message = None
-    sql_result: list[dict[str, Any]] = []
-    try:
-        sql_result = execute_readonly_sql(sql, payload.branchId)
-        answer = f"Found {len(sql_result)} rows for your question."
-    except Exception as error:  # pylint: disable=broad-except
-        success = False
-        error_message = str(error)
-        answer = "Query failed by guardrail or execution constraints."
+
+    if intent == "ESCALATE" and REPORT_DATABASE_URL:
+        generated_sql = map_question_to_sql(question, payload.branchId)
+        try:
+            params = [payload.branchId] if payload.branchId and "%s" in generated_sql else []
+            sql_result = execute_sql(generated_sql, params)
+            if sql_result:
+                answer = f"Mình đã lấy dữ liệu sơ bộ ({len(sql_result)} dòng) và đã chuyển nhân viên xử lý chi tiết."
+                confidence = 0.58
+                escalated = True
+        except Exception as error:  # pylint: disable=broad-except
+            success = False
+            error_message = str(error)
 
     chat_id = str(uuid4())
+    now_iso = datetime.now(timezone.utc).isoformat()
     record = {
         "id": chat_id,
         "branchId": payload.branchId,
+        "sessionId": payload.sessionId,
+        "tableId": payload.tableId,
         "question": question,
-        "generatedSql": sql,
         "answer": answer,
-        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "intent": intent,
+        "confidence": round(confidence, 2),
+        "escalated": escalated,
+        "generatedSql": generated_sql,
+        "createdAt": now_iso,
     }
     CHAT_HISTORY.append(record)
 
     latency_ms = int((time.perf_counter() - start) * 1000)
-    log_audit("/api/ai/chat", "chat_query", success, payload.branchId, latency_ms=latency_ms, metadata={"error": error_message})
-    if REPORT_DATABASE_URL:
-        try:
-            with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        INSERT INTO chatbot_query_log ("branchId", "userId", question, "generatedSql", "sqlResult", answer, "tokensUsed", "latencyMs", "isSuccessful", "createdAt")
-                        VALUES (%s, NULL, %s, %s, %s::jsonb, %s, %s, %s, %s, NOW())
-                        """,
-                        (
-                            payload.branchId,
-                            question,
-                            sql,
-                            json_dumps({"rows": sql_result}),
-                            answer,
-                            max(10, len(question) // 2),
-                            latency_ms,
-                            success,
-                        ),
-                    )
-        except Exception:
-            pass
+    log_audit("/api/ai/chat", "chat_query", success, payload.branchId, latency_ms=latency_ms, metadata={"error": error_message, "intent": intent})
 
-    return {**record, "sqlResult": sql_result, "isSuccessful": success, "suggestions": ["Doanh thu hôm nay?", "Top món bán chạy?"]}
+    return {
+        **record,
+        "reply": answer,
+        "sqlResult": sql_result,
+        "isSuccessful": success,
+        "suggestions": ["Doanh thu hôm nay?", "Món bán chạy nhất?", "Khuyến mãi đang chạy?"],
+    }
 
 
 @app.get("/api/ai/chat/history")

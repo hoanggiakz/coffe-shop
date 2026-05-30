@@ -739,6 +739,9 @@ public class UserService {
             user.setPhone(nextPhone);
         }
         if (req.getRole() != null) {
+            if (actor.getRole() == User.Role.MANAGER && req.getRole() != user.getRole()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "MANAGER khong duoc thay doi role");
+            }
             if (req.getRole() == User.Role.CUSTOMER) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khong the doi thanh role CUSTOMER");
             }
@@ -749,9 +752,15 @@ public class UserService {
             user.setPreferredShift(req.getPreferredShift());
         }
         if (req.getBranchId() != null) {
+            if (actor.getRole() == User.Role.MANAGER) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "MANAGER khong duoc chuyen chi nhanh nhan vien");
+            }
             user.setBranchId(resolveBranchAssignment(req.getBranchId()));
         }
         if (req.getEmployeeCode() != null) {
+            if (actor.getRole() == User.Role.MANAGER) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "MANAGER khong duoc doi ma nhan vien");
+            }
             String nextEmployeeCode = resolveEmployeeCode(req.getEmployeeCode(), staffId);
             if (nextEmployeeCode == null || nextEmployeeCode.isBlank()) {
                 nextEmployeeCode = resolveEmployeeCode(null, staffId);

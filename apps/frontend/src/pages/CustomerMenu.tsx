@@ -39,6 +39,7 @@ interface MenuItem {
 type CartSelections = Record<string, string | string[]>
 
 interface CartItem {
+  branchMenuItemId?: string
   menuItemId: string
   quantity: number
   note: string
@@ -215,6 +216,15 @@ interface PendingChatMessage {
   createdAt: string
 }
 
+interface BranchCartValidateChange {
+  branchMenuItemId?: string | null
+  menuItemId?: string | null
+  type: 'PRICE_CHANGED' | 'UNAVAILABLE' | string
+  oldPrice?: number
+  newPrice?: number
+  message?: string
+}
+
 interface MenuRecommendation extends MenuItem {
   recommendationReason?: string
   recommendationScore?: number
@@ -279,6 +289,7 @@ function buildCartLineKey(menuItemId: string, selections: CartSelections, note?:
 function parseCartLineEntry(legacyKey: string, entry: any): CartItem | null {
   if (!entry || typeof entry !== 'object') return null
   const menuItemId = String(entry.menuItemId || legacyKey || '').trim()
+  const branchMenuItemId = String(entry.branchMenuItemId || '').trim()
   if (!menuItemId) return null
 
   const quantity = Math.max(0, Number(entry.quantity || 0))
@@ -290,6 +301,7 @@ function parseCartLineEntry(legacyKey: string, entry: any): CartItem | null {
       : {}
 
   return {
+    ...(branchMenuItemId ? { branchMenuItemId } : {}),
     menuItemId,
     quantity,
     note: String(entry.note || ''),
@@ -315,6 +327,11 @@ function restoreCartFromStorage(raw: unknown): Record<string, CartItem> {
   })
 
   return next
+}
+
+type DiscountValidationCachePayload = {
+  savedAt: number
+  data: PromotionPreview
 }
 
 const fieldClass =
@@ -462,6 +479,7 @@ export default function CustomerMenu() {
   const [chatSessionId, setChatSessionId] = useState('')
   const [staffTyping, setStaffTyping] = useState(false)
   const [cartDrawerOpen, setCartDrawerOpen] = useState(false)
+  const [pendingLineRemoveConfirm, setPendingLineRemoveConfirm] = useState<Record<string, boolean>>({})
 
   const [customerToken, setCustomerToken] = useState('')
   const [customerSession, setCustomerSession] = useState<CustomerSession | null>(null)
@@ -488,6 +506,7 @@ export default function CustomerMenu() {
   const staffTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingChatFlushRef = useRef(false)
   const customerTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lineRemoveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   useEffect(() => {
     let ignore = false
@@ -633,6 +652,7 @@ export default function CustomerMenu() {
     const branchPart = String(qrBranchId || 'unknown').trim() || 'unknown'
     return `cart_${branchPart}_${tableId}`
   }, [tableId, qrBranchId])
+  const cartSessionFallbackKey = useMemo(() => (cartStorageKey ? `session_fallback_${cartStorageKey}` : ''), [cartStorageKey])
   const orderStorageKey = useMemo(() => (tableId ? `customer-last-order:${tableId}` : ''), [tableId])
   const chatProfileStorageKey = useMemo(() => (tableId ? `customer-chat-profile:${tableId}` : ''), [tableId])
   const customerAuthStorageKey = 'customer-auth-session'
@@ -641,22 +661,40 @@ export default function CustomerMenu() {
     if (!cartStorageKey) return
     try {
       const raw = localStorage.getItem(cartStorageKey)
-      if (raw) {
-        setCart(restoreCartFromStorage(JSON.parse(raw)))
-      } else {
-        setCart({})
-      }
+      const fallbackRaw = cartSessionFallbackKey ? sessionStorage.getItem(cartSessionFallbackKey) : null
+      const source = raw || fallbackRaw
+      setCart(source ? restoreCartFromStorage(JSON.parse(source)) : {})
     } catch {
       setCart({})
     } finally {
       setCartLoaded(true)
     }
-  }, [cartStorageKey])
+  }, [cartStorageKey, cartSessionFallbackKey])
 
   useEffect(() => {
     if (!cartStorageKey || !cartLoaded) return
-    localStorage.setItem(cartStorageKey, JSON.stringify(cart))
-  }, [cartStorageKey, cart, cartLoaded])
+    const serialized = JSON.stringify(cart)
+    try {
+      localStorage.setItem(cartStorageKey, serialized)
+      if (cartSessionFallbackKey) {
+        sessionStorage.removeItem(cartSessionFallbackKey)
+      }
+    } catch {
+      if (cartSessionFallbackKey) {
+        sessionStorage.setItem(cartSessionFallbackKey, serialized)
+      }
+      toast.error('Bo nho localStorage day, da tam luu gio hang trong session hien tai')
+    }
+  }, [cartStorageKey, cart, cartLoaded, cartSessionFallbackKey])
+
+  useEffect(() => {
+    const onEscCloseDrawer = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setCartDrawerOpen(false)
+    }
+    window.addEventListener('keydown', onEscCloseDrawer)
+    return () => window.removeEventListener('keydown', onEscCloseDrawer)
+  }, [])
 
   useEffect(() => {
     if (!orderStorageKey) return
@@ -1080,7 +1118,34 @@ export default function CustomerMenu() {
       setChatConnecting(false)
       if (staffTypingTimerRef.current) clearTimeout(staffTypingTimerRef.current)
     }
-  }, [chatOpen, tableId, qrBranchId, chatCustomerName, chatCustomerPhone])
+  }, [chatOpen, tableId, qrBranchId])
+
+  useEffect(() => {
+    if (!tableId) return
+    const socket = getSocket()
+    if (!socket.connected) {
+      socket.connect()
+    }
+
+    const roomId = `table:${tableId}`
+    socket.emit('join-room', { room: roomId })
+
+    const onCartUpdated = (payload: {
+      tableId?: string
+      cart?: Record<string, CartItem>
+      updatedBy?: string
+    }) => {
+      if (String(payload?.tableId || '').trim() !== tableId) return
+      if (!payload?.cart || typeof payload.cart !== 'object') return
+      setCart(restoreCartFromStorage(payload.cart))
+      toast('Giỏ hàng vừa được cập nhật bởi nhân viên')
+    }
+
+    socket.on('cart-updated', onCartUpdated)
+    return () => {
+      socket.off('cart-updated', onCartUpdated)
+    }
+  }, [tableId])
 
   useEffect(() => {
     flushPendingMessages()
@@ -1221,6 +1286,7 @@ export default function CustomerMenu() {
       return {
         ...prev,
         [lineKey]: {
+          branchMenuItemId: String(menuMap.get(menuItemId)?.branchMenuItemId || ''),
           menuItemId,
           quantity: Number(current?.quantity || 0) + 1,
           note: String(draft.note || ''),
@@ -1229,6 +1295,130 @@ export default function CustomerMenu() {
       }
     })
   }
+
+  const increaseLineQuantity = (lineKey: string) => {
+    setCart((prev) => {
+      const current = prev[lineKey]
+      if (!current) return prev
+      return {
+        ...prev,
+        [lineKey]: {
+          ...current,
+          quantity: Number(current.quantity || 0) + 1,
+        },
+      }
+    })
+  }
+
+  const decreaseLineQuantity = (lineKey: string) => {
+    setCart((prev) => {
+      const current = prev[lineKey]
+      if (!current) return prev
+      if (current.quantity <= 1) {
+        return prev
+      }
+      return {
+        ...prev,
+        [lineKey]: {
+          ...current,
+          quantity: Number(current.quantity || 0) - 1,
+        },
+      }
+    })
+  }
+
+  const removeCartLine = (lineKey: string) => {
+    setCart((prev) => {
+      if (!prev[lineKey]) return prev
+      const next = { ...prev }
+      delete next[lineKey]
+      return next
+    })
+  }
+
+  const scheduleLineRemoveConfirmation = (lineKey: string) => {
+    if (lineRemoveTimersRef.current[lineKey]) {
+      clearTimeout(lineRemoveTimersRef.current[lineKey])
+    }
+    setPendingLineRemoveConfirm((prev) => ({ ...prev, [lineKey]: true }))
+    lineRemoveTimersRef.current[lineKey] = setTimeout(() => {
+      setPendingLineRemoveConfirm((prev) => {
+        const next = { ...prev }
+        delete next[lineKey]
+        return next
+      })
+      delete lineRemoveTimersRef.current[lineKey]
+    }, 2000)
+  }
+
+  const validateCartWhenDrawerOpen = async () => {
+    if (!cartDrawerOpen || !qrBranchId || cartLines.length === 0) return
+    try {
+      const payloadItems = cartLines
+        .map((line) => {
+          const item = menuMap.get(line.menuItemId)
+          const unitPrice = item ? Number(item.price + getCustomizationDelta(item, line.selections)) : 0
+          return {
+            branchMenuItemId: String(line.branchMenuItemId || item?.branchMenuItemId || '').trim() || undefined,
+            menuItemId: line.menuItemId,
+            quantity: line.quantity,
+            unitPrice,
+          }
+        })
+        .filter((entry) => entry.menuItemId || entry.branchMenuItemId)
+
+      if (!payloadItems.length) return
+      const { data } = await api.post(`/branches/${encodeURIComponent(qrBranchId)}/cart/validate`, {
+        items: payloadItems,
+      })
+      const changes: BranchCartValidateChange[] = Array.isArray(data?.changes) ? data.changes : []
+      if (!changes.length) return
+
+      const unavailableMenuIds = new Set(
+        changes
+          .filter((change) => change.type === 'UNAVAILABLE')
+          .map((change) => String(change.menuItemId || '').trim())
+          .filter(Boolean),
+      )
+
+      if (unavailableMenuIds.size > 0) {
+        setCart((prev) =>
+          Object.fromEntries(
+            Object.entries(prev).filter(([, line]) => !unavailableMenuIds.has(String(line.menuItemId || '').trim())),
+          ),
+        )
+      }
+
+      const hasPriceChange = changes.some((change) => change.type === 'PRICE_CHANGED')
+      changes.forEach((change) => {
+        if (change?.message) {
+          toast(change.message)
+        }
+      })
+
+      if (hasPriceChange) {
+        const request = qrBranchId
+          ? api.get(`/orders/branches/${encodeURIComponent(qrBranchId)}/menu`, {
+              params: { tableId: tableId || undefined },
+            })
+          : api.get('/orders/menu', {
+              params: {
+                tableId,
+                branchId: qrBranchId || undefined,
+              },
+            })
+        const { data: refreshedMenu } = await request
+        setMenuItems(normalizeMenuPayload(refreshedMenu))
+      }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Không thể kiểm tra lại giỏ hàng')
+    }
+  }
+
+  useEffect(() => {
+    void validateCartWhenDrawerOpen()
+    // validate only when opening cart drawer or when source cart/menu changes while drawer is open
+  }, [cartDrawerOpen, qrBranchId, tableId, cartLines.length])
 
   const decrease = (menuItemId: string) => {
     const draft = getDraftForMenuItem(menuItemId)
@@ -1405,6 +1595,17 @@ export default function CustomerMenu() {
 
     setApplyingPromo(true)
     try {
+      const cacheKey = `discount_validate_${code.toUpperCase()}_${Math.floor(cartTotal)}`
+      const cachedRaw = sessionStorage.getItem(cacheKey)
+      if (cachedRaw) {
+        const cached = JSON.parse(cachedRaw) as DiscountValidationCachePayload
+        if (cached?.savedAt && Date.now() - Number(cached.savedAt) <= 5 * 60 * 1000 && cached?.data) {
+          setPromoPreview(cached.data)
+          toast.success('Đã áp dụng mã khuyến mãi (cache)')
+          return
+        }
+      }
+
       const selectedMenuItemIds = Array.from(
         new Set(
           cartLines
@@ -1429,6 +1630,18 @@ export default function CustomerMenu() {
         discountAmount: Number(data?.discountAmount || 0),
         finalAmount: Number(data?.finalAmount || cartTotal),
       })
+      sessionStorage.setItem(
+        cacheKey,
+        JSON.stringify({
+          savedAt: Date.now(),
+          data: {
+            code: String(data?.code || code).toUpperCase(),
+            description: data?.description || undefined,
+            discountAmount: Number(data?.discountAmount || 0),
+            finalAmount: Number(data?.finalAmount || cartTotal),
+          },
+        } as DiscountValidationCachePayload),
+      )
       toast.success('Đã áp dụng mã khuyến mãi')
     } catch (error: any) {
       setPromoPreview(null)
@@ -2044,28 +2257,80 @@ export default function CustomerMenu() {
             <p className="font-semibold text-slate-900">Giỏ hàng</p>
             <div className="mt-3 space-y-2 text-sm">
               {cartLines.length === 0 && (
-                <p className="text-gray-500">Chưa có món</p>
+                <div className="rounded-xl border border-dashed border-sky-200 bg-sky-50/30 px-3 py-5 text-center">
+                  <p className="text-gray-500">Giỏ hàng trống. Hãy thêm món từ thực đơn.</p>
+                  <button
+                    type="button"
+                    onClick={() => setCartDrawerOpen(false)}
+                    className="mt-2 rounded-lg border border-sky-200 bg-white px-3 py-1.5 text-xs font-medium text-sky-700"
+                  >
+                    Tiếp tục chọn món
+                  </button>
+                </div>
               )}
               {cartLines.map((entry) => {
                 const item = menuMap.get(entry.menuItemId)
                 if (!item) return null
                 const delta = getCustomizationDelta(item, entry.selections)
                 const detailLines = formatSelectionDetails(item, entry.selections)
+                const lineKey = buildCartLineKey(entry.menuItemId, entry.selections, entry.note)
                 return (
-                  <div
-                    key={buildCartLineKey(entry.menuItemId, entry.selections, entry.note)}
-                    className="rounded border border-gray-100 p-2"
-                  >
-                    <div className="flex justify-between">
+                  <div key={lineKey} className="rounded border border-gray-100 p-2">
+                    <div className="flex items-start justify-between gap-2">
                       <span>
                         {entry.quantity}x {item.name}
                       </span>
-                      <span>{formatVnd((item.price + delta) * entry.quantity)}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeCartLine(lineKey)}
+                        className="rounded border border-red-200 px-2 py-0.5 text-xs text-red-600"
+                      >
+                        Xóa
+                      </button>
                     </div>
                     {detailLines.length > 0 && (
                       <p className="mt-1 text-xs text-gray-500">Chi tiết: {detailLines.join(' | ')}</p>
                     )}
                     {!!entry.note && <p className="mt-1 text-xs text-gray-500">Ghi chú: {entry.note}</p>}
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="font-medium text-amber-700">{formatVnd((item.price + delta) * entry.quantity)}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (entry.quantity <= 1) {
+                              if (pendingLineRemoveConfirm[lineKey]) {
+                                removeCartLine(lineKey)
+                                setPendingLineRemoveConfirm((prev) => {
+                                  const next = { ...prev }
+                                  delete next[lineKey]
+                                  return next
+                                })
+                                if (lineRemoveTimersRef.current[lineKey]) {
+                                  clearTimeout(lineRemoveTimersRef.current[lineKey])
+                                  delete lineRemoveTimersRef.current[lineKey]
+                                }
+                                return
+                              }
+                              scheduleLineRemoveConfirmation(lineKey)
+                              return
+                            }
+                            decreaseLineQuantity(lineKey)
+                          }}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-sky-200 disabled:opacity-50"
+                        >
+                          {entry.quantity <= 1 && pendingLineRemoveConfirm[lineKey] ? 'X' : '-'}
+                        </button>
+                        <span className="min-w-6 text-center text-sm font-semibold">{entry.quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => increaseLineQuantity(lineKey)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-sky-200"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )
               })}
@@ -2114,6 +2379,12 @@ export default function CustomerMenu() {
                 <input
                   value={promoCode}
                   onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void applyPromotion()
+                    }
+                  }}
                   className={`${fieldClass} flex-1`}
                   placeholder="Nhap ma giam gia"
                 />
@@ -2127,9 +2398,21 @@ export default function CustomerMenu() {
                 </button>
               </div>
               {promoPreview && (
-                <p className="mt-2 text-xs text-emerald-700">
-                  Đã áp dụng {promoPreview.code}: -{formatVnd(promoPreview.discountAmount)}
-                </p>
+                <div className="mt-2 flex items-center justify-between gap-2 text-xs text-emerald-700">
+                  <p>
+                    Đã áp dụng {promoPreview.code}: -{formatVnd(promoPreview.discountAmount)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPromoCode('')
+                      setPromoPreview(null)
+                    }}
+                    className="rounded border border-emerald-200 px-2 py-0.5 text-emerald-700"
+                  >
+                    Xóa mã
+                  </button>
+                </div>
               )}
             </div>
 

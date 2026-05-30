@@ -168,7 +168,17 @@ export default function Dashboard() {
     setNotifications((prev) => [{ ...payload, id: stableId, source }, ...prev].slice(0, 20))
 
     if (showToast) {
-      showRealtimeNotification(payload.title, payload.message)
+      const mappedType =
+        payload.type === 'ORDER_NEW'
+          ? 'NEW_ORDER'
+          : payload.type === 'CALL_STAFF'
+            ? 'CALL_WAITER'
+            : payload.type === 'CHAT_MESSAGE' || payload.type === 'CHAT_OPENED'
+              ? 'NEW_MESSAGE'
+              : payload.type === 'LOW_STOCK'
+                ? 'LOW_INVENTORY'
+                : 'SYSTEM'
+      showRealtimeNotification(payload.title, payload.message, mappedType)
     }
   }
 

@@ -32,6 +32,15 @@ export class BranchMenuController {
     return this.orderService.findOneByBranch(branchId, orderId);
   }
 
+  @Post(':branchId/cart/validate')
+  @HttpCode(HttpStatus.OK)
+  validateBranchCart(
+    @Param('branchId') branchId: string,
+    @Body() body?: { items?: Array<{ branchMenuItemId?: string; menuItemId?: string; quantity?: number; unitPrice?: number }> },
+  ) {
+    return this.orderService.validateBranchCart(branchId, body?.items || []);
+  }
+
   @Post(':branchId/menu/items/:itemId')
   @HttpCode(HttpStatus.CREATED)
   activateItem(

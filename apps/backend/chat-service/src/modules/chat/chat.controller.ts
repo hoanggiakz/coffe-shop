@@ -97,6 +97,37 @@ export class ChatController {
     return { success: true, notification };
   }
 
+  @Get('api/notifications')
+  listNotifications(
+    @Query('branchId') branchId?: string,
+    @Query('isRead') isRead?: string,
+    @Query('type') type?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '20',
+    @Req() req?: Request,
+  ) {
+    return this.chatService.listNotifications(
+      {
+        branchId,
+        isRead,
+        type,
+        page: Number(page),
+        limit: Number(limit),
+      },
+      this.actor(req!),
+    );
+  }
+
+  @Patch('api/notifications/:id/read')
+  markNotificationRead(@Param('id') id: string, @Req() req?: Request) {
+    return this.chatService.markNotificationRead(id, this.actor(req!));
+  }
+
+  @Patch('api/notifications/read-all')
+  markAllNotificationsRead(@Query('branchId') branchId?: string, @Req() req?: Request) {
+    return this.chatService.markAllNotificationsRead({ branchId }, this.actor(req!));
+  }
+
   @Post('api/chats/:id/messages')
   async sendMessage(
     @Param('id') sessionId: string,

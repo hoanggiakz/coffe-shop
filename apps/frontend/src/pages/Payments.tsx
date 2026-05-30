@@ -5,10 +5,13 @@ import Button from '@/components/ui/Button'
 import api from '@/utils/api'
 import { cn } from '@/utils/cn'
 import { phuongThucThanhToan, trangThaiThanhToan } from '@/utils/display'
+import { useBranchScopeStore } from '@/stores/branchScopeStore'
+import { useAuthStore } from '@/stores/authStore'
 
 interface PaymentApi {
   paymentId: string
   orderId: string
+  branchId?: string | null
   amount: number
   provider: string
   status: string
@@ -91,6 +94,9 @@ const readErrorMessage = (error: unknown): string => {
 }
 
 export default function Payments() {
+  const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
+  const user = useAuthStore((state) => state.user)
+  const effectiveBranchId = String(selectedBranchId || user?.branchId || '').trim()
   const [payments, setPayments] = useState<PaymentApi[]>([])
   const [initialLoading, setInitialLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -108,7 +114,11 @@ export default function Payments() {
       const { data } = await api.get<PaymentApi[]>('/v1/payments', {
         params: { limit: 100, reconcileOnline: true },
       })
-      setPayments(Array.isArray(data) ? data : [])
+      const list = Array.isArray(data) ? data : []
+      const scoped = effectiveBranchId
+        ? list.filter((item) => String(item?.branchId || '').trim() === effectiveBranchId)
+        : list
+      setPayments(scoped)
       setLastUpdatedAt(new Date().toISOString())
       setErrorMessage('')
     } catch (error: unknown) {
@@ -132,7 +142,7 @@ export default function Payments() {
     return () => {
       window.clearInterval(timerId)
     }
-  }, [])
+  }, [effectiveBranchId])
 
   const totalRevenue = useMemo(
     () =>
