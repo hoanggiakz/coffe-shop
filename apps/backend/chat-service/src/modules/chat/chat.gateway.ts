@@ -12,7 +12,7 @@ import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
 
 export interface StaffNotificationInput {
-  type: 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY' | 'LOW_STOCK';
+  type: 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY' | 'LOW_STOCK' | 'PAYMENT_SUCCESS';
   title: string;
   message: string;
   branchId?: string;
@@ -283,6 +283,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } else {
       this.server.to('staff:global').emit('staff-notification', payload);
     }
+
+    void this.chatService.logStaffNotification(payload);
 
     return payload;
   }

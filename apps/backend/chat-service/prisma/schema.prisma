@@ -43,6 +43,22 @@ model ChatMessage {
   @@index([sessionId, createdAt])
 }
 
+model NotificationLog {
+  id          String   @id @default(cuid())
+  branchId    String
+  type        String
+  payload     Json
+  targetRoles String[] @default([])
+  userId      String?
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime?
+
+  @@map("notification_log")
+  @@index([branchId, isRead, createdAt(sort: Desc)])
+  @@index([userId, isRead])
+}
+
 enum ChatStatus {
   OPEN
   CLOSED

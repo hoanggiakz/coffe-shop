@@ -26,6 +26,7 @@ export interface CreateMessageDto {
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
+  private readonly notificationRetentionHours = 72;
 
   constructor(private prisma: PrismaService) {}
 
@@ -213,5 +214,175 @@ export class ChatService {
 
   async getSessionById(sessionId: string) {
     return this.prisma.chatSession.findUnique({ where: { id: sessionId } });
+  }
+
+  private normalizeNotificationActorRole(actor: ActorContext) {
+    return String(actor.role || '').trim().toUpperCase();
+  }
+
+  private resolveNotificationScope(actor: ActorContext, requestedBranchId?: string) {
+    const role = this.normalizeNotificationActorRole(actor);
+    const actorBranchId = String(actor.branchId || '').trim();
+    const actorUserId = String(actor.userId || '').trim();
+    const branchId = String(requestedBranchId || '').trim() || actorBranchId;
+
+    if (!['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF'].includes(role)) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
+
+    if (role === 'ADMIN') {
+      if (!branchId) {
+        throw new ForbiddenException('branchId la bat buoc voi tai khoan ADMIN');
+      }
+      return { role, branchId, userId: actorUserId };
+    }
+
+    if (!actorBranchId) {
+      throw new ForbiddenException('Tai khoan nhan vien thieu branchId');
+    }
+
+    if (branchId && branchId !== actorBranchId) {
+      throw new ForbiddenException('Khong co quyen truy cap thong bao chi nhanh khac');
+    }
+
+    return {
+      role,
+      branchId: actorBranchId,
+      userId: actorUserId,
+    };
+  }
+
+  async logStaffNotification(payload: {
+    id?: string;
+    type: string;
+    title: string;
+    message: string;
+    branchId?: string;
+    chatId?: string;
+    tableId?: string;
+    messageId?: string;
+    orderId?: string;
+    createdAt?: string;
+  }) {
+    const importantTypes = new Set(['ORDER_NEW', 'CALL_STAFF', 'LOW_STOCK', 'PAYMENT_SUCCESS']);
+    const type = String(payload.type || '').trim().toUpperCase();
+    const branchId = String(payload.branchId || '').trim();
+    if (!importantTypes.has(type) || !branchId) {
+      return;
+    }
+
+    const createdAt = payload.createdAt ? new Date(payload.createdAt) : new Date();
+    const expiresAt = new Date(createdAt.getTime() + this.notificationRetentionHours * 60 * 60 * 1000);
+    await this.prisma.notificationLog.create({
+      data: {
+        branchId,
+        type,
+        payload: {
+          title: String(payload.title || '').trim(),
+          message: String(payload.message || '').trim(),
+          chatId: payload.chatId || null,
+          tableId: payload.tableId || null,
+          messageId: payload.messageId || null,
+          orderId: payload.orderId || null,
+          sourceId: payload.id || null,
+        },
+        targetRoles: type === 'LOW_STOCK' ? ['MANAGER'] : ['ADMIN', 'MANAGER', 'WAITER', 'STAFF'],
+        userId: null,
+        createdAt,
+        expiresAt,
+      },
+    });
+  }
+
+  async listNotifications(
+    query: { branchId?: string; isRead?: string; type?: string; page?: number; limit?: number },
+    actor: ActorContext = {},
+  ) {
+    const scope = this.resolveNotificationScope(actor, query.branchId);
+    const safePage = Number.isFinite(query.page) && Number(query.page) > 0 ? Math.floor(Number(query.page)) : 1;
+    const safeLimit = Number.isFinite(query.limit) ? Math.min(Math.max(Math.floor(Number(query.limit)), 1), 100) : 20;
+    const skip = (safePage - 1) * safeLimit;
+    const normalizedType = String(query.type || '').trim().toUpperCase();
+    const hasReadFilter = query.isRead === 'true' || query.isRead === 'false';
+    const isRead = query.isRead === 'true';
+
+    const where: any = {
+      branchId: scope.branchId,
+      ...(normalizedType && normalizedType !== 'ALL' ? { type: normalizedType } : {}),
+      ...(hasReadFilter ? { isRead } : {}),
+    };
+
+    if ((scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') && scope.userId) {
+      where.OR = [{ userId: scope.userId }, { userId: null }];
+    }
+
+    const [rows, total, unreadCount] = await Promise.all([
+      this.prisma.notificationLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: safeLimit,
+      }),
+      this.prisma.notificationLog.count({ where }),
+      this.prisma.notificationLog.count({
+        where: {
+          ...where,
+          isRead: false,
+        },
+      }),
+    ]);
+
+    return {
+      data: rows.map((row) => ({
+        id: row.id,
+        type: row.type,
+        payload: row.payload,
+        isRead: row.isRead,
+        createdAt: row.createdAt,
+      })),
+      meta: {
+        total,
+        unreadCount,
+        page: safePage,
+        limit: safeLimit,
+      },
+    };
+  }
+
+  async markNotificationRead(id: string, actor: ActorContext = {}) {
+    const existing = await this.prisma.notificationLog.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException('Khong tim thay thong bao');
+    }
+    const scope = this.resolveNotificationScope(actor, existing.branchId);
+
+    if ((scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') && existing.userId && existing.userId !== scope.userId) {
+      throw new ForbiddenException('Khong co quyen cap nhat thong bao nay');
+    }
+
+    await this.prisma.notificationLog.update({
+      where: { id },
+      data: { isRead: true },
+    });
+    return { success: true };
+  }
+
+  async markAllNotificationsRead(query: { branchId?: string }, actor: ActorContext = {}) {
+    const scope = this.resolveNotificationScope(actor, query.branchId);
+    const where: any = {
+      branchId: scope.branchId,
+      isRead: false,
+    };
+
+    if (scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') {
+      where.userId = scope.userId || '__none__';
+    }
+
+    const updated = await this.prisma.notificationLog.updateMany({
+      where,
+      data: { isRead: true },
+    });
+
+    return { success: true, updatedCount: updated.count };
   }
 }

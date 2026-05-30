@@ -73,6 +73,7 @@ export class ProxyController {
     const isBranchInvoicesPath = /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(req.path);
     const isBranchChatPath = /^\/api\/branches\/[^/]+\/chat\/sessions(\/|$)/.test(req.path);
     const isChatSessionPath = /^\/api\/chat\/sessions\/[^/]+(\/|$)/.test(req.path);
+    const isNotificationsPath = /^\/api\/notifications(\/|$)/.test(req.path);
     const isOrderInvoiceRegeneratePath = /^\/api\/orders\/[^/]+\/invoice\/regenerate(\/|$)/.test(req.path);
     const isPublicInvoicePath = /^\/api\/public\/invoices\/[^/]+(\/|$)/.test(req.path);
     const isPublicOrderInvoiceLinkPath = /^\/api\/public\/orders\/[^/]+\/invoice-link(\/|$)/.test(req.path);
@@ -82,6 +83,8 @@ export class ProxyController {
       : isBranchInvoicesPath || isOrderInvoiceRegeneratePath || isPublicInvoicePath || isPublicOrderInvoiceLinkPath
         ? ({ path: '/api/invoices' } as any)
       : isBranchChatPath || isChatSessionPath
+        ? ({ path: '/api/chats' } as any)
+      : isNotificationsPath
         ? ({ path: '/api/chats' } as any)
       : isBranchOrdersPath || isBranchCartValidatePath
         ? ({ path: '/api/orders' } as any)
@@ -119,6 +122,7 @@ export class ProxyController {
     const isPublicInvoicePath = /^\/api\/public\/invoices\/[^/]+(\/|$)/.test(path);
     const isPublicOrderInvoiceLinkPath = /^\/api\/public\/orders\/[^/]+\/invoice-link(\/|$)/.test(path);
     const isBranchCartValidatePath = /^\/api\/branches\/[^/]+\/cart\/validate(\/|$)/.test(path);
+    const isNotificationsPath = /^\/api\/notifications(\/|$)/.test(path);
 
     // Public auth/customer endpoints
     if (
@@ -324,6 +328,10 @@ export class ProxyController {
     // Chat staff module (S-16..S-18)
     if (path.startsWith('/api/chats') || isBranchChatPath || isChatSessionPath) {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
+    if (isNotificationsPath) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
       return;
     }
 
