@@ -93,6 +93,13 @@ class ChatPayload(BaseModel):
     message: str | None = None
 
 
+class ReportChatPayload(BaseModel):
+    branchId: str | None = None
+    userId: str | None = None
+    role: str = "MANAGER"
+    question: str
+
+
 ANOMALIES: list[dict[str, Any]] = [
     {
         "id": "anomaly-seed-1",
@@ -418,6 +425,36 @@ def map_question_to_sql(question: str, branch_id: str | None) -> str:
         return f'SELECT label, COUNT(*)::int AS count FROM sentiment_analysis {where} GROUP BY label ORDER BY label'
 
     return f'SELECT "forecastDate", "predictedRevenue", "confidenceLow", "confidenceHigh" FROM sales_forecast {where} ORDER BY "forecastDate" DESC LIMIT 7'
+
+
+def infer_report_intent(question: str) -> str:
+    q = question.lower()
+    if "doanh thu" in q:
+        return "REVENUE_QUERY"
+    if "món" in q and ("bán chạy" in q or "ban chay" in q):
+        return "TOP_ITEMS_QUERY"
+    if "bất thường" in q or "cảnh báo" in q or "canh bao" in q:
+        return "ANOMALY_QUERY"
+    if "cảm xúc" in q or "sentiment" in q or "cam xuc" in q:
+        return "SENTIMENT_QUERY"
+    return "GENERAL_QUERY"
+
+
+def summarize_sql_result(intent: str, rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "Không tìm thấy dữ liệu phù hợp trong phạm vi câu hỏi."
+    if intent == "REVENUE_QUERY":
+        revenue = decimal_from_any(rows[0].get("revenue"), 0)
+        return f"Doanh thu ước tính theo dữ liệu hiện có là {int(revenue):,}đ."
+    if intent == "TOP_ITEMS_QUERY":
+        top = rows[0]
+        return f"Món dẫn đầu hiện tại là {top.get('menuItemId', 'N/A')} với số lượng {top.get('qty', 0)}."
+    if intent == "ANOMALY_QUERY":
+        return f"Có {len(rows)} cảnh báo bất thường gần nhất trong phạm vi truy vấn."
+    if intent == "SENTIMENT_QUERY":
+        parts = [f"{row.get('label', 'UNKNOWN')}: {row.get('count', 0)}" for row in rows[:3]]
+        return "Phân bổ cảm xúc hiện tại: " + ", ".join(parts)
+    return f"Tìm thấy {len(rows)} dòng dữ liệu."
 
 
 def answer_from_knowledge_base(question: str) -> tuple[str, str, float, bool]:
@@ -1082,3 +1119,50 @@ def ai_chat_history(branchId: str | None = None, limit: int = 20) -> dict[str, A
 @metric_guard("chat_suggestions")
 def ai_chat_suggestions() -> dict[str, Any]:
     return {"items": ["Doanh thu hôm nay so với hôm qua?", "Món bán chạy nhất tuần này?", "Có cảnh báo bất thường nào đang mở?", "Tồn kho nguyên liệu nào sắp hết?"]}
+
+
+@app.post("/api/ai/report-chat")
+@metric_guard("report_chat")
+def report_chat(payload: ReportChatPayload) -> dict[str, Any]:
+    start = time.perf_counter()
+    question = str(payload.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+
+    branch_id = normalize_branch_id(payload.branchId) if payload.branchId is not None else None
+    role = str(payload.role or "MANAGER").upper()
+    intent = infer_report_intent(question)
+    sql = map_question_to_sql(question, branch_id)
+
+    rows: list[dict[str, Any]] = []
+    success = True
+    error_message = None
+    try:
+        params = [branch_id] if branch_id and "%s" in sql else []
+        rows = execute_sql(sql, params)
+        answer = summarize_sql_result(intent, rows)
+    except Exception as error:  # pylint: disable=broad-except
+        success = False
+        error_message = str(error)
+        answer = "Không thể thực thi truy vấn báo cáo tại thời điểm này."
+
+    execution_ms = int((time.perf_counter() - start) * 1000)
+    log_audit(
+        "/api/ai/report-chat",
+        "report_chat",
+        success,
+        branch_id,
+        actor_id=payload.userId,
+        latency_ms=execution_ms,
+        metadata={"intent": intent, "error": error_message, "role": role},
+    )
+
+    return {
+        "answer": answer,
+        "sql": sql if role == "ADMIN" else None,
+        "executionTimeMs": execution_ms,
+        "intent": intent,
+        "isSuccessful": success,
+        "rowCount": len(rows),
+        "sampleRows": rows[:5],
+    }

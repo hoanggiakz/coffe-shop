@@ -136,3 +136,35 @@ def test_anomaly_detect_contract():
     assert payload.get('branchId') == 'branch-e2e'
     assert payload.get('severity') in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
     assert 'zScore' in payload
+
+
+def test_report_chat_admin_contract():
+    response = client.post(
+        '/api/ai/report-chat',
+        json={
+            'branchId': 'branch-e2e',
+            'userId': 'admin-1',
+            'role': 'ADMIN',
+            'question': 'Doanh thu hôm nay là bao nhiêu?',
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get('intent') in ['REVENUE_QUERY', 'TOP_ITEMS_QUERY', 'ANOMALY_QUERY', 'SENTIMENT_QUERY', 'GENERAL_QUERY']
+    assert isinstance(payload.get('executionTimeMs'), int)
+    assert payload.get('sql') is None or isinstance(payload.get('sql'), str)
+
+
+def test_report_chat_manager_hides_sql():
+    response = client.post(
+        '/api/ai/report-chat',
+        json={
+            'branchId': 'branch-e2e',
+            'userId': 'manager-1',
+            'role': 'MANAGER',
+            'question': 'Có cảnh báo bất thường nào không?',
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get('sql') is None
