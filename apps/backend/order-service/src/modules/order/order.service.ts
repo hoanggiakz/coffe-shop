@@ -934,6 +934,7 @@ export class OrderService {
       where: { id },
       select: {
         id: true,
+        price: true,
         categoryId: true,
         available: true,
         _count: {
@@ -954,6 +955,38 @@ export class OrderService {
       dto.branchId !== undefined
         ? this.resolveAdminMenuBranchScope(this.normalizeBranchId(dto.branchId), actor)
         : this.resolveAdminMenuBranchScope(this.normalizeBranchId(actor?.branchId), actor);
+
+    const updateKeys = Object.keys(dto || {});
+    const isAvailabilityOnlyUpdate =
+      updateKeys.length > 0 &&
+      updateKeys.every((key) => key === 'available' || key === 'branchId');
+    if (isAvailabilityOnlyUpdate && dto.available !== undefined) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.menuItem.update({
+          where: { id },
+          data: { available: dto.available },
+        });
+
+        if (nextBranchId) {
+          await tx.branchMenuItem.upsert({
+            where: { branchId_menuItemId: { branchId: nextBranchId, menuItemId: id } },
+            update: {
+              isAvailable: dto.available,
+            },
+            create: {
+              branchId: nextBranchId,
+              menuItemId: id,
+              price: Number(existing.price || 0),
+              isAvailable: dto.available,
+              displayOrder: 0,
+              customOptions: null,
+            },
+          });
+        }
+      });
+
+      return this.getMenuItemForAdmin(id);
+    }
 
     const shouldUpdateOptionBindings = Array.isArray(dto.optionGroups);
     const shouldUpdateRecipe = Array.isArray(dto.recipe);
