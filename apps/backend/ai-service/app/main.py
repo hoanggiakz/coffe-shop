@@ -60,6 +60,14 @@ class ResolveAnomalyPayload(BaseModel):
 class SentimentAnalyzePayload(BaseModel):
     branchId: str
     text: str
+    sourceType: str = "CHAT"
+    sourceId: str | None = None
+
+
+class ForecastRebuildPayload(BaseModel):
+    branchId: str
+    days: int = 7
+    granularity: str = "daily"
 
 
 class ChatPayload(BaseModel):
@@ -310,6 +318,13 @@ def classify_sentiment(text: str) -> tuple[str, float, dict[str, float]]:
     return label, round(confidence, 2), normalized
 
 
+def decimal_from_any(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
 def map_question_to_sql(question: str, branch_id: str | None) -> str:
     q = question.lower()
     where = 'WHERE "branchId" = %s' if branch_id else ""
@@ -385,6 +400,99 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.post("/api/ai/forecast/revenue/rebuild")
+@metric_guard("forecast_revenue_rebuild")
+def rebuild_revenue_forecast(payload: ForecastRebuildPayload) -> dict[str, Any]:
+    payload.branchId = normalize_branch_id(payload.branchId)
+    payload.days = max(1, min(payload.days, 30))
+    now = datetime.now(timezone.utc)
+
+    baseline_daily = 4_200_000.0
+    if REPORT_DATABASE_URL:
+        try:
+            rows = execute_sql(
+                """
+                SELECT date, revenue
+                FROM daily_revenue
+                WHERE date >= (CURRENT_DATE - INTERVAL '30 days')
+                ORDER BY date ASC
+                """,
+            )
+            if rows:
+                recent_values = [decimal_from_any(row.get("revenue"), baseline_daily) for row in rows]
+                baseline_daily = sum(recent_values) / max(len(recent_values), 1)
+        except Exception:
+            pass
+
+    generated = []
+    for idx in range(payload.days):
+        date_value = (now + timedelta(days=idx)).date()
+        predicted = max(0.0, baseline_daily * (1 + (0.02 * (idx % 5 - 2))))
+        low = predicted * 0.9
+        high = predicted * 1.1
+        generated.append(
+            {
+                "date": date_value.isoformat(),
+                "predictedRevenue": int(predicted),
+                "confidenceLow": int(low),
+                "confidenceHigh": int(high),
+                "confidence": 0.8,
+            }
+        )
+
+    persisted = 0
+    if REPORT_DATABASE_URL:
+        try:
+            with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
+                with conn.cursor() as cur:
+                    for item in generated:
+                        cur.execute(
+                            """
+                            INSERT INTO sales_forecast ("branchId", "forecastDate", granularity, "predictedRevenue", "confidenceLow", "confidenceHigh", confidence, "modelVersion", mape, "generatedAt")
+                            VALUES (%s, %s::date, %s, %s, %s, %s, %s, %s, %s, NOW())
+                            ON CONFLICT ("branchId", "forecastDate", granularity)
+                            DO UPDATE SET
+                              "predictedRevenue" = EXCLUDED."predictedRevenue",
+                              "confidenceLow" = EXCLUDED."confidenceLow",
+                              "confidenceHigh" = EXCLUDED."confidenceHigh",
+                              confidence = EXCLUDED.confidence,
+                              "modelVersion" = EXCLUDED."modelVersion",
+                              mape = EXCLUDED.mape,
+                              "generatedAt" = NOW()
+                            """,
+                            (
+                                payload.branchId,
+                                item["date"],
+                                payload.granularity,
+                                item["predictedRevenue"],
+                                item["confidenceLow"],
+                                item["confidenceHigh"],
+                                item["confidence"],
+                                AI_ACTIVE_MODEL_VERSION,
+                                12.5,
+                            ),
+                        )
+                        persisted += 1
+        except Exception:
+            persisted = 0
+
+    log_audit(
+        "/api/ai/forecast/revenue/rebuild",
+        "rebuild",
+        True,
+        payload.branchId,
+        metadata={"days": payload.days, "persisted": persisted},
+    )
+    return {
+        "branchId": payload.branchId,
+        "days": payload.days,
+        "granularity": payload.granularity,
+        "persisted": persisted,
+        "items": generated,
+        "modelVersion": AI_ACTIVE_MODEL_VERSION,
+    }
+
+
 @app.post("/api/ai/kb/reload")
 @metric_guard("kb_reload")
 def kb_reload() -> dict[str, Any]:
@@ -395,8 +503,44 @@ def kb_reload() -> dict[str, Any]:
 @app.get("/api/ai/forecast/revenue")
 @metric_guard("forecast_revenue")
 def forecast_revenue(branchId: str, days: int = 7, granularity: str = "daily") -> dict[str, Any]:
+    branchId = normalize_branch_id(branchId)
     days = max(1, min(days, 30))
     now = datetime.now(timezone.utc)
+    if REPORT_DATABASE_URL:
+        try:
+            rows = execute_sql(
+                """
+                SELECT "forecastDate", "predictedRevenue", "confidenceLow", "confidenceHigh", confidence
+                FROM sales_forecast
+                WHERE "branchId" = %s AND granularity = %s
+                ORDER BY "forecastDate" ASC
+                LIMIT %s
+                """,
+                [branchId, granularity, days],
+            )
+            if rows:
+                forecasts = [
+                    {
+                        "date": str(row.get("forecastDate"))[:10],
+                        "predictedRevenue": int(decimal_from_any(row.get("predictedRevenue"), 0)),
+                        "confidenceLow": int(decimal_from_any(row.get("confidenceLow"), 0)),
+                        "confidenceHigh": int(decimal_from_any(row.get("confidenceHigh"), 0)),
+                        "confidence": decimal_from_any(row.get("confidence"), 0.8),
+                    }
+                    for row in rows
+                ]
+                return {
+                    "branchId": branchId,
+                    "generatedAt": now.isoformat(),
+                    "granularity": granularity,
+                    "forecasts": forecasts,
+                    "modelVersion": AI_ACTIVE_MODEL_VERSION,
+                    "mape": 12.5,
+                    "source": "db",
+                }
+        except Exception:
+            pass
+
     forecasts: list[dict[str, Any]] = []
     base_value = 4_200_000
     for idx in range(days):
@@ -418,6 +562,7 @@ def forecast_revenue(branchId: str, days: int = 7, granularity: str = "daily") -
         "forecasts": forecasts,
         "modelVersion": AI_ACTIVE_MODEL_VERSION,
         "mape": 12.5,
+        "source": "fallback",
     }
 
 
@@ -593,13 +738,48 @@ def sentiment_summary(branchId: str) -> dict[str, Any]:
 @metric_guard("sentiment_trend")
 def sentiment_trend(branchId: str, days: int = 7) -> dict[str, Any]:
     branchId = normalize_branch_id(branchId)
+    if REPORT_DATABASE_URL:
+        try:
+            rows = execute_sql(
+                """
+                SELECT DATE("analyzedAt") AS date, label, COUNT(*)::int AS count
+                FROM sentiment_analysis
+                WHERE "branchId" = %s
+                  AND "analyzedAt" >= (CURRENT_DATE - (%s::int || ' days')::interval)
+                GROUP BY DATE("analyzedAt"), label
+                ORDER BY DATE("analyzedAt") ASC
+                """,
+                [branchId, max(1, min(days, 30))],
+            )
+            if rows:
+                grouped: dict[str, dict[str, int]] = {}
+                for row in rows:
+                    d = str(row.get("date"))[:10]
+                    label = str(row.get("label") or "NEUTRAL").upper()
+                    grouped.setdefault(d, {"POSITIVE": 0, "NEUTRAL": 0, "NEGATIVE": 0})
+                    grouped[d][label] = grouped[d].get(label, 0) + int(row.get("count") or 0)
+                points = []
+                for d in sorted(grouped.keys()):
+                    total = sum(grouped[d].values()) or 1
+                    points.append(
+                        {
+                            "date": d,
+                            "positive": round(grouped[d]["POSITIVE"] / total, 4),
+                            "neutral": round(grouped[d]["NEUTRAL"] / total, 4),
+                            "negative": round(grouped[d]["NEGATIVE"] / total, 4),
+                        }
+                    )
+                return {"branchId": branchId, "points": points, "source": "db"}
+        except Exception:
+            pass
+
     today = datetime.now(timezone.utc).date()
     points = []
     for i in range(max(1, min(days, 30))):
         d = today - timedelta(days=i)
         points.append({"date": d.isoformat(), "positive": 0.7 + (i % 3) * 0.03, "neutral": 0.2 - (i % 2) * 0.02, "negative": 0.1 - (i % 2) * 0.01})
     log_audit("/api/ai/sentiment/trend", "trend", True, branchId)
-    return {"branchId": branchId, "points": list(reversed(points))}
+    return {"branchId": branchId, "points": list(reversed(points)), "source": "fallback"}
 
 
 @app.post("/api/ai/sentiment/analyze")
@@ -607,12 +787,37 @@ def sentiment_trend(branchId: str, days: int = 7) -> dict[str, Any]:
 def sentiment_analyze(payload: SentimentAnalyzePayload) -> dict[str, Any]:
     payload.branchId = normalize_branch_id(payload.branchId)
     label, confidence, scores = classify_sentiment(payload.text)
+    persisted = False
+    if REPORT_DATABASE_URL:
+        try:
+            with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO sentiment_analysis ("branchId", "sourceType", "sourceId", "originalText", label, confidence, reason, "modelVersion", "analyzedAt")
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                        """,
+                        (
+                            payload.branchId,
+                            str(payload.sourceType or "CHAT").upper(),
+                            payload.sourceId,
+                            payload.text,
+                            label,
+                            confidence,
+                            "lexicon_baseline_v1",
+                            AI_ACTIVE_MODEL_VERSION,
+                        ),
+                    )
+            persisted = True
+        except Exception:
+            persisted = False
     log_audit("/api/ai/sentiment/analyze", "analyze", True, payload.branchId, metadata={"label": label})
     return {
         "branchId": payload.branchId,
         "label": label,
         "confidence": confidence,
         "scores": scores,
+        "persisted": persisted,
         "reason": "lexicon_baseline_v1",
     }
 

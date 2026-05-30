@@ -96,3 +96,15 @@ def test_kb_reload_endpoint():
     payload = response.json()
     assert payload.get('success') is True
     assert int(payload.get('itemCount', 0)) > 0
+
+
+def test_forecast_rebuild_endpoint():
+    response = client.post(
+        '/api/ai/forecast/revenue/rebuild',
+        json={'branchId': 'branch-e2e', 'days': 3, 'granularity': 'daily'},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get('branchId') == 'branch-e2e'
+    assert int(payload.get('days', 0)) == 3
+    assert isinstance(payload.get('items'), list)
