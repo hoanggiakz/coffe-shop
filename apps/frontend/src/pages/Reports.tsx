@@ -116,6 +116,7 @@ interface AiInsightState {
   forecasts: AiRevenueForecast[]
   anomalies: Array<{ id: string; severity: string; description: string; isResolved: boolean }>
   sentiment: { positive: number; neutral: number; negative: number } | null
+  sentimentTopIssues: Array<{ issue: string; count: number }>
   forecastSource?: string
   sentimentSource?: string
   fallbackReason?: string
@@ -168,6 +169,7 @@ export default function Reports() {
     forecasts: [],
     anomalies: [],
     sentiment: null,
+    sentimentTopIssues: [],
   })
   const [rebuildingForecast, setRebuildingForecast] = useState(false)
 
@@ -215,17 +217,19 @@ export default function Reports() {
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
 
       try {
-        const [forecastResult, anomalyResult, sentimentResult] = await Promise.allSettled([
+        const [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult] = await Promise.allSettled([
           requestAiWithRetry('/ai/forecast/revenue', { branchId: effectiveAiBranchId, days: 7 }),
           requestAiWithRetry('/ai/anomalies', { branchId: effectiveAiBranchId }),
           requestAiWithRetry('/ai/sentiment/summary', { branchId: effectiveAiBranchId }),
+          requestAiWithRetry('/ai/sentiment/issues-top', { branchId: effectiveAiBranchId, days: 7, limit: 3 }),
         ])
 
         const forecastData = forecastResult.status === 'fulfilled' ? forecastResult.value.data : null
         const anomalyData = anomalyResult.status === 'fulfilled' ? anomalyResult.value.data : null
         const sentimentData = sentimentResult.status === 'fulfilled' ? sentimentResult.value.data : null
-        const aiAvailable = Boolean(forecastData || anomalyData || sentimentData)
-        const reasons = [forecastResult, anomalyResult, sentimentResult]
+        const sentimentIssuesData = sentimentIssuesResult.status === 'fulfilled' ? sentimentIssuesResult.value.data : null
+        const aiAvailable = Boolean(forecastData || anomalyData || sentimentData || sentimentIssuesData)
+        const reasons = [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult]
           .filter((item): item is PromiseRejectedResult => item.status === 'rejected')
           .map((item) => item.reason?.response?.data?.message || item.reason?.message || 'request_failed')
 
@@ -242,6 +246,14 @@ export default function Reports() {
                 negative: Number(sentimentData.negative || 0),
               }
             : null,
+          sentimentTopIssues: Array.isArray(sentimentIssuesData?.issues)
+            ? sentimentIssuesData.issues
+                .map((item: any) => ({
+                  issue: String(item?.issue || '').trim(),
+                  count: Number(item?.count || 0),
+                }))
+                .filter((item: { issue: string; count: number }) => item.issue)
+            : [],
           fallbackReason: reasons.length ? reasons.join('; ') : undefined,
         })
       } catch (aiError: any) {
@@ -250,6 +262,7 @@ export default function Reports() {
           forecasts: [],
           anomalies: [],
           sentiment: null,
+          sentimentTopIssues: [],
           forecastSource: '',
           sentimentSource: '',
           fallbackReason: aiError?.response?.data?.message || 'AI service unavailable',
@@ -457,7 +470,7 @@ export default function Reports() {
           </p>
         )}
         {aiInsight.available && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <div className="rounded-xl border border-sky-100 bg-sky-50/70 p-3">
               <p className="text-xs text-slate-600">Dự báo 7 ngày</p>
               <p className="text-lg font-semibold text-slate-900">
@@ -475,6 +488,19 @@ export default function Reports() {
               <p className="text-lg font-semibold text-slate-900">
                 {aiInsight.sentiment ? `${Math.round(aiInsight.sentiment.positive * 100)}%` : '-'}
               </p>
+            </div>
+            <div className="rounded-xl border border-rose-100 bg-rose-50/70 p-3">
+              <p className="text-xs text-slate-600">Top vấn đề tiêu cực</p>
+              {aiInsight.sentimentTopIssues.length === 0 && <p className="text-sm font-medium text-slate-700">Chưa có dữ liệu</p>}
+              {aiInsight.sentimentTopIssues.length > 0 && (
+                <div className="space-y-1">
+                  {aiInsight.sentimentTopIssues.map((issue) => (
+                    <p key={issue.issue} className="text-xs text-slate-800">
+                      {issue.issue}: <span className="font-semibold">{issue.count}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
