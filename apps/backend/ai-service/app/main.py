@@ -26,6 +26,7 @@ CHATBOT_MAX_ROWS = int(os.getenv("AI_CHATBOT_MAX_ROWS", "200"))
 AI_ROLLOUT_PERCENT = int(os.getenv("AI_ROLLOUT_PERCENT", "10"))
 AI_ACTIVE_MODEL_VERSION = os.getenv("AI_ACTIVE_MODEL_VERSION", "baseline_v1")
 AI_STAGING_MODEL_VERSION = os.getenv("AI_STAGING_MODEL_VERSION", "baseline_v2_candidate")
+KB_REFRESH_INTERVAL_MINUTES = int(os.getenv("AI_KB_REFRESH_INTERVAL_MINUTES", "30"))
 
 DEFAULT_MENU_KB = [
     {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
@@ -81,6 +82,10 @@ ANOMALIES: list[dict[str, Any]] = [
     }
 ]
 CHAT_HISTORY: list[dict[str, Any]] = []
+KB_STATE: dict[str, Any] = {
+    "lastReloadAt": datetime.now(timezone.utc).isoformat(),
+    "source": "bootstrap",
+}
 
 
 def metric_guard(endpoint: str):
@@ -107,6 +112,39 @@ def json_dumps(obj: dict[str, Any]) -> str:
     import json
 
     return json.dumps(obj, ensure_ascii=False)
+
+
+def normalize_branch_id(value: str | None) -> str:
+    branch_id = str(value or "").strip()
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="branchId is required")
+    return branch_id
+
+
+def normalize_limit(value: int, lower: int = 1, upper: int = 10) -> int:
+    if value < lower or value > upper:
+        raise HTTPException(status_code=400, detail=f"limit must be between {lower} and {upper}")
+    return value
+
+
+def reload_knowledge_base(source: str = "manual") -> dict[str, Any]:
+    # Phase-1 baseline: load from static defaults; ready to swap with DB/API loaders.
+    global DEFAULT_MENU_KB  # pylint: disable=global-statement
+    DEFAULT_MENU_KB = list(DEFAULT_MENU_KB)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    KB_STATE["lastReloadAt"] = now_iso
+    KB_STATE["source"] = source
+    KB_STATE["itemCount"] = len(DEFAULT_MENU_KB)
+    return {"reloadedAt": now_iso, "itemCount": len(DEFAULT_MENU_KB), "source": source}
+
+
+def ensure_kb_fresh() -> None:
+    try:
+        last_reload = datetime.fromisoformat(str(KB_STATE.get("lastReloadAt")))
+    except Exception:
+        last_reload = datetime.now(timezone.utc) - timedelta(minutes=KB_REFRESH_INTERVAL_MINUTES + 1)
+    if datetime.now(timezone.utc) - last_reload >= timedelta(minutes=KB_REFRESH_INTERVAL_MINUTES):
+        reload_knowledge_base(source="auto-interval")
 
 
 def log_audit(
@@ -339,7 +377,19 @@ def health() -> dict[str, Any]:
         "activeModel": AI_ACTIVE_MODEL_VERSION,
         "stagingModel": AI_STAGING_MODEL_VERSION,
         "rolloutPercent": AI_ROLLOUT_PERCENT,
+        "kb": {
+            "lastReloadAt": KB_STATE.get("lastReloadAt"),
+            "refreshIntervalMinutes": KB_REFRESH_INTERVAL_MINUTES,
+            "itemCount": KB_STATE.get("itemCount", len(DEFAULT_MENU_KB)),
+        },
     }
+
+
+@app.post("/api/ai/kb/reload")
+@metric_guard("kb_reload")
+def kb_reload() -> dict[str, Any]:
+    payload = reload_knowledge_base(source="manual-api")
+    return {"success": True, **payload}
 
 
 @app.get("/api/ai/forecast/revenue")
@@ -419,7 +469,8 @@ def forecast_staffing(branchId: str) -> dict[str, Any]:
 @app.get("/api/ai/recommend")
 @metric_guard("recommend")
 def recommend(branchId: str, limit: int = 5, customerId: str | None = None) -> dict[str, Any]:
-    safe_limit = max(1, min(limit, 10))
+    branchId = normalize_branch_id(branchId)
+    safe_limit = normalize_limit(limit)
     items = get_popular_items(branchId, safe_limit)
     strategy = "user-history" if customerId else "popularity"
     log_audit("/api/ai/recommend", "recommend", True, branchId, metadata={"limit": safe_limit, "strategy": strategy})
@@ -436,7 +487,8 @@ def recommend(branchId: str, limit: int = 5, customerId: str | None = None) -> d
 @app.post("/api/ai/recommend")
 @metric_guard("recommend_post")
 def recommend_post(payload: RecommendationPayload) -> dict[str, Any]:
-    safe_limit = max(1, min(payload.limit, 10))
+    payload.branchId = normalize_branch_id(payload.branchId)
+    safe_limit = normalize_limit(payload.limit)
     cooccurrence_items = get_cooccurrence_items(payload.branchId, payload.cartItemIds, safe_limit)
     strategy = "item-based-cf" if cooccurrence_items else "popularity"
     items = cooccurrence_items if cooccurrence_items else get_popular_items(payload.branchId, safe_limit)
@@ -456,7 +508,8 @@ def recommend_post(payload: RecommendationPayload) -> dict[str, Any]:
 @app.get("/api/ai/recommend/popular")
 @metric_guard("recommend_popular")
 def recommend_popular(branchId: str, limit: int = 5) -> dict[str, Any]:
-    safe_limit = max(1, min(limit, 10))
+    branchId = normalize_branch_id(branchId)
+    safe_limit = normalize_limit(limit)
     items = get_popular_items(branchId, safe_limit)
     log_audit("/api/ai/recommend/popular", "recommend", True, branchId, metadata={"limit": safe_limit})
     return {"branchId": branchId, "items": items, "strategy": "popularity"}
@@ -472,6 +525,7 @@ def recommend_feedback(payload: RecommendationFeedback) -> dict[str, Any]:
 @app.get("/api/ai/anomalies")
 @metric_guard("anomalies")
 def anomalies(branchId: str, severity: str | None = None) -> dict[str, Any]:
+    branchId = normalize_branch_id(branchId)
     db_items = load_anomalies_from_db(branchId, severity)
     if db_items:
         return {"branchId": branchId, "items": db_items}
@@ -500,6 +554,7 @@ def resolve_anomaly(anomaly_id: str, payload: ResolveAnomalyPayload) -> dict[str
 @app.get("/api/ai/anomalies/summary")
 @metric_guard("anomaly_summary")
 def anomalies_summary(branchId: str) -> dict[str, Any]:
+    branchId = normalize_branch_id(branchId)
     items = anomalies(branchId).get("items", [])
     resolved = sum(1 for a in items if a.get("isResolved"))
     log_audit("/api/ai/anomalies/summary", "summary", True, branchId)
@@ -509,6 +564,7 @@ def anomalies_summary(branchId: str) -> dict[str, Any]:
 @app.get("/api/ai/sentiment/summary")
 @metric_guard("sentiment_summary")
 def sentiment_summary(branchId: str) -> dict[str, Any]:
+    branchId = normalize_branch_id(branchId)
     if REPORT_DATABASE_URL:
         try:
             rows = execute_sql(
@@ -536,6 +592,7 @@ def sentiment_summary(branchId: str) -> dict[str, Any]:
 @app.get("/api/ai/sentiment/trend")
 @metric_guard("sentiment_trend")
 def sentiment_trend(branchId: str, days: int = 7) -> dict[str, Any]:
+    branchId = normalize_branch_id(branchId)
     today = datetime.now(timezone.utc).date()
     points = []
     for i in range(max(1, min(days, 30))):
@@ -548,6 +605,7 @@ def sentiment_trend(branchId: str, days: int = 7) -> dict[str, Any]:
 @app.post("/api/ai/sentiment/analyze")
 @metric_guard("sentiment_analyze")
 def sentiment_analyze(payload: SentimentAnalyzePayload) -> dict[str, Any]:
+    payload.branchId = normalize_branch_id(payload.branchId)
     label, confidence, scores = classify_sentiment(payload.text)
     log_audit("/api/ai/sentiment/analyze", "analyze", True, payload.branchId, metadata={"label": label})
     return {
@@ -563,6 +621,9 @@ def sentiment_analyze(payload: SentimentAnalyzePayload) -> dict[str, Any]:
 @metric_guard("chat")
 def ai_chat(payload: ChatPayload) -> dict[str, Any]:
     start = time.perf_counter()
+    ensure_kb_fresh()
+    if payload.branchId is not None:
+        payload.branchId = normalize_branch_id(payload.branchId)
     question = str(payload.message or payload.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="message/question is required")
