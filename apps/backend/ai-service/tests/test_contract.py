@@ -116,3 +116,23 @@ def test_sentiment_issues_top_contract():
     payload = response.json()
     assert payload.get('branchId') == 'branch-e2e'
     assert isinstance(payload.get('issues'), list)
+
+
+def test_anomaly_detect_contract():
+    response = client.post(
+        '/api/ai/anomalies/detect',
+        json={
+            'branchId': 'branch-e2e',
+            'type': 'ORDER_QTY',
+            'value': 120,
+            'baselineMean': 20,
+            'baselineStd': 10,
+            'referenceId': 'order-1',
+            'referenceType': 'ORDER',
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get('branchId') == 'branch-e2e'
+    assert payload.get('severity') in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+    assert 'zScore' in payload

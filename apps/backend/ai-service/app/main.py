@@ -61,6 +61,17 @@ class ResolveAnomalyPayload(BaseModel):
     note: str | None = None
 
 
+class AnomalyDetectPayload(BaseModel):
+    branchId: str
+    type: str = "ORDER_QTY"
+    value: float
+    baselineMean: float
+    baselineStd: float = 0
+    referenceId: str | None = None
+    referenceType: str | None = None
+    description: str | None = None
+
+
 class SentimentAnalyzePayload(BaseModel):
     branchId: str
     text: str
@@ -440,6 +451,17 @@ def load_anomalies_from_db(branch_id: str, severity: str | None) -> list[dict[st
         return []
 
 
+def calculate_anomaly_severity(z_score: float) -> str:
+    abs_score = abs(z_score)
+    if abs_score >= 4:
+        return "CRITICAL"
+    if abs_score >= 3:
+        return "HIGH"
+    if abs_score >= 2:
+        return "MEDIUM"
+    return "LOW"
+
+
 @app.get("/metrics")
 def metrics():
     return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -750,6 +772,74 @@ def anomalies(branchId: str, severity: str | None = None) -> dict[str, Any]:
         filtered = [a for a in filtered if a["severity"] == severity.upper()]
     log_audit("/api/ai/anomalies", "list", True, branchId)
     return {"branchId": branchId, "items": filtered}
+
+
+@app.post("/api/ai/anomalies/detect")
+@metric_guard("anomaly_detect")
+def detect_anomaly(payload: AnomalyDetectPayload) -> dict[str, Any]:
+    payload.branchId = normalize_branch_id(payload.branchId)
+    if payload.baselineStd < 0:
+        raise HTTPException(status_code=400, detail="baselineStd must be >= 0")
+
+    z_score = 0.0 if payload.baselineStd == 0 else (payload.value - payload.baselineMean) / payload.baselineStd
+    severity = calculate_anomaly_severity(z_score)
+    score = min(1.0, abs(z_score) / 5.0)
+    description = (
+        payload.description
+        or f"{payload.type}: value={payload.value:.2f}, mean={payload.baselineMean:.2f}, std={payload.baselineStd:.2f}, z={z_score:.2f}"
+    )
+    anomaly_id = f"anomaly-{uuid4()}"
+    detected_at = datetime.now(timezone.utc).isoformat()
+
+    created: dict[str, Any] = {
+        "id": anomaly_id,
+        "branchId": payload.branchId,
+        "alertType": payload.type,
+        "severity": severity,
+        "description": description,
+        "anomalyScore": round(score, 4),
+        "referenceId": payload.referenceId,
+        "referenceType": payload.referenceType,
+        "isResolved": False,
+        "detectedAt": detected_at,
+    }
+
+    persisted = False
+    if REPORT_DATABASE_URL:
+        try:
+            with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO anomaly_alert (id, "branchId", "alertType", severity, "referenceId", "referenceType", description, "anomalyScore", "isResolved", "detectedAt")
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, false, NOW())
+                        """,
+                        (
+                            anomaly_id,
+                            payload.branchId,
+                            payload.type,
+                            severity,
+                            payload.referenceId,
+                            payload.referenceType,
+                            description,
+                            score,
+                        ),
+                    )
+            persisted = True
+        except Exception:
+            persisted = False
+
+    if not persisted:
+        ANOMALIES.append(created)
+
+    log_audit(
+        "/api/ai/anomalies/detect",
+        "detect",
+        True,
+        payload.branchId,
+        metadata={"severity": severity, "zScore": round(z_score, 4), "persisted": persisted},
+    )
+    return {**created, "zScore": round(z_score, 4), "persisted": persisted}
 
 
 @app.put("/api/ai/anomalies/{anomaly_id}/resolve")
