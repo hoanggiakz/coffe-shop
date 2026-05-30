@@ -11,6 +11,7 @@ public interface UserRepository extends JpaRepository<User, String> {
     Optional<User> findByEmailAndRole(String email, User.Role role);
     Optional<User> findByPhoneAndRole(String phone, User.Role role);
     Optional<User> findByEmployeeCode(String employeeCode);
+    Optional<User> findByEmployeeCodeAndBranchId(String employeeCode, String branchId);
     Optional<User> findByPersonalQrCode(String personalQrCode);
     boolean existsByEmployeeCode(String employeeCode);
     boolean existsByPersonalQrCode(String personalQrCode);
