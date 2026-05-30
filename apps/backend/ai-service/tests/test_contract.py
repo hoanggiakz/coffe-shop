@@ -136,6 +136,7 @@ def test_anomaly_detect_contract():
     assert payload.get('branchId') == 'branch-e2e'
     assert payload.get('severity') in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
     assert 'zScore' in payload
+    assert 'notified' in payload
 
 
 def test_report_chat_admin_contract():

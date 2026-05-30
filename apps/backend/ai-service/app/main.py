@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import time
+from urllib import request as urlrequest
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Any
@@ -31,6 +32,7 @@ AI_STAGING_MODEL_VERSION = os.getenv("AI_STAGING_MODEL_VERSION", "baseline_v2_ca
 KB_REFRESH_INTERVAL_MINUTES = int(os.getenv("AI_KB_REFRESH_INTERVAL_MINUTES", "30"))
 AI_FORECAST_CRON_ENABLED = os.getenv("AI_FORECAST_CRON_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
 AI_FORECAST_CRON_HOUR_UTC = int(os.getenv("AI_FORECAST_CRON_HOUR_UTC", "19"))  # 02:00 ICT ~= 19:00 UTC (previous day)
+CHAT_SERVICE_API_URL = os.getenv("CHAT_SERVICE_API_URL", "http://chat-service:3007/api/chats").strip().rstrip("/")
 
 DEFAULT_MENU_KB = [
     {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
@@ -499,6 +501,17 @@ def calculate_anomaly_severity(z_score: float) -> str:
     return "LOW"
 
 
+def emit_staff_notification(payload: dict[str, Any]) -> bool:
+    target = f"{CHAT_SERVICE_API_URL}/staff-notifications"
+    try:
+        body = json_dumps(payload).encode("utf-8")
+        req = urlrequest.Request(target, data=body, method="POST", headers={"Content-Type": "application/json"})
+        with urlrequest.urlopen(req, timeout=2.0) as response:  # nosec B310
+            return int(getattr(response, "status", 500)) < 300
+    except Exception:
+        return False
+
+
 @app.get("/metrics")
 def metrics():
     return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -842,6 +855,7 @@ def detect_anomaly(payload: AnomalyDetectPayload) -> dict[str, Any]:
     }
 
     persisted = False
+    notified = False
     if REPORT_DATABASE_URL:
         try:
             with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
@@ -869,14 +883,32 @@ def detect_anomaly(payload: AnomalyDetectPayload) -> dict[str, Any]:
     if not persisted:
         ANOMALIES.append(created)
 
+    if severity in {"HIGH", "CRITICAL"}:
+        notified = emit_staff_notification(
+            {
+                "type": "ANOMALY_ALERT",
+                "title": f"Canh bao bat thuong {severity}",
+                "message": description,
+                "branchId": payload.branchId,
+                "metadata": {
+                    "anomalyId": anomaly_id,
+                    "severity": severity,
+                    "anomalyScore": score,
+                    "zScore": round(z_score, 4),
+                    "referenceId": payload.referenceId,
+                    "referenceType": payload.referenceType,
+                },
+            }
+        )
+
     log_audit(
         "/api/ai/anomalies/detect",
         "detect",
         True,
         payload.branchId,
-        metadata={"severity": severity, "zScore": round(z_score, 4), "persisted": persisted},
+        metadata={"severity": severity, "zScore": round(z_score, 4), "persisted": persisted, "notified": notified},
     )
-    return {**created, "zScore": round(z_score, 4), "persisted": persisted}
+    return {**created, "zScore": round(z_score, 4), "persisted": persisted, "notified": notified}
 
 
 @app.put("/api/ai/anomalies/{anomaly_id}/resolve")
