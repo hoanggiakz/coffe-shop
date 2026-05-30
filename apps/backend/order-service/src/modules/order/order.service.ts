@@ -222,6 +222,33 @@ export class OrderService {
       orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
     });
 
+    if (!branchItems.length) {
+      const fallbackItems = await this.prisma.menuItem.findMany({
+        where: {
+          available: true,
+          ingredients: { some: {} },
+        },
+        include: {
+          categoryRef: true,
+          optionGroups: {
+            include: {
+              group: {
+                include: {
+                  values: {
+                    where: { isActive: true },
+                    orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+                  },
+                },
+              },
+            },
+            orderBy: { sortOrder: 'asc' },
+          },
+        },
+        orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      });
+      return fallbackItems.map((item) => this.mapMenuItemForCustomer(item));
+    }
+
     return branchItems.map((entry) => this.mapMenuItemForCustomer(entry.menuItem, entry));
   }
 
@@ -265,9 +292,45 @@ export class OrderService {
       orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
     });
 
-    const flatItems = entries
+    let flatItems = entries
       .map((entry) => this.mapBranchMenuItemResponse(entry.menuItem, entry))
       .filter(Boolean) as any[];
+
+    if (!flatItems.length) {
+      const fallbackItems = await this.prisma.menuItem.findMany({
+        where: { available: true, ingredients: { some: {} } },
+        include: {
+          categoryRef: true,
+          optionGroups: {
+            include: {
+              group: {
+                include: {
+                  values: {
+                    where: { isActive: true },
+                    orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+                  },
+                },
+              },
+            },
+            orderBy: [{ sortOrder: 'asc' }],
+          },
+        },
+        orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      });
+
+      flatItems = fallbackItems
+        .map((item) =>
+          this.mapBranchMenuItemResponse(item, {
+            id: item.id,
+            branchId: resolvedBranchId,
+            isAvailable: true,
+            price: item.price,
+            displayOrder: 0,
+            customOptions: null,
+          }),
+        )
+        .filter(Boolean) as any[];
+    }
 
     const categoryMap = new Map<string, { id: string; name: string; emoji: string; sortOrder: number; items: any[] }>();
     flatItems.forEach((item, index) => {
