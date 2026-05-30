@@ -1080,7 +1080,7 @@ export default function CustomerMenu() {
       setChatConnecting(false)
       if (staffTypingTimerRef.current) clearTimeout(staffTypingTimerRef.current)
     }
-  }, [chatOpen, tableId, qrBranchId, chatCustomerName, chatCustomerPhone])
+  }, [chatOpen, tableId, qrBranchId])
 
   useEffect(() => {
     flushPendingMessages()

@@ -182,6 +182,10 @@ export class ProxyController {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
       return;
     }
+    if (method === 'GET' && /^\/api\/branches\/[^/]+\/chat\/sessions(\/|$)/.test(path)) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
     if (method === 'GET' && path.startsWith('/api/branches')) {
       this.requireRoles(req, ['ADMIN', 'MANAGER'])
       return
