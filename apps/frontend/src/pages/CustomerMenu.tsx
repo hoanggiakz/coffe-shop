@@ -39,6 +39,7 @@ interface MenuItem {
 type CartSelections = Record<string, string | string[]>
 
 interface CartItem {
+  branchMenuItemId?: string
   menuItemId: string
   quantity: number
   note: string
@@ -215,6 +216,15 @@ interface PendingChatMessage {
   createdAt: string
 }
 
+interface BranchCartValidateChange {
+  branchMenuItemId?: string | null
+  menuItemId?: string | null
+  type: 'PRICE_CHANGED' | 'UNAVAILABLE' | string
+  oldPrice?: number
+  newPrice?: number
+  message?: string
+}
+
 interface MenuRecommendation extends MenuItem {
   recommendationReason?: string
   recommendationScore?: number
@@ -279,6 +289,7 @@ function buildCartLineKey(menuItemId: string, selections: CartSelections, note?:
 function parseCartLineEntry(legacyKey: string, entry: any): CartItem | null {
   if (!entry || typeof entry !== 'object') return null
   const menuItemId = String(entry.menuItemId || legacyKey || '').trim()
+  const branchMenuItemId = String(entry.branchMenuItemId || '').trim()
   if (!menuItemId) return null
 
   const quantity = Math.max(0, Number(entry.quantity || 0))
@@ -290,6 +301,7 @@ function parseCartLineEntry(legacyKey: string, entry: any): CartItem | null {
       : {}
 
   return {
+    ...(branchMenuItemId ? { branchMenuItemId } : {}),
     menuItemId,
     quantity,
     note: String(entry.note || ''),
@@ -467,6 +479,7 @@ export default function CustomerMenu() {
   const [chatSessionId, setChatSessionId] = useState('')
   const [staffTyping, setStaffTyping] = useState(false)
   const [cartDrawerOpen, setCartDrawerOpen] = useState(false)
+  const [pendingLineRemoveConfirm, setPendingLineRemoveConfirm] = useState<Record<string, boolean>>({})
 
   const [customerToken, setCustomerToken] = useState('')
   const [customerSession, setCustomerSession] = useState<CustomerSession | null>(null)
@@ -493,6 +506,7 @@ export default function CustomerMenu() {
   const staffTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingChatFlushRef = useRef(false)
   const customerTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lineRemoveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   useEffect(() => {
     let ignore = false
@@ -1107,6 +1121,33 @@ export default function CustomerMenu() {
   }, [chatOpen, tableId, qrBranchId])
 
   useEffect(() => {
+    if (!tableId) return
+    const socket = getSocket()
+    if (!socket.connected) {
+      socket.connect()
+    }
+
+    const roomId = `table:${tableId}`
+    socket.emit('join-room', { room: roomId })
+
+    const onCartUpdated = (payload: {
+      tableId?: string
+      cart?: Record<string, CartItem>
+      updatedBy?: string
+    }) => {
+      if (String(payload?.tableId || '').trim() !== tableId) return
+      if (!payload?.cart || typeof payload.cart !== 'object') return
+      setCart(restoreCartFromStorage(payload.cart))
+      toast('Giỏ hàng vừa được cập nhật bởi nhân viên')
+    }
+
+    socket.on('cart-updated', onCartUpdated)
+    return () => {
+      socket.off('cart-updated', onCartUpdated)
+    }
+  }, [tableId])
+
+  useEffect(() => {
     flushPendingMessages()
   }, [chatSessionId, chatOpen])
 
@@ -1245,6 +1286,7 @@ export default function CustomerMenu() {
       return {
         ...prev,
         [lineKey]: {
+          branchMenuItemId: String(menuMap.get(menuItemId)?.branchMenuItemId || ''),
           menuItemId,
           quantity: Number(current?.quantity || 0) + 1,
           note: String(draft.note || ''),
@@ -1293,6 +1335,90 @@ export default function CustomerMenu() {
       return next
     })
   }
+
+  const scheduleLineRemoveConfirmation = (lineKey: string) => {
+    if (lineRemoveTimersRef.current[lineKey]) {
+      clearTimeout(lineRemoveTimersRef.current[lineKey])
+    }
+    setPendingLineRemoveConfirm((prev) => ({ ...prev, [lineKey]: true }))
+    lineRemoveTimersRef.current[lineKey] = setTimeout(() => {
+      setPendingLineRemoveConfirm((prev) => {
+        const next = { ...prev }
+        delete next[lineKey]
+        return next
+      })
+      delete lineRemoveTimersRef.current[lineKey]
+    }, 2000)
+  }
+
+  const validateCartWhenDrawerOpen = async () => {
+    if (!cartDrawerOpen || !qrBranchId || cartLines.length === 0) return
+    try {
+      const payloadItems = cartLines
+        .map((line) => {
+          const item = menuMap.get(line.menuItemId)
+          const unitPrice = item ? Number(item.price + getCustomizationDelta(item, line.selections)) : 0
+          return {
+            branchMenuItemId: String(line.branchMenuItemId || item?.branchMenuItemId || '').trim() || undefined,
+            menuItemId: line.menuItemId,
+            quantity: line.quantity,
+            unitPrice,
+          }
+        })
+        .filter((entry) => entry.menuItemId || entry.branchMenuItemId)
+
+      if (!payloadItems.length) return
+      const { data } = await api.post(`/branches/${encodeURIComponent(qrBranchId)}/cart/validate`, {
+        items: payloadItems,
+      })
+      const changes: BranchCartValidateChange[] = Array.isArray(data?.changes) ? data.changes : []
+      if (!changes.length) return
+
+      const unavailableMenuIds = new Set(
+        changes
+          .filter((change) => change.type === 'UNAVAILABLE')
+          .map((change) => String(change.menuItemId || '').trim())
+          .filter(Boolean),
+      )
+
+      if (unavailableMenuIds.size > 0) {
+        setCart((prev) =>
+          Object.fromEntries(
+            Object.entries(prev).filter(([, line]) => !unavailableMenuIds.has(String(line.menuItemId || '').trim())),
+          ),
+        )
+      }
+
+      const hasPriceChange = changes.some((change) => change.type === 'PRICE_CHANGED')
+      changes.forEach((change) => {
+        if (change?.message) {
+          toast(change.message)
+        }
+      })
+
+      if (hasPriceChange) {
+        const request = qrBranchId
+          ? api.get(`/orders/branches/${encodeURIComponent(qrBranchId)}/menu`, {
+              params: { tableId: tableId || undefined },
+            })
+          : api.get('/orders/menu', {
+              params: {
+                tableId,
+                branchId: qrBranchId || undefined,
+              },
+            })
+        const { data: refreshedMenu } = await request
+        setMenuItems(normalizeMenuPayload(refreshedMenu))
+      }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Không thể kiểm tra lại giỏ hàng')
+    }
+  }
+
+  useEffect(() => {
+    void validateCartWhenDrawerOpen()
+    // validate only when opening cart drawer or when source cart/menu changes while drawer is open
+  }, [cartDrawerOpen, qrBranchId, tableId, cartLines.length])
 
   const decrease = (menuItemId: string) => {
     const draft = getDraftForMenuItem(menuItemId)
@@ -2171,11 +2297,29 @@ export default function CustomerMenu() {
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => decreaseLineQuantity(lineKey)}
-                          disabled={entry.quantity <= 1}
+                          onClick={() => {
+                            if (entry.quantity <= 1) {
+                              if (pendingLineRemoveConfirm[lineKey]) {
+                                removeCartLine(lineKey)
+                                setPendingLineRemoveConfirm((prev) => {
+                                  const next = { ...prev }
+                                  delete next[lineKey]
+                                  return next
+                                })
+                                if (lineRemoveTimersRef.current[lineKey]) {
+                                  clearTimeout(lineRemoveTimersRef.current[lineKey])
+                                  delete lineRemoveTimersRef.current[lineKey]
+                                }
+                                return
+                              }
+                              scheduleLineRemoveConfirmation(lineKey)
+                              return
+                            }
+                            decreaseLineQuantity(lineKey)
+                          }}
                           className="inline-flex h-8 w-8 items-center justify-center rounded border border-sky-200 disabled:opacity-50"
                         >
-                          -
+                          {entry.quantity <= 1 && pendingLineRemoveConfirm[lineKey] ? 'X' : '-'}
                         </button>
                         <span className="min-w-6 text-center text-sm font-semibold">{entry.quantity}</span>
                         <button

@@ -367,6 +367,106 @@ export class OrderService {
     };
   }
 
+  async validateBranchCart(
+    branchId: string,
+    items: Array<{ branchMenuItemId?: string; menuItemId?: string; quantity?: number; unitPrice?: number }> = [],
+  ) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) {
+      throw new BadRequestException('branchId khong hop le');
+    }
+
+    const normalizedItems = (Array.isArray(items) ? items : [])
+      .map((entry) => ({
+        branchMenuItemId: String(entry?.branchMenuItemId || '').trim(),
+        menuItemId: String(entry?.menuItemId || '').trim(),
+        unitPrice: Number(entry?.unitPrice || 0),
+      }))
+      .filter((entry) => entry.branchMenuItemId || entry.menuItemId);
+
+    if (!normalizedItems.length) {
+      return { valid: true, changes: [] };
+    }
+
+    const requestedBranchMenuItemIds = Array.from(
+      new Set(normalizedItems.map((entry) => entry.branchMenuItemId).filter(Boolean)),
+    );
+    const requestedMenuItemIds = Array.from(
+      new Set(normalizedItems.map((entry) => entry.menuItemId).filter(Boolean)),
+    );
+
+    const branchEntries = await this.prisma.branchMenuItem.findMany({
+      where: {
+        branchId: normalizedBranchId,
+        OR: [
+          ...(requestedBranchMenuItemIds.length ? [{ id: { in: requestedBranchMenuItemIds } }] : []),
+          ...(requestedMenuItemIds.length ? [{ menuItemId: { in: requestedMenuItemIds } }] : []),
+        ],
+      },
+      select: {
+        id: true,
+        menuItemId: true,
+        price: true,
+        isAvailable: true,
+        menuItem: {
+          select: {
+            available: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    const byBranchMenuId = new Map(branchEntries.map((entry) => [entry.id, entry]));
+    const byMenuItemId = new Map(branchEntries.map((entry) => [entry.menuItemId, entry]));
+    const changes: Array<Record<string, any>> = [];
+
+    for (const item of normalizedItems) {
+      const matched = item.branchMenuItemId
+        ? byBranchMenuId.get(item.branchMenuItemId)
+        : byMenuItemId.get(item.menuItemId);
+
+      if (!matched) {
+        changes.push({
+          branchMenuItemId: item.branchMenuItemId || null,
+          menuItemId: item.menuItemId || null,
+          type: 'UNAVAILABLE',
+          message: 'Mon khong con ton tai trong menu chi nhanh nay',
+        });
+        continue;
+      }
+
+      const isAvailable = Boolean(matched.isAvailable && matched.menuItem?.available);
+      if (!isAvailable) {
+        changes.push({
+          branchMenuItemId: matched.id,
+          menuItemId: matched.menuItemId,
+          type: 'UNAVAILABLE',
+          message: `${matched.menuItem?.name || 'Mon'} hien tam ngung ban`,
+        });
+        continue;
+      }
+
+      const nextUnitPrice = Number(matched.price || 0);
+      const previousUnitPrice = Number(item.unitPrice || 0);
+      if (previousUnitPrice > 0 && previousUnitPrice !== nextUnitPrice) {
+        changes.push({
+          branchMenuItemId: matched.id,
+          menuItemId: matched.menuItemId,
+          type: 'PRICE_CHANGED',
+          oldPrice: previousUnitPrice,
+          newPrice: nextUnitPrice,
+          message: `Gia ${matched.menuItem?.name || 'mon'} da thay doi`,
+        });
+      }
+    }
+
+    return {
+      valid: changes.every((entry) => entry.type !== 'UNAVAILABLE'),
+      changes,
+    };
+  }
+
   async activateBranchMenuItem(
     branchId: string,
     itemId: string,
