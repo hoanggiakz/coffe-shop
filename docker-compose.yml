@@ -106,6 +106,7 @@ services:
       ORDER_SERVICE_URL: http://order-service:3001
       INVENTORY_SERVICE_URL: http://inventory-service:3005
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-token}
+      SPRING_DATA_REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
       GOOGLE_OAUTH_CALLBACK_URL: ${GOOGLE_OAUTH_CALLBACK_URL:-https://app.httpscoffee-demo.buzz/api/auth/google/callback}

@@ -14,4 +14,13 @@ public class PointsAccrualRequest {
 
     @Min(0)
     private long amount;
+
+    @Min(0)
+    private Long subtotalAmount;
+
+    @Min(0)
+    private Long discountAmount;
+
+    @Min(0)
+    private Long loyaltyRedeemAmount;
 }

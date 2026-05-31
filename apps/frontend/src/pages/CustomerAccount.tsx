@@ -217,7 +217,10 @@ export default function CustomerAccount() {
               <p className="text-lg font-bold text-slate-900">Tài khoản của tôi</p>
               <p className="text-sm text-slate-600">{profile?.name || session.name}</p>
             </div>
-            <Link to="/menu" className="rounded-xl border border-amber-200 px-3 py-2 text-sm text-amber-700">Về menu</Link>
+            <div className="flex gap-2">
+              <Link to="/menu/rewards" className="rounded-xl border border-emerald-200 px-3 py-2 text-sm text-emerald-700">Rewards</Link>
+              <Link to="/menu" className="rounded-xl border border-amber-200 px-3 py-2 text-sm text-amber-700">Về menu</Link>
+            </div>
           </div>
           <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
             <div className="rounded-xl bg-amber-50 p-2"><p className="font-semibold text-amber-700">{profile?.loyaltyPoints ?? 0}</p><p>Điểm</p></div>

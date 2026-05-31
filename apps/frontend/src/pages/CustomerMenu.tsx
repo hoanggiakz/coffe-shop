@@ -2248,9 +2248,12 @@ export default function CustomerMenu() {
             </div>
 
             {!customerSession && (
-              <p className="mt-2 text-sm text-gray-500">
-                Đăng nhập để lưu lịch sử đơn hàng, tích điểm và nhận ưu đãi thành viên.
-              </p>
+              <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                <p className="font-semibold">Đăng nhập để tích điểm cho đơn hiện tại</p>
+                <p className="mt-1 text-amber-800">
+                  Ước tính đơn này có thể nhận khoảng {Math.floor(payableCartTotal / 10000)} điểm (hạng BRONZE).
+                </p>
+              </div>
             )}
 
             {customerSession && (
@@ -2273,12 +2276,20 @@ export default function CustomerMenu() {
                   </div>
                 </div>
                 <div>
-                  <Link
-                    to="/menu/account"
-                    className="inline-flex rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700"
-                  >
-                    Mở trang tài khoản & rewards
-                  </Link>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      to="/menu/account"
+                      className="inline-flex rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700"
+                    >
+                      Trang tài khoản
+                    </Link>
+                    <Link
+                      to="/menu/rewards"
+                      className="inline-flex rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700"
+                    >
+                      Trang rewards
+                    </Link>
+                  </div>
                 </div>
                 {loadingCustomerData && <p className="text-xs text-gray-500">Dang tai du lieu thanh vien...</p>}
                 {!loadingCustomerData && customerOffers.length > 0 && (

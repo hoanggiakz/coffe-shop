@@ -2713,7 +2713,14 @@ export class OrderService {
     });
 
     if (order.status !== 'COMPLETED' && nextStatus === 'COMPLETED' && order.customerId) {
-      const points = await this.awardCustomerPoints(order.customerId, order.id, order.totalAmount);
+      const points = await this.awardCustomerPoints(
+        order.customerId,
+        order.id,
+        order.totalAmount,
+        Number((order as any).subtotalAmount || order.totalAmount || 0),
+        Number((order as any).discountAmount || 0),
+        0,
+      );
       if (points > 0) {
         await this.prisma.order.update({
           where: { id: order.id },
@@ -3232,7 +3239,14 @@ export class OrderService {
     }
   }
 
-  private async awardCustomerPoints(customerId: string, orderId: string, amount: number) {
+  private async awardCustomerPoints(
+    customerId: string,
+    orderId: string,
+    amount: number,
+    subtotalAmount: number,
+    discountAmount: number,
+    loyaltyRedeemAmount: number,
+  ) {
     try {
       const response = await this.fetchWithRetry(`${this.userServiceUrl}/api/users/customer/points/accrual`, {
         method: 'POST',
@@ -3243,6 +3257,9 @@ export class OrderService {
           customerId,
           orderId,
           amount,
+          subtotalAmount,
+          discountAmount,
+          loyaltyRedeemAmount,
         }),
       });
 

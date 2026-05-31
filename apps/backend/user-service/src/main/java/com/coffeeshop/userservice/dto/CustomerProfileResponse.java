@@ -30,10 +30,10 @@ public class CustomerProfileResponse {
             default -> "PLATINUM";
         };
         long nextMilestone = switch (tier) {
-            case "BRONZE", "STANDARD" -> 3_000_000L;
-            case "SILVER" -> 10_000_000L;
-            case "GOLD" -> 30_000_000L;
-            default -> 30_000_000L;
+            case "BRONZE", "STANDARD" -> 1_000_000L;
+            case "SILVER" -> 5_000_000L;
+            case "GOLD" -> 10_000_000L;
+            default -> 10_000_000L;
         };
         return new CustomerProfileResponse(
                 user.getId(),

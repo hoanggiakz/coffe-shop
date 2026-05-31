@@ -60,6 +60,7 @@ import com.coffeeshop.userservice.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -73,6 +74,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.TemporalAdjusters;
@@ -100,6 +102,9 @@ public class UserService {
     private static final long ACCESS_TOKEN_EXPIRES_SECONDS = 900L;
     private static final long REFRESH_TOKEN_EXPIRES_MILLIS = 7L * 24L * 60L * 60L * 1000L;
     private static final long RESET_TOKEN_EXPIRES_MILLIS = 15L * 60L * 1000L;
+    private static final String REDIS_KEY_PREFIX_OTP = "customer:otp:";
+    private static final String REDIS_KEY_PREFIX_OTP_RATE = "customer:otp:rate:";
+    private static final String REDIS_KEY_PREFIX_REFRESH = "customer:refresh:";
     private static final Set<User.Role> MANAGER_ROLES = Set.of(User.Role.ADMIN, User.Role.MANAGER);
     private static final Set<User.Role> BRANCH_MANAGER_ROLES = Set.of(User.Role.ADMIN, User.Role.MANAGER);
     private static final List<User.Role> STAFF_ROLES = List.of(
@@ -121,6 +126,7 @@ public class UserService {
     private final LoyaltyTransactionRepository loyaltyTransactionRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final StringRedisTemplate redisTemplate;
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -132,6 +138,8 @@ public class UserService {
 
     @Value("${app.inventory-service-url:http://inventory-service:3005}")
     private String inventoryServiceUrl;
+    @Value("${app.payment-service-url:http://payment-service:3004}")
+    private String paymentServiceUrl;
 
     @Value("${app.internal-service-token:dev-internal-token}")
     private String internalServiceToken;
@@ -279,8 +287,8 @@ public class UserService {
         String purpose = normalizeOtpPurpose(req.getPurpose());
         enforceOtpRateLimit(phone);
         String otp = String.format("%06d", ThreadLocalRandom.current().nextInt(0, 1_000_000));
-        long expiresAt = System.currentTimeMillis() + (OTP_EXPIRES_SECONDS * 1000);
-        otpStore.put(buildOtpStoreKey(phone, purpose), new OtpEntry(passwordEncoder.encode(otp), expiresAt, 0));
+        String storeKey = buildOtpStoreKey(phone, purpose);
+        saveOtpEntry(storeKey, new OtpEntry(passwordEncoder.encode(otp), OTP_MAX_ATTEMPTS, System.currentTimeMillis() + (OTP_EXPIRES_SECONDS * 1000)));
         String maskedPhone = phone.length() >= 7
                 ? phone.substring(0, 3) + "****" + phone.substring(phone.length() - 3)
                 : phone;
@@ -474,10 +482,22 @@ public class UserService {
         if (user.getRole() != User.Role.CUSTOMER) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "User khong phai khach hang");
         }
-        int pointsEarned = (int) Math.max(0L, req.getAmount() / 10000L);
+        long subtotal = Math.max(0L, req.getSubtotalAmount() == null ? req.getAmount() : req.getSubtotalAmount());
+        long discount = Math.max(0L, req.getDiscountAmount() == null ? 0L : req.getDiscountAmount());
+        long loyaltyRedeem = Math.max(0L, req.getLoyaltyRedeemAmount() == null ? 0L : req.getLoyaltyRedeemAmount());
+        if (subtotal > 0 && discount * 100L >= subtotal * 50L) {
+            return new PointsAccrualResponse(user.getId(), req.getOrderId(), 0, user.getLoyaltyPoints(), user.getMemberTier().name());
+        }
+        if (loyaltyRedeem > 0L) {
+            return new PointsAccrualResponse(user.getId(), req.getOrderId(), 0, user.getLoyaltyPoints(), user.getMemberTier().name());
+        }
+        long amount = Math.max(0L, req.getAmount());
+        int basePoints = (int) (amount / 10_000L);
+        double multiplier = loyaltyMultiplier(user.getMemberTier());
+        int pointsEarned = (int) Math.floor(basePoints * multiplier);
         long currentSpent = user.getTotalSpent() == null ? 0L : user.getTotalSpent();
         int currentPoints = user.getLoyaltyPoints() == null ? 0 : user.getLoyaltyPoints();
-        long newTotalSpent = currentSpent + Math.max(0L, req.getAmount());
+        long newTotalSpent = currentSpent + amount;
         int newTotalPoints = currentPoints + pointsEarned;
         user.setTotalSpent(newTotalSpent);
         user.setLoyaltyPoints(newTotalPoints);
@@ -496,9 +516,9 @@ public class UserService {
 
     public RefreshTokenResponse refreshCustomerToken(RefreshTokenRequest req) {
         String token = String.valueOf(req.getRefreshToken() == null ? "" : req.getRefreshToken()).trim();
-        RefreshEntry entry = refreshTokenStore.get(token);
+        RefreshEntry entry = readRefreshToken(token);
         if (entry == null || System.currentTimeMillis() > entry.expiresAtMillis()) {
-            refreshTokenStore.remove(token);
+            removeRefreshToken(token);
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token khong hop le hoac het han");
         }
         User user = userRepository.findById(entry.userId())
@@ -506,7 +526,7 @@ public class UserService {
         if (user.getRole() != User.Role.CUSTOMER) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chi danh cho tai khoan khach hang");
         }
-        refreshTokenStore.remove(token);
+        removeRefreshToken(token);
         String newRefreshToken = issueRefreshToken(user.getId());
         String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
         return new RefreshTokenResponse(accessToken, newRefreshToken, ACCESS_TOKEN_EXPIRES_SECONDS);
@@ -613,6 +633,19 @@ public class UserService {
 
     public LoyaltyRedeemResponse redeemLoyaltyPoints(String token, LoyaltyRedeemRequest req) {
         User user = requireCustomerFromToken(token);
+        Map<String, Object> orderInfo = loadOrderForRedeemValidation(req.getOrderId());
+        String orderStatus = String.valueOf(orderInfo.getOrDefault("status", "")).trim().toUpperCase(Locale.ROOT);
+        if (!"PENDING".equals(orderStatus)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Chi cho phep doi diem khi don dang PENDING");
+        }
+        String orderCustomerId = String.valueOf(orderInfo.getOrDefault("customerId", "")).trim();
+        if (!user.getId().equals(orderCustomerId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Khong the doi diem cho don cua tai khoan khac");
+        }
+        if (isOrderPaid(req.getOrderId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Don da thanh toan, khong the doi diem");
+        }
+
         int points = req.getPointsToRedeem() == null ? 0 : req.getPointsToRedeem();
         if (points <= 0 || points % 100 != 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pointsToRedeem phai la boi so cua 100");
@@ -620,6 +653,12 @@ public class UserService {
         int currentPoints = user.getLoyaltyPoints() == null ? 0 : user.getLoyaltyPoints();
         if (points > currentPoints) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khong du diem de doi");
+        }
+        long discountAmount = points * 100L;
+        long orderTotal = Math.max(0L, parseLongValue(orderInfo.get("totalAmount")));
+        long maxDiscount = Math.round(orderTotal * 0.30d);
+        if (discountAmount > maxDiscount) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Diem doi vuot qua 30% gia tri don hang");
         }
         int remaining = currentPoints - points;
         user.setLoyaltyPoints(remaining);
@@ -632,7 +671,6 @@ public class UserService {
                 .balanceAfter(remaining)
                 .description("Doi diem cho don " + req.getOrderId())
                 .build());
-        long discountAmount = points * 100L;
         return new LoyaltyRedeemResponse(true, discountAmount, points, remaining, "Da ap dung giam gia tu loyalty points");
     }
 
@@ -1660,16 +1698,29 @@ public class UserService {
     }
 
     private User.MemberTier resolveTier(long totalSpent, int loyaltyPoints) {
-        if (totalSpent >= 30_000_000L || loyaltyPoints >= 3000) {
+        if (totalSpent >= 10_000_000L || loyaltyPoints >= 3000) {
             return User.MemberTier.PLATINUM;
         }
-        if (totalSpent >= 10_000_000L || loyaltyPoints >= 1000) {
+        if (totalSpent >= 5_000_000L || loyaltyPoints >= 1000) {
             return User.MemberTier.GOLD;
         }
-        if (totalSpent >= 3_000_000L || loyaltyPoints >= 300) {
+        if (totalSpent >= 1_000_000L || loyaltyPoints >= 300) {
             return User.MemberTier.SILVER;
         }
         return User.MemberTier.BRONZE;
+    }
+
+    private double loyaltyMultiplier(User.MemberTier tier) {
+        if (tier == null || tier == User.MemberTier.BRONZE || tier == User.MemberTier.STANDARD) {
+            return 1.0d;
+        }
+        if (tier == User.MemberTier.SILVER) {
+            return 1.2d;
+        }
+        if (tier == User.MemberTier.GOLD) {
+            return 1.5d;
+        }
+        return 2.0d;
     }
 
     private boolean isStaffRole(User.Role role) {
@@ -1854,29 +1905,44 @@ public class UserService {
     }
 
     private void verifyAndConsumeOtp(String phone, String purpose, String otp) {
-        OtpEntry entry = otpStore.get(buildOtpStoreKey(phone, purpose));
+        String storeKey = buildOtpStoreKey(phone, purpose);
+        OtpEntry entry = readOtpEntry(storeKey);
         if (entry == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP khong ton tai hoac da het han");
         }
-        if (System.currentTimeMillis() > entry.expiresAtMillis) {
-            otpStore.remove(buildOtpStoreKey(phone, purpose));
+        if (System.currentTimeMillis() > entry.expiresAtMillis()) {
+            removeOtpEntry(storeKey);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP da het han");
         }
-        if (entry.attempts >= OTP_MAX_ATTEMPTS) {
-            otpStore.remove(buildOtpStoreKey(phone, purpose));
+        if (entry.attemptsRemaining() <= 0) {
+            removeOtpEntry(storeKey);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP da bi khoa do nhap sai qua so lan cho phep");
         }
-        if (!passwordEncoder.matches(String.valueOf(otp == null ? "" : otp).trim(), entry.otpHash)) {
-            otpStore.put(
-                    buildOtpStoreKey(phone, purpose),
-                    new OtpEntry(entry.otpHash, entry.expiresAtMillis, entry.attempts + 1)
-            );
+        if (!passwordEncoder.matches(String.valueOf(otp == null ? "" : otp).trim(), entry.otpHash())) {
+            saveOtpEntry(storeKey, new OtpEntry(entry.otpHash(), entry.attemptsRemaining - 1, entry.expiresAtMillis));
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP khong dung");
         }
-        otpStore.remove(buildOtpStoreKey(phone, purpose));
+        removeOtpEntry(storeKey);
     }
 
     private void enforceOtpRateLimit(String phone) {
+        String key = REDIS_KEY_PREFIX_OTP_RATE + phone;
+        if (useRedis()) {
+            try {
+                Long count = redisTemplate.opsForValue().increment(key);
+                if (count != null && count == 1L) {
+                    redisTemplate.expire(key, Duration.ofMillis(OTP_RATE_LIMIT_WINDOW_MILLIS));
+                }
+                if (count != null && count > OTP_MAX_REQUESTS_PER_HOUR) {
+                    throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "OTP_RATE_LIMIT_EXCEEDED");
+                }
+                return;
+            } catch (ResponseStatusException ex) {
+                throw ex;
+            } catch (Exception ignored) {
+                // fallback to in-memory if Redis is temporarily unavailable
+            }
+        }
         long now = System.currentTimeMillis();
         List<Long> marks = new ArrayList<>(otpRequestRateStore.getOrDefault(phone, List.of()));
         marks.removeIf(ts -> now - ts > OTP_RATE_LIMIT_WINDOW_MILLIS);
@@ -1897,13 +1963,127 @@ public class UserService {
     }
 
     private String buildOtpStoreKey(String phone, String purpose) {
-        return phone + ":" + String.valueOf(purpose == null ? "" : purpose).trim().toUpperCase(Locale.ROOT);
+        return REDIS_KEY_PREFIX_OTP + phone + ":" + String.valueOf(purpose == null ? "" : purpose).trim().toUpperCase(Locale.ROOT);
     }
 
     private String issueRefreshToken(String userId) {
         String token = UUID.randomUUID().toString() + "." + UUID.randomUUID();
+        if (useRedis()) {
+            try {
+                redisTemplate.opsForValue().set(
+                        REDIS_KEY_PREFIX_REFRESH + token,
+                        userId,
+                        Duration.ofMillis(REFRESH_TOKEN_EXPIRES_MILLIS)
+                );
+                return token;
+            } catch (Exception ignored) {
+                // fallback to in-memory if Redis is temporarily unavailable
+            }
+        }
         refreshTokenStore.put(token, new RefreshEntry(userId, System.currentTimeMillis() + REFRESH_TOKEN_EXPIRES_MILLIS));
         return token;
+    }
+
+    private RefreshEntry readRefreshToken(String token) {
+        if (useRedis()) {
+            try {
+                String userId = redisTemplate.opsForValue().get(REDIS_KEY_PREFIX_REFRESH + token);
+                if (userId != null && !userId.isBlank()) {
+                    return new RefreshEntry(userId, System.currentTimeMillis() + REFRESH_TOKEN_EXPIRES_MILLIS);
+                }
+            } catch (Exception ignored) {
+                // fallback
+            }
+        }
+        return refreshTokenStore.get(token);
+    }
+
+    private void removeRefreshToken(String token) {
+        if (useRedis()) {
+            try {
+                redisTemplate.delete(REDIS_KEY_PREFIX_REFRESH + token);
+            } catch (Exception ignored) {
+                // fallback still cleaned below
+            }
+        }
+        refreshTokenStore.remove(token);
+    }
+
+    private void saveOtpEntry(String storeKey, OtpEntry entry) {
+        if (useRedis()) {
+            try {
+                redisTemplate.opsForHash().put(storeKey, "hash", entry.otpHash());
+                redisTemplate.opsForHash().put(storeKey, "attemptsRemaining", String.valueOf(entry.attemptsRemaining()));
+                redisTemplate.expire(storeKey, Duration.ofSeconds(OTP_EXPIRES_SECONDS));
+            } catch (Exception ignored) {
+                otpStore.put(storeKey, entry);
+            }
+            return;
+        }
+        otpStore.put(storeKey, entry);
+    }
+
+    private OtpEntry readOtpEntry(String storeKey) {
+        if (useRedis()) {
+            try {
+                Object hash = redisTemplate.opsForHash().get(storeKey, "hash");
+                Object attempts = redisTemplate.opsForHash().get(storeKey, "attemptsRemaining");
+                if (hash != null && attempts != null) {
+                    return new OtpEntry(
+                            String.valueOf(hash),
+                            Integer.parseInt(String.valueOf(attempts)),
+                            System.currentTimeMillis() + (OTP_EXPIRES_SECONDS * 1000)
+                    );
+                }
+            } catch (Exception ignored) {
+                // fallback
+            }
+        }
+        return otpStore.get(storeKey);
+    }
+
+    private void removeOtpEntry(String storeKey) {
+        if (useRedis()) {
+            try {
+                redisTemplate.delete(storeKey);
+            } catch (Exception ignored) {
+                // fallback
+            }
+        }
+        otpStore.remove(storeKey);
+    }
+
+    private boolean useRedis() {
+        return redisTemplate != null;
+    }
+
+    private Map<String, Object> loadOrderForRedeemValidation(String orderId) {
+        JsonNode node = callExternalJson(orderServiceUrl + "/api/orders/" + encode(orderId));
+        return objectMapper.convertValue(node, Map.class);
+    }
+
+    private boolean isOrderPaid(String orderId) {
+        try {
+            JsonNode node = callExternalJson(paymentServiceUrl + "/api/v1/payments/orders/" + encode(orderId) + "?allowMissing=true");
+            String status = String.valueOf(node.path("status").asText("")).trim().toUpperCase(Locale.ROOT);
+            return "PAID".equals(status);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private long parseLongValue(Object value) {
+        if (value == null) {
+            return 0L;
+        }
+        if (value instanceof Number num) {
+            return num.longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (Exception ex) {
+            return 0L;
+        }
     }
 
     private void validateStrongPassword(String password) {
@@ -1988,7 +2168,7 @@ public class UserService {
         return URLEncoder.encode(String.valueOf(value == null ? "" : value), StandardCharsets.UTF_8);
     }
 
-    private record OtpEntry(String otpHash, long expiresAtMillis, int attempts) {}
+    private record OtpEntry(String otpHash, int attemptsRemaining, long expiresAtMillis) {}
     private record RefreshEntry(String userId, long expiresAtMillis) {}
     private record GoogleOauthStateEntry(String redirectUri, long expiresAtMillis) {}
 }
