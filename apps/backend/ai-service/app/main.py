@@ -20,6 +20,7 @@ app = FastAPI(title="coffee-ai-service", version="0.3.0")
 
 REQUEST_COUNT = Counter("ai_requests_total", "Total AI requests", ["endpoint", "status"])
 REQUEST_LATENCY = Histogram("ai_request_latency_seconds", "AI request latency", ["endpoint"])
+RESPONSE_SOURCE_COUNT = Counter("ai_response_source_total", "AI response source counter", ["endpoint", "source"])
 PREDICTION_ERROR_GAUGE = Gauge("ai_prediction_error_mape", "Latest prediction error (MAPE)")
 DATA_FRESHNESS_MINUTES = Gauge("ai_data_freshness_minutes", "Latest data freshness in minutes")
 
@@ -163,6 +164,7 @@ KB_STATE: dict[str, Any] = {
 }
 FORECAST_CRON_STATE: dict[str, Any] = {"running": False, "lastRunAt": None}
 RATE_LIMIT_COUNTERS: dict[str, dict[str, int]] = {}
+SOURCE_TRACKING: dict[str, dict[str, int]] = {}
 
 
 @app.middleware("http")
@@ -252,6 +254,34 @@ def enforce_rate_limit(request: Request, scope: str, max_per_minute: int) -> Non
     bucket["count"] = current_count
     if current_count > max_per_minute:
         raise HTTPException(status_code=429, detail=f"Rate limit exceeded for {scope}")
+
+
+def track_response_source(endpoint: str, source: str) -> None:
+    normalized_endpoint = str(endpoint or "unknown").strip().lower()
+    normalized_source = str(source or "unknown").strip().lower()
+    if not normalized_endpoint:
+        normalized_endpoint = "unknown"
+    if not normalized_source:
+        normalized_source = "unknown"
+    RESPONSE_SOURCE_COUNT.labels(endpoint=normalized_endpoint, source=normalized_source).inc()
+    bucket = SOURCE_TRACKING.get(normalized_endpoint) or {}
+    bucket[normalized_source] = int(bucket.get(normalized_source, 0)) + 1
+    SOURCE_TRACKING[normalized_endpoint] = bucket
+
+
+def build_fallback_ratio_snapshot() -> dict[str, Any]:
+    endpoint_summary: dict[str, Any] = {}
+    for endpoint, sources in SOURCE_TRACKING.items():
+        total = sum(int(value) for value in sources.values())
+        fallback_count = int(sources.get("fallback", 0))
+        ratio = (fallback_count / total) if total > 0 else 0.0
+        endpoint_summary[endpoint] = {
+            "totalResponses": total,
+            "fallbackResponses": fallback_count,
+            "fallbackRatio": round(ratio, 4),
+            "sources": {key: int(value) for key, value in sources.items()},
+        }
+    return endpoint_summary
 
 
 def reload_knowledge_base(source: str = "manual") -> dict[str, Any]:
@@ -975,6 +1005,28 @@ def ai_ops_data_quality(request: Request, branchId: str | None = None) -> dict[s
     }
 
 
+@app.get("/api/ai/ops/quality-summary")
+def ai_ops_quality_summary(request: Request, branchId: str | None = None) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
+    quality = run_data_quality_checks(branchId)
+    fallback_by_endpoint = build_fallback_ratio_snapshot()
+    critical_ratio = {
+        endpoint: data
+        for endpoint, data in fallback_by_endpoint.items()
+        if data.get("fallbackRatio", 0) >= 0.2
+    }
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "branchId": branchId,
+        "quality": quality,
+        "fallbackRatios": fallback_by_endpoint,
+        "attention": {
+            "highFallbackEndpoints": critical_ratio,
+            "count": len(critical_ratio),
+        },
+    }
+
+
 @app.post("/api/ai/ops/retention/run")
 def ai_ops_retention_run(payload: RetentionRunPayload, request: Request) -> dict[str, Any]:
     authorize_request(request, None, {"ADMIN"})
@@ -1080,6 +1132,7 @@ def forecast_revenue(request: Request, branchId: str, days: int = 7, granularity
                 [branchId, granularity, days],
             )
             if rows:
+                track_response_source("/api/ai/forecast/revenue", "db")
                 forecasts = [
                     {
                         "date": str(row.get("forecastDate"))[:10],
@@ -1104,6 +1157,7 @@ def forecast_revenue(request: Request, branchId: str, days: int = 7, granularity
             pass
 
     forecasts, forecast_meta = build_revenue_forecast_from_history(branchId, days)
+    track_response_source("/api/ai/forecast/revenue", str(forecast_meta.get("source") or "fallback"))
     log_audit("/api/ai/forecast/revenue", "predict", True, branchId)
     return {
         "branchId": branchId,
@@ -1176,6 +1230,7 @@ def recommend(branchId: str, limit: int = 5, customerId: str | None = None) -> d
     popular_items = get_popular_items(branchId, max(safe_limit * 2, safe_limit))
     items = merge_recommendation_candidates(cooccurrence_items, popular_items, cart_seed, safe_limit)
     strategy = "hybrid-cf-popularity" if cooccurrence_items else "popularity"
+    track_response_source("/api/ai/recommend", strategy)
     log_audit("/api/ai/recommend", "recommend", True, branchId, metadata={"limit": safe_limit, "strategy": strategy})
     return {
         "branchId": branchId,
@@ -1196,6 +1251,7 @@ def recommend_post(payload: RecommendationPayload) -> dict[str, Any]:
     popular_items = get_popular_items(payload.branchId, max(safe_limit * 2, safe_limit))
     response_items = merge_recommendation_candidates(cooccurrence_items, popular_items, payload.cartItemIds, safe_limit)
     strategy = "item-based-cf+popularity" if cooccurrence_items else "popularity"
+    track_response_source("/api/ai/recommend_post", strategy)
     log_audit("/api/ai/recommend", "recommend", True, payload.branchId, metadata={"limit": safe_limit, "strategy": strategy})
     return {
         "branchId": payload.branchId,
@@ -1214,6 +1270,7 @@ def recommend_popular(branchId: str, limit: int = 5) -> dict[str, Any]:
     branchId = normalize_branch_id(branchId)
     safe_limit = normalize_limit(limit)
     items = get_popular_items(branchId, safe_limit)
+    track_response_source("/api/ai/recommend/popular", "popularity")
     log_audit("/api/ai/recommend/popular", "recommend", True, branchId, metadata={"limit": safe_limit})
     return {"branchId": branchId, "items": items, "strategy": "popularity"}
 
@@ -1232,11 +1289,13 @@ def anomalies(request: Request, branchId: str, severity: str | None = None) -> d
     branchId = normalize_branch_id(branchId)
     db_items = load_anomalies_from_db(branchId, severity)
     if db_items:
+        track_response_source("/api/ai/anomalies", "db")
         return {"branchId": branchId, "items": db_items, "source": "db", "available": True}
 
     filtered = [a for a in ANOMALIES if a["branchId"] == branchId]
     if severity:
         filtered = [a for a in filtered if a["severity"] == severity.upper()]
+    track_response_source("/api/ai/anomalies", "fallback")
     log_audit("/api/ai/anomalies", "list", True, branchId)
     return {"branchId": branchId, "items": filtered, "source": "fallback", "available": True}
 
@@ -1403,6 +1462,7 @@ def sentiment_summary(request: Request, branchId: str) -> dict[str, Any]:
             total = sum(int(row.get("count") or 0) for row in rows)
             if total > 0:
                 mapped = {str(row.get("label")).upper(): int(row.get("count") or 0) for row in rows}
+                track_response_source("/api/ai/sentiment/summary", "db")
                 return {
                     "branchId": branchId,
                     "positive": round(mapped.get("POSITIVE", 0) / total, 4),
@@ -1416,6 +1476,7 @@ def sentiment_summary(request: Request, branchId: str) -> dict[str, Any]:
             pass
 
     log_audit("/api/ai/sentiment/summary", "summary", True, branchId)
+    track_response_source("/api/ai/sentiment/summary", "fallback")
     return {"branchId": branchId, "positive": 0.78, "neutral": 0.15, "negative": 0.07, "sampleSize": 120, "modelVersion": AI_ACTIVE_MODEL_VERSION, "source": "fallback"}
 
 
@@ -1455,6 +1516,7 @@ def sentiment_trend(request: Request, branchId: str, days: int = 7) -> dict[str,
                             "negative": round(grouped[d]["NEGATIVE"] / total, 4),
                         }
                     )
+                track_response_source("/api/ai/sentiment/trend", "db")
                 return {"branchId": branchId, "points": points, "source": "db"}
         except Exception:
             pass
@@ -1465,6 +1527,7 @@ def sentiment_trend(request: Request, branchId: str, days: int = 7) -> dict[str,
         d = today - timedelta(days=i)
         points.append({"date": d.isoformat(), "positive": 0.7 + (i % 3) * 0.03, "neutral": 0.2 - (i % 2) * 0.02, "negative": 0.1 - (i % 2) * 0.01})
     log_audit("/api/ai/sentiment/trend", "trend", True, branchId)
+    track_response_source("/api/ai/sentiment/trend", "fallback")
     return {"branchId": branchId, "points": list(reversed(points)), "source": "fallback"}
 
 
@@ -1490,10 +1553,12 @@ def sentiment_issues_top(request: Request, branchId: str, days: int = 7, limit: 
                 [branchId, safe_days],
             )
             issues = top_negative_issues([str(row.get("originalText") or "") for row in rows], safe_limit)
+            track_response_source("/api/ai/sentiment/issues-top", "db")
             return {"branchId": branchId, "days": safe_days, "issues": issues, "source": "db"}
         except Exception:
             pass
     issues = [{"issue": "cho-lau", "count": 5}, {"issue": "het-mon", "count": 4}, {"issue": "thai-do", "count": 3}]
+    track_response_source("/api/ai/sentiment/issues-top", "fallback")
     return {"branchId": branchId, "days": safe_days, "issues": issues[:safe_limit], "source": "fallback"}
 
 

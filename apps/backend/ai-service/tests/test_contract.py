@@ -24,6 +24,14 @@ def test_live_and_ready():
     assert 'checks' in ready.json()
 
 
+def test_quality_summary_contract():
+    response = client.get('/api/ai/ops/quality-summary')
+    assert response.status_code == 200
+    payload = response.json()
+    assert 'quality' in payload
+    assert 'fallbackRatios' in payload
+
+
 def test_recommend_get_contract():
     response = client.get('/api/ai/recommend', params={'branchId': 'branch-e2e', 'limit': 3})
     assert response.status_code == 200
