@@ -132,6 +132,21 @@ interface ReportChatResponse {
   sampleRows?: Array<Record<string, unknown>>
 }
 
+function formatSentimentIssueLabel(issue: string): string {
+  const normalized = String(issue || '').trim().toLowerCase()
+  const topicMap: Record<string, string> = {
+    cho_lau: 'Chờ lâu',
+    het_mon: 'Hết món',
+    thai_do: 'Thái độ phục vụ',
+    chat_luong: 'Chất lượng món',
+    gia_ca: 'Giá cả',
+  }
+  if (topicMap[normalized]) return topicMap[normalized]
+  return normalized
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
 function formatMoney(value: number): string {
   return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, value || 0))}đ`
 }
@@ -563,7 +578,7 @@ export default function Reports() {
                 <div className="space-y-1">
                   {aiInsight.sentimentTopIssues.map((issue) => (
                     <p key={issue.issue} className="text-xs text-slate-800">
-                      {issue.issue}: <span className="font-semibold">{issue.count}</span>
+                      {formatSentimentIssueLabel(issue.issue)}: <span className="font-semibold">{issue.count}</span>
                     </p>
                   ))}
                 </div>
