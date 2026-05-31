@@ -238,10 +238,13 @@ function resolvePublicMenuImage(image?: string | null, name?: string | null): st
   const raw = String(image || '').trim()
   if (!raw) return fallbackMenuImage(name)
   const normalized = raw.toLowerCase()
+  const isProtectedIngredientPath =
+    /(^|\/)api\/v1\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)v1\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)api\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)ingredients\/(ing_|cmp)/.test(normalized)
   if (
-    normalized.includes('/api/v1/ingredients/') ||
-    normalized.includes('/v1/ingredients/') ||
-    normalized.includes('/api/ingredients/')
+    isProtectedIngredientPath
   ) {
     return fallbackMenuImage(name)
   }

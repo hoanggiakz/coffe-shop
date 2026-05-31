@@ -88,10 +88,13 @@ const resolveMenuImage = (image?: string | null, name?: string | null, size = '1
   const raw = String(image || '').trim()
   if (!raw) return fallbackMenuImage(name, size)
   const normalized = raw.toLowerCase()
+  const isProtectedIngredientPath =
+    /(^|\/)api\/v1\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)v1\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)api\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)ingredients\/(ing_|cmp)/.test(normalized)
   if (
-    normalized.includes('/api/v1/ingredients/') ||
-    normalized.includes('/v1/ingredients/') ||
-    normalized.includes('/api/ingredients/')
+    isProtectedIngredientPath
   ) {
     return fallbackMenuImage(name, size)
   }
