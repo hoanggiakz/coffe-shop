@@ -87,6 +87,14 @@ const fallbackMenuImage = (name?: string | null, size = '120x120') =>
 const resolveMenuImage = (image?: string | null, name?: string | null, size = '120x120') => {
   const raw = String(image || '').trim()
   if (!raw) return fallbackMenuImage(name, size)
+  const normalized = raw.toLowerCase()
+  if (
+    normalized.includes('/api/v1/ingredients/') ||
+    normalized.includes('/v1/ingredients/') ||
+    normalized.includes('/api/ingredients/')
+  ) {
+    return fallbackMenuImage(name, size)
+  }
   return raw
 }
 

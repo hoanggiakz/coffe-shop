@@ -230,6 +230,24 @@ interface MenuRecommendation extends MenuItem {
   recommendationScore?: number
 }
 
+function fallbackMenuImage(name?: string | null, size = '400x280'): string {
+  return `https://placehold.co/${size}?text=${encodeURIComponent(String(name || 'Mon'))}`
+}
+
+function resolvePublicMenuImage(image?: string | null, name?: string | null): string {
+  const raw = String(image || '').trim()
+  if (!raw) return fallbackMenuImage(name)
+  const normalized = raw.toLowerCase()
+  if (
+    normalized.includes('/api/v1/ingredients/') ||
+    normalized.includes('/v1/ingredients/') ||
+    normalized.includes('/api/ingredients/')
+  ) {
+    return fallbackMenuImage(name)
+  }
+  return raw
+}
+
 function normalizeCustomizations(raw: unknown): CustomizationGroup[] {
   if (!Array.isArray(raw)) return []
   return raw
@@ -2045,9 +2063,12 @@ export default function CustomerMenu() {
                 return (
                   <div key={item.id} className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-md shadow-slate-100">
                     <img
-                      src={item.image || `https://placehold.co/400x280?text=${encodeURIComponent(item.name)}`}
+                      src={resolvePublicMenuImage(item.image, item.name)}
                       alt={item.name}
                       className="h-36 w-full rounded-xl object-cover sm:h-32"
+                      onError={(event) => {
+                        event.currentTarget.src = fallbackMenuImage(item.name)
+                      }}
                     />
                     <div className="mt-2 flex items-start justify-between gap-2">
                       <p className="line-clamp-2 text-sm font-semibold text-slate-900">{item.name}</p>
