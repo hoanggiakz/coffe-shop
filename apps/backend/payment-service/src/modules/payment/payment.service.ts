@@ -1562,6 +1562,18 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       where: { orderId },
     });
 
+    const buildUniqueTransferContent = (targetOrderId: string, paymentRef: string) => {
+      const normalizedOrder = String(targetOrderId || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9_-]/g, '')
+        .slice(0, 28);
+      const normalizedRef = String(paymentRef || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .slice(-8);
+      return `PAY ${normalizedOrder}-${normalizedRef}`;
+    };
+
     if (existing) {
       if (existing.provider !== provider) {
         throw new BadRequestException(
@@ -1569,10 +1581,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         );
       }
       if (provider === 'SEPAY' && existing.status !== PaymentStatus.PAID) {
-        const transferContent = `PAY ${String(orderId).toUpperCase()}`;
-        const onlineQr = this.getOnlineQr({ amount, transferContent });
         const providerPrefix = provider.toLowerCase();
         const transactionId = `${providerPrefix}_${String(orderId).slice(0, 24)}_${Date.now()}`;
+        const transferContent = buildUniqueTransferContent(orderId, transactionId);
+        const onlineQr = this.getOnlineQr({ amount, transferContent });
         const updated = await this.prisma.payment.update({
           where: { id: existing.id },
           data: {
@@ -1626,10 +1638,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       return this.buildResponse(payment);
     }
 
-    const transferContent = `PAY ${String(orderId).toUpperCase()}`;
-    const onlineQr = this.getOnlineQr({ amount, transferContent });
     const providerPrefix = provider.toLowerCase();
     const transactionId = `${providerPrefix}_${String(orderId).slice(0, 24)}_${Date.now()}`;
+    const transferContent = buildUniqueTransferContent(orderId, transactionId);
+    const onlineQr = this.getOnlineQr({ amount, transferContent });
     const payment = await this.prisma.payment.create({
       data: {
         orderId,
