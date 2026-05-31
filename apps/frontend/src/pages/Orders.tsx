@@ -696,11 +696,23 @@ export default function Orders() {
     if (createdPayment.provider !== 'SEPAY') return
     if (!['PENDING', 'WAITING_TRANSFER'].includes(createdPayment.status)) return
 
-    const intervalId = window.setInterval(() => {
+    const poll = () => {
       void refreshPaymentAndCompleteIfPaid(payingOrder.id)
-    }, 5000)
+    }
+    const intervalId = window.setInterval(poll, 3000)
+    const onFocus = () => poll()
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') poll()
+    }
 
-    return () => window.clearInterval(intervalId)
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [createdPayment?.orderId, createdPayment?.provider, createdPayment?.status, payingOrder?.id])
 
   useEffect(() => {
