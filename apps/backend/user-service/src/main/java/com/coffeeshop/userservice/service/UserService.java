@@ -48,13 +48,16 @@ import com.coffeeshop.userservice.entity.AttendanceRecord;
 import com.coffeeshop.userservice.entity.Branch;
 import com.coffeeshop.userservice.entity.CustomerPasswordResetToken;
 import com.coffeeshop.userservice.entity.LoyaltyTransaction;
+import com.coffeeshop.userservice.entity.SalaryHistory;
 import com.coffeeshop.userservice.entity.ShiftType;
 import com.coffeeshop.userservice.entity.StaffShift;
 import com.coffeeshop.userservice.entity.User;
 import com.coffeeshop.userservice.repository.AttendanceRecordRepository;
 import com.coffeeshop.userservice.repository.BranchRepository;
 import com.coffeeshop.userservice.repository.CustomerPasswordResetTokenRepository;
+import com.coffeeshop.userservice.repository.HrAttendanceRepository;
 import com.coffeeshop.userservice.repository.LoyaltyTransactionRepository;
+import com.coffeeshop.userservice.repository.SalaryHistoryRepository;
 import com.coffeeshop.userservice.repository.StaffShiftRepository;
 import com.coffeeshop.userservice.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -105,6 +108,7 @@ public class UserService {
     private static final String REDIS_KEY_PREFIX_OTP = "customer:otp:";
     private static final String REDIS_KEY_PREFIX_OTP_RATE = "customer:otp:rate:";
     private static final String REDIS_KEY_PREFIX_REFRESH = "customer:refresh:";
+    private static final String REDIS_KEY_PREFIX_STAFF_REVOKE = "staff:revoked:";
     private static final Set<User.Role> MANAGER_ROLES = Set.of(User.Role.ADMIN, User.Role.MANAGER);
     private static final Set<User.Role> BRANCH_MANAGER_ROLES = Set.of(User.Role.ADMIN, User.Role.MANAGER);
     private static final List<User.Role> STAFF_ROLES = List.of(
@@ -117,13 +121,16 @@ public class UserService {
             User.Role.WAITER, 40_000L,
             User.Role.STAFF, 38_000L
     );
+    private static final String AUTO_PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#$%";
 
     private final UserRepository userRepository;
     private final BranchRepository branchRepository;
     private final CustomerPasswordResetTokenRepository customerPasswordResetTokenRepository;
     private final StaffShiftRepository staffShiftRepository;
     private final AttendanceRecordRepository attendanceRecordRepository;
+    private final HrAttendanceRepository hrAttendanceRepository;
     private final LoyaltyTransactionRepository loyaltyTransactionRepository;
+    private final SalaryHistoryRepository salaryHistoryRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final StringRedisTemplate redisTemplate;
@@ -143,6 +150,8 @@ public class UserService {
 
     @Value("${app.internal-service-token:dev-internal-token}")
     private String internalServiceToken;
+    @Value("${jwt.expiration:86400000}")
+    private long jwtExpirationMillis;
     @Value("${app.google-oauth-client-id:}")
     private String googleOauthClientId;
     @Value("${app.google-oauth-client-secret:}")
@@ -979,6 +988,55 @@ public class UserService {
         return listStaff(token, null, null, branch.getId(), includeInactive);
     }
 
+    public Map<String, Object> listBranchStaffPaged(
+            String token,
+            String branchId,
+            Integer page,
+            Integer limit,
+            User.Role role,
+            Boolean isActive,
+            String search,
+            String sortBy,
+            String sortOrder
+    ) {
+        User actor = requireManagerOrAdmin(token);
+        Branch branch = requireBranchById(branchId);
+        assertCanAccessBranch(actor, branch.getId());
+
+        List<StaffResponse> all = listStaff(token, search, role, branch.getId(), true);
+        List<StaffResponse> filtered = all.stream()
+                .filter(item -> {
+                    if (isActive == null) {
+                        return true;
+                    }
+                    return isActive ? !Boolean.FALSE.equals(item.getIsActive()) : Boolean.FALSE.equals(item.getIsActive());
+                })
+                .sorted((a, b) -> compareStaff(a, b, sortBy, sortOrder))
+                .toList();
+
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeLimit = limit == null || limit < 1 ? 20 : Math.min(limit, 100);
+        int total = filtered.size();
+        int from = Math.min((safePage - 1) * safeLimit, total);
+        int to = Math.min(from + safeLimit, total);
+        List<StaffResponse> data = filtered.subList(from, to);
+
+        long activeCount = all.stream().filter(item -> !Boolean.FALSE.equals(item.getIsActive())).count();
+        long inactiveCount = all.size() - activeCount;
+
+        return Map.of(
+                "data", data,
+                "meta", Map.of(
+                        "total", total,
+                        "activeCount", activeCount,
+                        "inactiveCount", inactiveCount,
+                        "page", safePage,
+                        "limit", safeLimit,
+                        "totalPages", Math.max(1, (int) Math.ceil(total / (double) safeLimit))
+                )
+        );
+    }
+
     public StaffResponse createBranchStaff(String token, String branchId, StaffCreateRequest request) {
         User actor = requireManagerOrAdmin(token);
         Branch branch = requireBranchById(branchId);
@@ -1117,6 +1175,13 @@ public class UserService {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "MANAGER chi duoc them nhan vien trong chi nhanh cua minh");
             }
         }
+        String rawPassword = normalizeNullableText(req.getPassword());
+        if (rawPassword == null) {
+            rawPassword = generateTemporaryPassword(16);
+        } else {
+            validateStrongPassword(rawPassword);
+        }
+
         String employeeCode = resolveEmployeeCode(req.getEmployeeCode(), null);
         // Always auto-generate personal QR code when creating a new staff account.
         String personalQrCode = resolvePersonalQrCode(null, employeeCode, null);
@@ -1124,13 +1189,16 @@ public class UserService {
         User user = User.builder()
                 .name(req.getName().trim())
                 .email(email)
-                .password(passwordEncoder.encode(req.getPassword()))
+                .password(passwordEncoder.encode(rawPassword))
                 .phone(normalizedPhone)
                 .role(req.getRole())
                 .employeeCode(employeeCode)
                 .personalQrCode(personalQrCode)
                 .preferredShift(req.getPreferredShift())
                 .branchId(normalizedBranchId)
+                .hireDate(req.getHireDate() == null ? LocalDate.now() : req.getHireDate())
+                .baseSalary(req.getBaseSalary())
+                .salaryType(req.getSalaryType() == null ? User.SalaryType.MONTHLY : req.getSalaryType())
                 .memberTier(User.MemberTier.BRONZE)
                 .loyaltyPoints(0)
                 .totalSpent(0L)
@@ -1146,6 +1214,8 @@ public class UserService {
 
         User user = requireStaffById(staffId);
         assertCanManageTargetStaff(actor, user);
+        java.math.BigDecimal previousBaseSalary = user.getBaseSalary();
+        User.SalaryType previousSalaryType = user.getSalaryType();
         String currentEmail = user.getEmail();
         String currentPhone = user.getPhone();
         String currentEmployeeCode = user.getEmployeeCode();
@@ -1213,9 +1283,38 @@ public class UserService {
         }
         if (req.getIsActive() != null) {
             user.setIsActive(req.getIsActive());
+            if (Boolean.FALSE.equals(req.getIsActive())) {
+                revokeStaffSessions(user.getId());
+            }
+        }
+        if (req.getHireDate() != null) {
+            user.setHireDate(req.getHireDate());
+        }
+        if (req.getBaseSalary() != null) {
+            if (req.getBaseSalary().signum() < 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "baseSalary khong hop le");
+            }
+            user.setBaseSalary(req.getBaseSalary());
+        }
+        if (req.getSalaryType() != null) {
+            user.setSalaryType(req.getSalaryType());
         }
 
         user = userRepository.save(user);
+        boolean salaryChanged = !Objects.equals(previousBaseSalary, user.getBaseSalary())
+                || !Objects.equals(previousSalaryType, user.getSalaryType());
+        if (salaryChanged && user.getBaseSalary() != null && user.getSalaryType() != null && user.getBranchId() != null) {
+            salaryHistoryRepository.save(SalaryHistory.builder()
+                    .userId(user.getId())
+                    .branchId(user.getBranchId())
+                    .oldSalary(previousBaseSalary)
+                    .newSalary(user.getBaseSalary())
+                    .oldType(previousSalaryType == null ? null : previousSalaryType.name())
+                    .newType(user.getSalaryType().name())
+                    .changedBy(actor.getId())
+                    .reason("Auto log from staff update")
+                    .build());
+        }
         return toStaffResponse(user, true, resolveBranchName(user.getBranchId()));
     }
 
@@ -1228,15 +1327,70 @@ public class UserService {
         }
         assertCanManageTargetStaff(actor, user);
 
-        String archivedEmail = "deleted+" + user.getId() + "+" + System.currentTimeMillis() + "@archived.local";
         user.setIsActive(false);
-        user.setEmail(archivedEmail);
-        user.setPhone(null);
-        user.setEmployeeCode(null);
-        user.setPersonalQrCode(null);
 
         user = userRepository.save(user);
         return toStaffResponse(user, true, resolveBranchName(user.getBranchId()));
+    }
+
+    public Map<String, Object> hardDeleteStaff(String token, String staffId) {
+        User actor = requireAdmin(token);
+        User user = requireStaffById(staffId);
+        if (Objects.equals(actor.getId(), user.getId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khong the tu xoa tai khoan dang dang nhap");
+        }
+        boolean hasAttendance = attendanceRecordRepository.existsByStaffId(user.getId());
+        boolean hasHrAttendance = false;
+        try {
+            hasHrAttendance = hrAttendanceRepository.existsByUserId(user.getId());
+        } catch (Exception ignored) {
+            // no-op
+        }
+        boolean hasShift = staffShiftRepository.existsByStaffId(user.getId());
+        if (hasAttendance || hasHrAttendance || hasShift) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khong the hard-delete: nhan vien da co lich su cham cong/phan ca");
+        }
+        userRepository.delete(user);
+        revokeStaffSessions(user.getId());
+        return Map.of(
+                "success", true,
+                "userId", staffId,
+                "deleted", true
+        );
+    }
+
+    public List<SalaryHistory> listSalaryHistory(String token, String userId) {
+        User actor = requireManagerOrAdmin(token);
+        User target = requireStaffById(userId);
+        assertCanManageTargetStaff(actor, target);
+        return salaryHistoryRepository.findByUserIdOrderByChangedAtDesc(userId);
+    }
+
+    public Map<String, Object> exportBranchStaffCsv(String token, String branchId, Boolean includeInactive) {
+        List<StaffResponse> items = listBranchStaff(token, branchId, includeInactive);
+        StringBuilder csv = new StringBuilder();
+        csv.append("id,employeeCode,name,email,phone,role,branchId,branchName,isActive,hireDate,baseSalary,salaryType\n");
+        for (StaffResponse item : items) {
+            csv.append(csvCell(item.getId())).append(',')
+                    .append(csvCell(item.getEmployeeCode())).append(',')
+                    .append(csvCell(item.getName())).append(',')
+                    .append(csvCell(item.getEmail())).append(',')
+                    .append(csvCell(item.getPhone())).append(',')
+                    .append(csvCell(item.getRole())).append(',')
+                    .append(csvCell(item.getBranchId())).append(',')
+                    .append(csvCell(item.getBranchName())).append(',')
+                    .append(csvCell(String.valueOf(item.getIsActive()))).append(',')
+                    .append(csvCell(item.getHireDate() == null ? null : item.getHireDate().toString())).append(',')
+                    .append(csvCell(item.getBaseSalary() == null ? null : item.getBaseSalary().toPlainString())).append(',')
+                    .append(csvCell(item.getSalaryType()))
+                    .append('\n');
+        }
+        return Map.of(
+                "filename", "staff-" + branchId + ".csv",
+                "contentType", "text/csv; charset=utf-8",
+                "csv", csv.toString(),
+                "count", items.size()
+        );
     }
 
     // M-02: Phan ca
@@ -1565,6 +1719,9 @@ public class UserService {
                 user.getBranchId(),
                 branchName,
                 user.getIsActive(),
+                user.getHireDate(),
+                user.getBaseSalary(),
+                user.getSalaryType() == null ? null : user.getSalaryType().name(),
                 user.getCreatedAt()
         );
     }
@@ -1684,6 +1841,9 @@ public class UserService {
 
         try {
             String userId = jwtUtil.getUserIdFromToken(token);
+            if (isStaffSessionRevoked(userId)) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Phien dang nhap da bi thu hoi");
+            }
             User user = userRepository.findById(userId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));
             if (Boolean.FALSE.equals(user.getIsActive())) {
@@ -1984,6 +2144,33 @@ public class UserService {
         return token;
     }
 
+    private void revokeStaffSessions(String userId) {
+        if (!useRedis() || userId == null || userId.isBlank()) {
+            return;
+        }
+        try {
+            redisTemplate.opsForValue().set(
+                    REDIS_KEY_PREFIX_STAFF_REVOKE + userId,
+                    "1",
+                    Duration.ofMillis(Math.max(jwtExpirationMillis, 60_000L))
+            );
+        } catch (Exception ignored) {
+            // best effort
+        }
+    }
+
+    private boolean isStaffSessionRevoked(String userId) {
+        if (!useRedis() || userId == null || userId.isBlank()) {
+            return false;
+        }
+        try {
+            String value = redisTemplate.opsForValue().get(REDIS_KEY_PREFIX_STAFF_REVOKE + userId);
+            return value != null && !value.isBlank();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     private RefreshEntry readRefreshToken(String token) {
         if (useRedis()) {
             try {
@@ -2072,6 +2259,36 @@ public class UserService {
         }
     }
 
+    private int compareStaff(StaffResponse left, StaffResponse right, String sortBy, String sortOrder) {
+        String field = normalizeNullableText(sortBy) == null ? "name" : normalizeNullableText(sortBy);
+        String direction = normalizeNullableText(sortOrder) == null ? "asc" : normalizeNullableText(sortOrder).toLowerCase(Locale.ROOT);
+        int sign = "desc".equals(direction) ? -1 : 1;
+
+        int compare;
+        if ("hireDate".equalsIgnoreCase(field)) {
+            LocalDate l = left.getHireDate() == null ? LocalDate.MIN : left.getHireDate();
+            LocalDate r = right.getHireDate() == null ? LocalDate.MIN : right.getHireDate();
+            compare = l.compareTo(r);
+        } else if ("employeeCode".equalsIgnoreCase(field)) {
+            compare = String.valueOf(left.getEmployeeCode() == null ? "" : left.getEmployeeCode())
+                    .compareToIgnoreCase(String.valueOf(right.getEmployeeCode() == null ? "" : right.getEmployeeCode()));
+        } else {
+            compare = String.valueOf(left.getName() == null ? "" : left.getName())
+                    .compareToIgnoreCase(String.valueOf(right.getName() == null ? "" : right.getName()));
+        }
+        return compare * sign;
+    }
+
+    private String generateTemporaryPassword(int length) {
+        int safeLength = Math.max(length, 12);
+        StringBuilder builder = new StringBuilder();
+        for (int index = 0; index < safeLength; index++) {
+            int next = ThreadLocalRandom.current().nextInt(AUTO_PASSWORD_CHARS.length());
+            builder.append(AUTO_PASSWORD_CHARS.charAt(next));
+        }
+        return builder.toString();
+    }
+
     private long parseLongValue(Object value) {
         if (value == null) {
             return 0L;
@@ -2084,6 +2301,12 @@ public class UserService {
         } catch (Exception ex) {
             return 0L;
         }
+    }
+
+    private String csvCell(String value) {
+        String raw = value == null ? "" : value;
+        String escaped = raw.replace("\"", "\"\"");
+        return "\"" + escaped + "\"";
     }
 
     private void validateStrongPassword(String password) {

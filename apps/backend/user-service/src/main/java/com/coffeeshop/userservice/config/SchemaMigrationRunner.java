@@ -90,5 +90,22 @@ public class SchemaMigrationRunner {
         );
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_customer_reset_token_user ON customer_password_reset_token(user_id)");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_customer_reset_token_exp ON customer_password_reset_token(expires_at)");
+
+        jdbcTemplate.execute(
+                "CREATE TABLE IF NOT EXISTS salary_history (" +
+                        "id VARCHAR(255) PRIMARY KEY, " +
+                        "user_id VARCHAR(255) NOT NULL, " +
+                        "branch_id VARCHAR(255) NOT NULL, " +
+                        "old_salary NUMERIC(12,2), " +
+                        "new_salary NUMERIC(12,2) NOT NULL, " +
+                        "old_type VARCHAR(20), " +
+                        "new_type VARCHAR(20) NOT NULL, " +
+                        "changed_by VARCHAR(255) NOT NULL, " +
+                        "changed_at TIMESTAMP DEFAULT NOW(), " +
+                        "reason TEXT" +
+                        ")"
+        );
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_salary_history_user_changed ON salary_history(user_id, changed_at DESC)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_salary_history_branch_changed ON salary_history(branch_id, changed_at DESC)");
     }
 }

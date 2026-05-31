@@ -20,6 +20,7 @@ import com.coffeeshop.userservice.entity.HrShift;
 import com.coffeeshop.userservice.entity.LeaveRequest;
 import com.coffeeshop.userservice.entity.Payroll;
 import com.coffeeshop.userservice.entity.PayrollDetail;
+import com.coffeeshop.userservice.entity.SalaryHistory;
 import com.coffeeshop.userservice.entity.SalaryComponent;
 import com.coffeeshop.userservice.entity.User;
 import com.coffeeshop.userservice.entity.WorkSchedule;
@@ -188,6 +189,18 @@ public class HrManagementService {
         }
 
         return result;
+    }
+
+    public Map<String, Object> hardDeleteStaff(String token, String userId) {
+        return userService.hardDeleteStaff(token, userId);
+    }
+
+    public List<SalaryHistory> listSalaryHistory(String token, String userId) {
+        return userService.listSalaryHistory(token, userId);
+    }
+
+    public Map<String, Object> exportBranchStaffCsv(String token, String branchId, Boolean includeInactive) {
+        return userService.exportBranchStaffCsv(token, branchId, includeInactive);
     }
 
     public Map<String, Object> getStaffQr(String token, String userId) {

@@ -95,7 +95,7 @@ class AuthControllerTest {
         StaffResponse staffResponse = new StaffResponse(
                 "u-2", "Staff B", "new.staff@coffee.local", "0900000002",
                 "STAFF", "EMP002", "QR-EMP002", "MORNING",
-                "branch-1", "Central", true, null
+                "branch-1", "Central", true, null, null, null, null
         );
         when(userService.register(eq("token-abc"), eq(registerRequest))).thenReturn(staffResponse);
 
@@ -111,7 +111,7 @@ class AuthControllerTest {
         StaffResponse staffResponse = new StaffResponse(
                 "u-3", "Staff C", "staff.c@coffee.local", "0900000003",
                 "WAITER", "EMP003", "QR-EMP003", "AFTERNOON",
-                "branch-1", "Central", true, null
+                "branch-1", "Central", true, null, null, null, null
         );
         when(userService.register(eq(""), eq(registerRequest))).thenReturn(staffResponse);
 

@@ -250,16 +250,18 @@ export default function StaffManagement() {
     }
     setLoadingStaff(true)
     try {
-      const { data } = await api.get(`/branches/${activeBranchId}/staff`)
-      let next = Array.isArray(data) ? data : []
-      if (!includeInactive) next = next.filter((item) => item?.isActive !== false)
-      if (staffKeyword.trim()) {
-        const keyword = staffKeyword.trim().toLowerCase()
-        next = next.filter((item) =>
-          [item.name, item.email, item.employeeCode].some((v) => String(v || '').toLowerCase().includes(keyword)),
-        )
-      }
-      if (staffRoleFilter !== 'ALL') next = next.filter((item) => item.role === staffRoleFilter)
+      const { data } = await api.get(`/branches/${activeBranchId}/staff`, {
+        params: {
+          page: 1,
+          limit: 200,
+          role: staffRoleFilter !== 'ALL' ? staffRoleFilter : undefined,
+          isActive: includeInactive ? undefined : true,
+          search: staffKeyword.trim() || undefined,
+          sortBy: 'name',
+          sortOrder: 'asc',
+        },
+      })
+      let next = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
       setStaffs(next)
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Không tải được danh sách nhân viên')
@@ -607,6 +609,30 @@ export default function StaffManagement() {
     setEmployeeCodeExists(null)
   }
 
+  const exportStaffCsv = async () => {
+    if (!activeBranchId) {
+      toast.error('Thiếu chi nhánh để xuất danh sách')
+      return
+    }
+    try {
+      const { data } = await api.get(`/branches/${activeBranchId}/staff/export`, {
+        params: { includeInactive },
+      })
+      const csv = String(data?.csv || '')
+      const filename = String(data?.filename || `staff-${activeBranchId}.csv`)
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      window.URL.revokeObjectURL(url)
+      toast.success('Đã xuất danh sách nhân viên')
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Xuất danh sách thất bại')
+    }
+  }
+
   const startEditStaff = (staff: StaffItem) => {
     if (!canManageTargetStaff(staff)) {
       toast.error('Ban khong duoc sua tai khoan nay')
@@ -649,10 +675,6 @@ export default function StaffManagement() {
     }
     if (!emailRegex.test(email)) {
       toast.error('Email không hợp lệ')
-      return
-    }
-    if (!editingStaffId && !password) {
-      toast.error('Mật khẩu không được để trống khi tạo mới')
       return
     }
     if (password) {
@@ -705,7 +727,7 @@ export default function StaffManagement() {
         await api.post(`/branches/${branchId}/staff`, {
           name: staffForm.name.trim(),
           email,
-          password,
+          password: password || undefined,
           phone: staffForm.phone || null,
           role: staffForm.role,
           employeeCode: employeeCode || null,
@@ -1071,6 +1093,9 @@ export default function StaffManagement() {
           <Button variant="secondary" onClick={resetStaffForm}>
             {editingStaffId ? 'Hủy sửa' : 'Làm mới form'}
           </Button>
+          <Button variant="secondary" onClick={exportStaffCsv}>
+            Xuất CSV
+          </Button>
         </div>
 
         {canManageAccounts ? (
@@ -1090,8 +1115,7 @@ export default function StaffManagement() {
             />
             <Input
               type="password"
-              placeholder={editingStaffId ? 'Đổi mật khẩu (tùy chọn)' : 'Mật khẩu đăng nhập'}
-              required={!editingStaffId}
+              placeholder={editingStaffId ? 'Đổi mật khẩu (tùy chọn)' : 'Mật khẩu đăng nhập (để trống: tự sinh)'}
               value={staffForm.password}
               onChange={(e) => setStaffForm((prev) => ({ ...prev, password: e.target.value }))}
             />

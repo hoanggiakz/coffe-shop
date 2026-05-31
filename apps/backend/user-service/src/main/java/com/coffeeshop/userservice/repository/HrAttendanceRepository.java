@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface HrAttendanceRepository extends JpaRepository<HrAttendance, String> {
+    boolean existsByUserId(String userId);
     Optional<HrAttendance> findByUserIdAndDate(String userId, LocalDate date);
     List<HrAttendance> findByUserIdAndDateBetweenOrderByDateDesc(String userId, LocalDate from, LocalDate to);
     List<HrAttendance> findByDateBetweenOrderByDateDesc(LocalDate from, LocalDate to);
