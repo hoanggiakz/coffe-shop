@@ -197,6 +197,7 @@ export default function Orders() {
   const [offlineQueue, setOfflineQueue] = useState<OfflineOrderQueueItem[]>([])
   const [syncingOfflineQueue, setSyncingOfflineQueue] = useState(false)
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  const [cartHistory, setCartHistory] = useState<Record<string, number>[]>([])
   const notifSyncKey = useMemo(() => `notif_last_received_at_${String(user?.id || 'guest')}`, [user?.id])
 
   const refreshOfflineQueue = () => {
@@ -275,6 +276,21 @@ export default function Orders() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (payingOrder && (event.key === 'F5' || (event.ctrlKey && event.key.toLowerCase() === 'p'))) {
+        event.preventDefault()
+        printCurrentView()
+        return
+      }
+      if (payingOrder && event.key === 'Tab') {
+        event.preventDefault()
+        switchPaymentMethodByShortcut()
+        return
+      }
+      if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+        event.preventDefault()
+        undoCartChange()
+        return
+      }
       if (event.key === 'F1') {
         event.preventDefault()
         navigate('/tables')
@@ -284,6 +300,13 @@ export default function Orders() {
         tableSelectRef.current?.focus()
       }
       if (event.key === 'F4' || event.key === 'Enter') {
+        if (payingOrder) {
+          if (event.key === 'Enter' && !(selectedMethod === 'CASH' && cashDeficit > 0) && !processingPayment) {
+            event.preventDefault()
+            void confirmPayment()
+          }
+          return
+        }
         const openOrder = orders.find((order) => order.status === 'READY')
         if (!openOrder) return
         event.preventDefault()
@@ -301,7 +324,7 @@ export default function Orders() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [navigate, orders])
+  }, [navigate, orders, payingOrder, lockedProvider, selectedMethod, cashDeficit, processingPayment, confirmPayment])
 
   useEffect(() => {
     const socket = getSocket()
@@ -439,10 +462,12 @@ export default function Orders() {
   }, [selectedBranchId])
 
   const increase = (menuItemId: string) => {
+    pushCartHistory({ ...cart })
     setCart((prev) => ({ ...prev, [menuItemId]: (prev[menuItemId] || 0) + 1 }))
   }
 
   const decrease = (menuItemId: string) => {
+    pushCartHistory({ ...cart })
     setCart((prev) => {
       const next = { ...prev }
       if (!next[menuItemId]) return prev
@@ -1269,7 +1294,7 @@ export default function Orders() {
               </Button>
             </div>
             <div className="mt-2 text-xs text-slate-500">
-              F1: Sơ đồ bàn | F3: Focus chọn bàn | F4/Enter: Mở thanh toán đơn READY | Esc: Đóng
+              F1: Sơ đồ bàn | F3: Focus chọn bàn | F4/Enter: Mở thanh toán đơn READY | Tab: Đổi phương thức | F5/Ctrl+P: In | Ctrl+Z: Undo giỏ | Esc: Đóng
             </div>
           </div>
         </div>
@@ -1408,3 +1433,26 @@ export default function Orders() {
     </div>
   )
 }
+  const printCurrentView = () => {
+    if (typeof window === 'undefined') return
+    window.print()
+  }
+
+  const switchPaymentMethodByShortcut = () => {
+    if (!payingOrder) return
+    if (lockedProvider) return
+    setSelectedMethod((prev) => (prev === 'CASH' ? 'SEPAY' : 'CASH'))
+  }
+
+  const pushCartHistory = (snapshot: Record<string, number>) => {
+    setCartHistory((prev) => [snapshot, ...prev].slice(0, 30))
+  }
+
+  const undoCartChange = () => {
+    setCartHistory((prev) => {
+      if (!prev.length) return prev
+      const [latest, ...rest] = prev
+      setCart(latest)
+      return rest
+    })
+  }
