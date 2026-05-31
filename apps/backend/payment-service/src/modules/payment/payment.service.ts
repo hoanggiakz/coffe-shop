@@ -569,14 +569,30 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     return Array.from(matches);
   }
 
+  private normalizeTransferMatchText(raw: string) {
+    return String(raw || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+  }
+
+  private matchesTransferContent(rawText: string, transferContent?: string | null) {
+    const transfer = String(transferContent || '').trim();
+    if (!transfer) return false;
+    const normalizedText = this.normalizeTransferMatchText(rawText);
+    const normalizedTransfer = this.normalizeTransferMatchText(transfer);
+    return normalizedTransfer.length > 0 && normalizedText.includes(normalizedTransfer);
+  }
+
   private async resolvePaymentFromSepayPayload(payload: Record<string, any>) {
     const code = String(payload.code || payload.payment_code || '').trim();
     const content = String(payload.content || '').trim();
+    const description = String(payload.description || '').trim();
     const transactionId = String(payload.id || payload.transaction_id || '').trim();
+    const mergedText = [code, content, description].filter(Boolean).join(' ');
 
     const orderHints = new Set<string>();
     if (code) orderHints.add(code);
-    for (const hint of this.extractOrderHintsFromText(content)) {
+    for (const hint of this.extractOrderHintsFromText(mergedText)) {
       orderHints.add(hint);
     }
 
@@ -599,7 +615,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         status: { in: [PaymentStatus.WAITING_TRANSFER, PaymentStatus.PENDING] },
       },
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      take: 300,
     });
 
     const normalizedContent = content.toLowerCase();
@@ -607,8 +623,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       const transfer = String(item.transferContent || '').trim().toLowerCase();
       return transfer && normalizedContent.includes(transfer);
     });
+    if (byTransferContent) return byTransferContent;
 
-    return byTransferContent || null;
+    const byFuzzyTransferContent = recentPending.find((item) => this.matchesTransferContent(mergedText, item.transferContent));
+    return byFuzzyTransferContent || null;
   }
 
   private normalizeSepayWebhookStatus(payload: Record<string, any>) {
@@ -1562,6 +1580,18 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       where: { orderId },
     });
 
+    const buildUniqueTransferContent = (targetOrderId: string, paymentRef: string) => {
+      const normalizedOrder = String(targetOrderId || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9_-]/g, '')
+        .slice(0, 28);
+      const normalizedRef = String(paymentRef || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .slice(-8);
+      return `PAY ${normalizedOrder}-${normalizedRef}`;
+    };
+
     if (existing) {
       if (existing.provider !== provider) {
         throw new BadRequestException(
@@ -1569,10 +1599,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         );
       }
       if (provider === 'SEPAY' && existing.status !== PaymentStatus.PAID) {
-        const transferContent = `PAY ${String(orderId).toUpperCase()}`;
-        const onlineQr = this.getOnlineQr({ amount, transferContent });
         const providerPrefix = provider.toLowerCase();
         const transactionId = `${providerPrefix}_${String(orderId).slice(0, 24)}_${Date.now()}`;
+        const transferContent = buildUniqueTransferContent(orderId, transactionId);
+        const onlineQr = this.getOnlineQr({ amount, transferContent });
         const updated = await this.prisma.payment.update({
           where: { id: existing.id },
           data: {
@@ -1626,10 +1656,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       return this.buildResponse(payment);
     }
 
-    const transferContent = `PAY ${String(orderId).toUpperCase()}`;
-    const onlineQr = this.getOnlineQr({ amount, transferContent });
     const providerPrefix = provider.toLowerCase();
     const transactionId = `${providerPrefix}_${String(orderId).slice(0, 24)}_${Date.now()}`;
+    const transferContent = buildUniqueTransferContent(orderId, transactionId);
+    const onlineQr = this.getOnlineQr({ amount, transferContent });
     const payment = await this.prisma.payment.create({
       data: {
         orderId,

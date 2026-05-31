@@ -230,6 +230,27 @@ interface MenuRecommendation extends MenuItem {
   recommendationScore?: number
 }
 
+function fallbackMenuImage(name?: string | null, size = '400x280'): string {
+  return `https://placehold.co/${size}?text=${encodeURIComponent(String(name || 'Mon'))}`
+}
+
+function resolvePublicMenuImage(image?: string | null, name?: string | null): string {
+  const raw = String(image || '').trim()
+  if (!raw) return fallbackMenuImage(name)
+  const normalized = raw.toLowerCase()
+  const isProtectedIngredientPath =
+    /(^|\/)api\/v1\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)v1\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)api\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)ingredients\/(ing_|cmp)/.test(normalized)
+  if (
+    isProtectedIngredientPath
+  ) {
+    return fallbackMenuImage(name)
+  }
+  return raw
+}
+
 function normalizeCustomizations(raw: unknown): CustomizationGroup[] {
   if (!Array.isArray(raw)) return []
   return raw
@@ -1746,6 +1767,31 @@ export default function CustomerMenu() {
     return () => window.clearInterval(timer)
   }, [currentOrderId])
 
+  useEffect(() => {
+    if (!currentOrderId) return
+    if (!currentPayment || currentPayment.provider !== 'SEPAY') return
+    if (!['PENDING', 'WAITING_TRANSFER'].includes(currentPayment.status)) return
+
+    const poll = () => {
+      void fetchPaymentStatus(currentOrderId)
+    }
+
+    const intervalId = window.setInterval(poll, 3000)
+    const onFocus = () => poll()
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') poll()
+    }
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [currentOrderId, currentPayment?.paymentId, currentPayment?.provider, currentPayment?.status])
+
   const submitOrder = async (e: FormEvent) => {
     e.preventDefault()
     if (!tableId) {
@@ -2045,9 +2091,12 @@ export default function CustomerMenu() {
                 return (
                   <div key={item.id} className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-md shadow-slate-100">
                     <img
-                      src={item.image || `https://placehold.co/400x280?text=${encodeURIComponent(item.name)}`}
+                      src={resolvePublicMenuImage(item.image, item.name)}
                       alt={item.name}
                       className="h-36 w-full rounded-xl object-cover sm:h-32"
+                      onError={(event) => {
+                        event.currentTarget.src = fallbackMenuImage(item.name)
+                      }}
                     />
                     <div className="mt-2 flex items-start justify-between gap-2">
                       <p className="line-clamp-2 text-sm font-semibold text-slate-900">{item.name}</p>
@@ -2622,7 +2671,13 @@ export default function CustomerMenu() {
                       <p>
                         Trạng thái: <span className="font-semibold">{trangThaiThanhToan(currentPayment.status)}</span>
                       </p>
+                      {currentPayment.status === 'PAID' && (
+                        <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-emerald-700">
+                          Thanh toán thành công. Đơn hàng đã được ghi nhận.
+                        </div>
+                      )}
                       {currentPayment.provider === 'SEPAY' &&
+                        currentPayment.status !== 'PAID' &&
                         (currentPayment.paymentUrl || currentPayment.vietQr?.qrImageUrl) && (
                           <div className="space-y-2">
                             {currentPayment.vietQr?.qrImageUrl && (

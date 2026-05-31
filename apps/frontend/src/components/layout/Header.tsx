@@ -21,6 +21,21 @@ type NotificationApiItem = {
   createdAt: string
 }
 
+const formatNotificationTypeLabel = (type: string) => {
+  const key = String(type || '').trim().toUpperCase()
+  const labels: Record<string, string> = {
+    ORDER_NEW: 'Đơn hàng mới',
+    CALL_STAFF: 'Khách gọi phục vụ',
+    CHAT_MESSAGE: 'Tin nhắn khách',
+    CHAT_OPENED: 'Mở hội thoại mới',
+    KDS_ITEM_STATUS: 'Bếp cập nhật món',
+    KDS_ORDER_READY: 'Đơn sẵn sàng phục vụ',
+    LOW_STOCK: 'Cảnh báo tồn kho',
+    PAYMENT_SUCCESS: 'Thanh toán thành công',
+  }
+  return labels[key] || key || 'Thông báo'
+}
+
 interface HeaderProps {
   onToggleSidebar: () => void
   onToggleMobileSidebar?: () => void
@@ -41,9 +56,11 @@ export default function Header({
   const avatarSrc = useMemo(() => user?.avatarUrl || user?.avatar || '', [user?.avatarUrl, user?.avatar])
   const [avatarBroken, setAvatarBroken] = useState(false)
   const markAllNotificationsRead = useNotificationStore((state) => state.markAllRead)
+  const localNotificationEntries = useNotificationStore((state) => state.entries)
   const [notifOpen, setNotifOpen] = useState(false)
   const [notifLoading, setNotifLoading] = useState(false)
   const [notifItems, setNotifItems] = useState<NotificationApiItem[]>([])
+  const [selectedNotifId, setSelectedNotifId] = useState('')
   const [notifOnlyUnread, setNotifOnlyUnread] = useState(true)
   const [notifError, setNotifError] = useState('')
   const bellPanelRef = useRef<HTMLDivElement | null>(null)
@@ -52,10 +69,18 @@ export default function Header({
     setAvatarBroken(false)
   }, [avatarSrc])
 
+  const currentBranchId = useMemo(() => {
+    const selected = String(selectedBranchId || '').trim()
+    if (selected) return selected
+    return String(user?.branchId || '').trim()
+  }, [selectedBranchId, user?.branchId])
+
   const fetchNotifications = async (onlyUnread = notifOnlyUnread) => {
-    const branchId = String(selectedBranchId || user?.branchId || '').trim()
+    const branchId = currentBranchId
     if (!branchId) {
       setNotifItems([])
+      setSelectedNotifId('')
+      setNotifError('Vui lòng chọn chi nhánh để xem thông báo')
       return
     }
     setNotifLoading(true)
@@ -69,7 +94,9 @@ export default function Header({
           limit: 20,
         },
       })
-      setNotifItems(Array.isArray(data?.data) ? data.data : [])
+      const items = Array.isArray(data?.data) ? data.data : []
+      setNotifItems(items)
+      setSelectedNotifId((prev) => (prev && items.some((item: NotificationApiItem) => item.id === prev) ? prev : (items[0]?.id || '')))
     } catch (error: any) {
       setNotifError(error?.response?.data?.message || 'Không tải được lịch sử thông báo')
     } finally {
@@ -80,7 +107,47 @@ export default function Header({
   useEffect(() => {
     if (!notifOpen) return
     void fetchNotifications(notifOnlyUnread)
-  }, [notifOpen, notifOnlyUnread, selectedBranchId, user?.branchId])
+  }, [notifOpen, notifOnlyUnread, currentBranchId])
+
+  const selectedNotif = useMemo(
+    () => notifItems.find((item) => item.id === selectedNotifId) || null,
+    [notifItems, selectedNotifId],
+  )
+
+  const fallbackLocalItems = useMemo<NotificationApiItem[]>(
+    () =>
+      localNotificationEntries.map((entry) => ({
+        id: entry.id,
+        type: entry.type,
+        payload: { title: entry.title, message: entry.message },
+        isRead: entry.read,
+        createdAt: entry.createdAt,
+      })),
+    [localNotificationEntries],
+  )
+
+  const visibleNotifItems = useMemo(
+    () => (notifItems.length > 0 ? notifItems : fallbackLocalItems),
+    [notifItems, fallbackLocalItems],
+  )
+
+  const selectedVisibleNotif = useMemo(
+    () => visibleNotifItems.find((item) => item.id === selectedNotifId) || visibleNotifItems[0] || null,
+    [visibleNotifItems, selectedNotifId],
+  )
+
+  const openNotificationTarget = (item: NotificationApiItem) => {
+    const type = String(item.type || '').toUpperCase()
+    if (type === 'CALL_STAFF' || type === 'CHAT_MESSAGE' || type === 'CHAT_OPENED') {
+      window.location.href = '/chat'
+      return
+    }
+    if (type === 'LOW_STOCK') {
+      window.location.href = '/inventory'
+      return
+    }
+    window.location.href = '/orders'
+  }
 
   useEffect(() => {
     if (!notifOpen) return
@@ -161,8 +228,13 @@ export default function Header({
                   type="button"
                   className="rounded border border-amber-200 px-2 py-1 text-[11px] text-amber-700"
                   onClick={async () => {
-                    const branchId = String(selectedBranchId || user?.branchId || '').trim()
-                    if (!branchId) return
+                    const branchId = currentBranchId
+                    if (!branchId) {
+                      markAllNotificationsRead()
+                      setNotifItems([])
+                      setSelectedNotifId('')
+                      return
+                    }
                     try {
                       await api.patch('/notifications/read-all', {}, { params: { branchId } })
                       setNotifItems((prev) => prev.map((item) => ({ ...item, isRead: true })))
@@ -194,17 +266,22 @@ export default function Header({
               <div className="max-h-80 space-y-2 overflow-y-auto">
                 {notifLoading && <p className="text-xs text-slate-500">Đang tải...</p>}
                 {!notifLoading && notifError && <p className="text-xs text-red-600">{notifError}</p>}
-                {!notifLoading && !notifError && notifItems.length === 0 && (
+                {!notifLoading && !notifError && visibleNotifItems.length === 0 && (
                   <p className="text-xs text-slate-500">Không có thông báo</p>
                 )}
                 {!notifLoading &&
                   !notifError &&
-                  notifItems.map((item) => (
-                    <div key={item.id} className={`rounded-lg border p-2 text-xs ${item.isRead ? 'border-slate-100 bg-slate-50' : 'border-amber-200 bg-amber-50/50'}`}>
+                  visibleNotifItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setSelectedNotifId(item.id)}
+                      className={`block w-full rounded-lg border p-2 text-left text-xs ${item.isRead ? 'border-slate-100 bg-slate-50' : 'border-amber-200 bg-amber-50/50'} ${selectedNotifId === item.id ? 'ring-1 ring-amber-300' : ''}`}
+                    >
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <p className="font-semibold text-slate-800">{item.payload?.title || item.type}</p>
-                          <p className="mt-0.5 text-slate-600">{item.payload?.message || '-'}</p>
+                          <p className="font-semibold text-slate-800">{item.payload?.title || formatNotificationTypeLabel(item.type)}</p>
+                          <p className="mt-0.5 line-clamp-2 text-slate-600">{item.payload?.message || 'Có cập nhật mới'}</p>
                           <p className="mt-1 text-[10px] text-slate-500">{new Date(item.createdAt).toLocaleString('vi-VN')}</p>
                         </div>
                         {!item.isRead && (
@@ -212,6 +289,7 @@ export default function Header({
                             type="button"
                             className="shrink-0 rounded border border-amber-200 px-1.5 py-0.5 text-[10px] text-amber-700"
                             onClick={async () => {
+                              setSelectedNotifId(item.id)
                               await api.patch(`/notifications/${item.id}/read`)
                               setNotifItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, isRead: true } : entry)))
                             }}
@@ -220,8 +298,34 @@ export default function Header({
                           </button>
                         )}
                       </div>
-                    </div>
+                    </button>
                   ))}
+
+                {!notifLoading && !notifError && selectedVisibleNotif && (
+                  <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50/40 p-2 text-xs">
+                    <p className="font-semibold text-slate-900">{selectedVisibleNotif.payload?.title || formatNotificationTypeLabel(selectedVisibleNotif.type)}</p>
+                    <p className="mt-1 text-slate-700">{selectedVisibleNotif.payload?.message || 'Có cập nhật mới trong hệ thống.'}</p>
+                    <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-slate-600">
+                      <p>Loại: {formatNotificationTypeLabel(selectedVisibleNotif.type)}</p>
+                      <p>Thời gian: {new Date(selectedVisibleNotif.createdAt).toLocaleTimeString('vi-VN')}</p>
+                      <p>Đơn: {String(selectedVisibleNotif.payload?.orderId || '-')}</p>
+                      <p>Bàn: {String(selectedVisibleNotif.payload?.tableId || '-')}</p>
+                      <p className="col-span-2 break-all">Chat: {String(selectedVisibleNotif.payload?.chatId || '-')}</p>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-[11px] text-slate-500">
+                        Vai trò: {vaiTroNhanVien(user?.role)} • Chi nhánh: {currentBranchId || '-'}
+                      </span>
+                      <button
+                        type="button"
+                        className="rounded border border-amber-200 px-2 py-1 text-[11px] text-amber-700"
+                        onClick={() => openNotificationTarget(selectedVisibleNotif)}
+                      >
+                        Mở chi tiết
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

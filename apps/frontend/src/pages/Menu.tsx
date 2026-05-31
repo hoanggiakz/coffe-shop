@@ -87,6 +87,17 @@ const fallbackMenuImage = (name?: string | null, size = '120x120') =>
 const resolveMenuImage = (image?: string | null, name?: string | null, size = '120x120') => {
   const raw = String(image || '').trim()
   if (!raw) return fallbackMenuImage(name, size)
+  const normalized = raw.toLowerCase()
+  const isProtectedIngredientPath =
+    /(^|\/)api\/v1\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)v1\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)api\/ingredients(\/|$)/.test(normalized) ||
+    /(^|\/)ingredients\/(ing_|cmp)/.test(normalized)
+  if (
+    isProtectedIngredientPath
+  ) {
+    return fallbackMenuImage(name, size)
+  }
   return raw
 }
 
