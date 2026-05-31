@@ -7,4 +7,6 @@ import lombok.Data;
 public class OtpRequest {
     @NotBlank
     private String phone;
+
+    private String purpose;
 }

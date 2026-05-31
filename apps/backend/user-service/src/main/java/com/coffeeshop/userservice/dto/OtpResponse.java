@@ -7,6 +7,6 @@ import lombok.Data;
 @AllArgsConstructor
 public class OtpResponse {
     private String message;
-    private String otp;
-    private long expiresInSeconds;
+    private String maskedPhone;
+    private long expiresIn;
 }

@@ -92,6 +92,9 @@ import org.springframework.data.domain.PageRequest;
 public class UserService {
 
     private static final long OTP_EXPIRES_SECONDS = 300L;
+    private static final int OTP_MAX_ATTEMPTS = 5;
+    private static final int OTP_MAX_REQUESTS_PER_HOUR = 5;
+    private static final long OTP_RATE_LIMIT_WINDOW_MILLIS = 60L * 60L * 1000L;
     private static final long ACCESS_TOKEN_EXPIRES_SECONDS = 900L;
     private static final long REFRESH_TOKEN_EXPIRES_MILLIS = 7L * 24L * 60L * 60L * 1000L;
     private static final long RESET_TOKEN_EXPIRES_MILLIS = 15L * 60L * 1000L;
@@ -136,6 +139,7 @@ public class UserService {
     @Value("${app.google-oauth-callback-url:https://app.httpscoffee-demo.buzz/api/auth/google/callback}")
     private String googleOauthCallbackUrl;
     private final Map<String, OtpEntry> otpStore = new ConcurrentHashMap<>();
+    private final Map<String, List<Long>> otpRequestRateStore = new ConcurrentHashMap<>();
     private final Map<String, RefreshEntry> refreshTokenStore = new ConcurrentHashMap<>();
     private final Map<String, ResetPasswordEntry> resetPasswordStore = new ConcurrentHashMap<>();
     private final Map<String, GoogleOauthStateEntry> googleOauthStateStore = new ConcurrentHashMap<>();
@@ -240,9 +244,11 @@ public class UserService {
 
     public OtpResponse requestCustomerOtp(OtpRequest req) {
         String phone = normalizeRequiredPhone(req.getPhone());
+        String purpose = normalizeOtpPurpose(req.getPurpose());
+        enforceOtpRateLimit(phone);
         String otp = String.format("%06d", ThreadLocalRandom.current().nextInt(0, 1_000_000));
         long expiresAt = System.currentTimeMillis() + (OTP_EXPIRES_SECONDS * 1000);
-        otpStore.put(phone, new OtpEntry(otp, expiresAt));
+        otpStore.put(buildOtpStoreKey(phone, purpose), new OtpEntry(passwordEncoder.encode(otp), expiresAt, 0));
         String maskedPhone = phone.length() >= 7
                 ? phone.substring(0, 3) + "****" + phone.substring(phone.length() - 3)
                 : phone;
@@ -251,7 +257,8 @@ public class UserService {
 
     public CustomerAuthResponse verifyCustomerOtp(OtpVerifyRequest req) {
         String phone = normalizeRequiredPhone(req.getPhone());
-        verifyAndConsumeOtp(phone, req.getOtp());
+        String purpose = normalizeOtpPurpose(req.getPurpose());
+        verifyAndConsumeOtp(phone, purpose, req.getOtp());
         User user = userRepository.findByPhoneAndRole(phone, User.Role.CUSTOMER).orElse(null);
         boolean isNewUser = false;
         if (user == null) {
@@ -321,7 +328,7 @@ public class UserService {
 
     public AuthResponse registerCustomerByOtp(CustomerOtpRegisterRequest req) {
         String phone = normalizeRequiredPhone(req.getPhone());
-        verifyAndConsumeOtp(phone, req.getOtp());
+        verifyAndConsumeOtp(phone, "REGISTER", req.getOtp());
         if (userRepository.existsByPhone(phone)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "So dien thoai da duoc dang ky");
         }
@@ -349,7 +356,7 @@ public class UserService {
 
     public AuthResponse loginCustomerByOtp(CustomerOtpLoginRequest req) {
         String phone = normalizeRequiredPhone(req.getPhone());
-        verifyAndConsumeOtp(phone, req.getOtp());
+        verifyAndConsumeOtp(phone, "LOGIN", req.getOtp());
         User user = userRepository.findByPhoneAndRole(phone, User.Role.CUSTOMER)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Khong tim thay tai khoan khach hang"));
         if (Boolean.FALSE.equals(user.getIsActive())) {
@@ -371,6 +378,36 @@ public class UserService {
 
     public CustomerProfileResponse updateCustomerProfileV2(String token, UpdateProfileRequest req) {
         User customer = requireCustomerFromToken(token);
+        String nextEmail = normalizeEmail(req.getEmail());
+        String nextPhone = normalizePhone(req.getPhone());
+        String currentEmail = customer.getEmail() == null ? "" : customer.getEmail().trim();
+        String currentPhone = customer.getPhone() == null ? "" : customer.getPhone().trim();
+        boolean emailChanged = nextEmail != null && !nextEmail.equalsIgnoreCase(currentEmail);
+        boolean phoneChanged = nextPhone != null && !nextPhone.equals(currentPhone);
+
+        if (emailChanged || phoneChanged) {
+            String rawOtp = String.valueOf(req.getVerifyOtp() == null ? "" : req.getVerifyOtp()).trim();
+            if (rawOtp.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP_REQUIRED_FOR_CONTACT_CHANGE");
+            }
+            String purpose = normalizeOtpPurpose(req.getVerifyPurpose());
+            if (!"PROFILE_UPDATE".equals(purpose)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP_PURPOSE_INVALID_FOR_PROFILE_UPDATE");
+            }
+            String targetPhoneForOtp = phoneChanged ? nextPhone : normalizePhone(customer.getPhone());
+            if (targetPhoneForOtp == null || targetPhoneForOtp.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "PHONE_REQUIRED_FOR_CONTACT_CHANGE_VERIFICATION");
+            }
+            verifyAndConsumeOtp(targetPhoneForOtp, purpose, rawOtp);
+        }
+
+        if (emailChanged) {
+            if (userRepository.existsByEmail(nextEmail)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "EMAIL_EXISTS");
+            }
+            customer.setEmail(nextEmail);
+            userRepository.save(customer);
+        }
         UserProfile updated = updateProfile(customer.getId(), req);
         User reloaded = userRepository.findById(updated.getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));
@@ -1757,19 +1794,51 @@ public class UserService {
         return source.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT));
     }
 
-    private void verifyAndConsumeOtp(String phone, String otp) {
-        OtpEntry entry = otpStore.get(phone);
+    private void verifyAndConsumeOtp(String phone, String purpose, String otp) {
+        OtpEntry entry = otpStore.get(buildOtpStoreKey(phone, purpose));
         if (entry == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP khong ton tai hoac da het han");
         }
         if (System.currentTimeMillis() > entry.expiresAtMillis) {
-            otpStore.remove(phone);
+            otpStore.remove(buildOtpStoreKey(phone, purpose));
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP da het han");
         }
-        if (!entry.otp.equals(otp)) {
+        if (entry.attempts >= OTP_MAX_ATTEMPTS) {
+            otpStore.remove(buildOtpStoreKey(phone, purpose));
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP da bi khoa do nhap sai qua so lan cho phep");
+        }
+        if (!passwordEncoder.matches(String.valueOf(otp == null ? "" : otp).trim(), entry.otpHash)) {
+            otpStore.put(
+                    buildOtpStoreKey(phone, purpose),
+                    new OtpEntry(entry.otpHash, entry.expiresAtMillis, entry.attempts + 1)
+            );
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP khong dung");
         }
-        otpStore.remove(phone);
+        otpStore.remove(buildOtpStoreKey(phone, purpose));
+    }
+
+    private void enforceOtpRateLimit(String phone) {
+        long now = System.currentTimeMillis();
+        List<Long> marks = new ArrayList<>(otpRequestRateStore.getOrDefault(phone, List.of()));
+        marks.removeIf(ts -> now - ts > OTP_RATE_LIMIT_WINDOW_MILLIS);
+        if (marks.size() >= OTP_MAX_REQUESTS_PER_HOUR) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "OTP_RATE_LIMIT_EXCEEDED");
+        }
+        marks.add(now);
+        otpRequestRateStore.put(phone, marks);
+    }
+
+    private String normalizeOtpPurpose(String purpose) {
+        String raw = String.valueOf(purpose == null ? "" : purpose).trim();
+        String value = raw.isBlank() ? "LOGIN" : raw.toUpperCase(Locale.ROOT);
+        if (!Set.of("LOGIN", "REGISTER", "RESET", "PROFILE_UPDATE").contains(value)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTP_PURPOSE_INVALID");
+        }
+        return value;
+    }
+
+    private String buildOtpStoreKey(String phone, String purpose) {
+        return phone + ":" + String.valueOf(purpose == null ? "" : purpose).trim().toUpperCase(Locale.ROOT);
     }
 
     private String issueRefreshToken(String userId) {
@@ -1860,7 +1929,7 @@ public class UserService {
         return URLEncoder.encode(String.valueOf(value == null ? "" : value), StandardCharsets.UTF_8);
     }
 
-    private record OtpEntry(String otp, long expiresAtMillis) {}
+    private record OtpEntry(String otpHash, long expiresAtMillis, int attempts) {}
     private record RefreshEntry(String userId, long expiresAtMillis) {}
     private record ResetPasswordEntry(String userId, long expiresAtMillis) {}
     private record GoogleOauthStateEntry(String redirectUri, long expiresAtMillis) {}
