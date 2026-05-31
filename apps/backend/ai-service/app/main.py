@@ -43,8 +43,40 @@ DEFAULT_MENU_KB = [
     {"keyword": "khuyến mãi", "answer": "Bạn có thể xem khuyến mãi đang chạy ở mục Khuyến mãi theo chi nhánh."},
 ]
 
-POSITIVE_WORDS = {"tốt", "ngon", "tuyệt", "hài lòng", "good", "great", "excellent", "friendly"}
-NEGATIVE_WORDS = {"tệ", "dở", "chậm", "lâu", "không hài lòng", "bad", "poor", "awful"}
+POSITIVE_WORD_WEIGHTS: dict[str, float] = {
+    "tot": 1.0,
+    "ngon": 1.2,
+    "tuyet": 1.4,
+    "hailong": 1.3,
+    "nhanh": 0.8,
+    "thanthien": 1.1,
+    "sach": 0.7,
+    "good": 1.0,
+    "great": 1.2,
+    "excellent": 1.5,
+    "friendly": 1.0,
+}
+NEGATIVE_WORD_WEIGHTS: dict[str, float] = {
+    "te": 1.3,
+    "do": 1.0,
+    "cham": 1.1,
+    "lau": 1.1,
+    "khonghailong": 1.4,
+    "hetmon": 1.5,
+    "khophucvu": 1.2,
+    "thaidoxau": 1.6,
+    "bad": 1.1,
+    "poor": 1.2,
+    "awful": 1.5,
+}
+
+ISSUE_TOPIC_KEYWORDS: dict[str, set[str]] = {
+    "cho_lau": {"cho", "cho_lau", "cham", "lau", "doi", "tre"},
+    "het_mon": {"het", "het_mon", "khong_co", "out_of_stock", "sold_out"},
+    "thai_do": {"thai_do", "nhan_vien", "tho_lo", "khophucvu", "cau_gat", "bat_lich_su"},
+    "chat_luong": {"do", "te", "nhat", "nguoi", "khong_ngon", "chat_luong"},
+    "gia_ca": {"gia", "dat", "mac", "phi", "khong_xung_dang"},
+}
 
 
 class RecommendationFeedback(BaseModel):
@@ -343,29 +375,57 @@ def get_cooccurrence_items(branch_id: str, cart_item_ids: list[str], limit: int)
         return []
 
 
-def classify_sentiment(text: str) -> tuple[str, float, dict[str, float]]:
-    lowered = text.lower()
-    pos_hits = sum(1 for word in POSITIVE_WORDS if word in lowered)
-    neg_hits = sum(1 for word in NEGATIVE_WORDS if word in lowered)
+def normalize_text_for_sentiment(text: str) -> str:
+    value = str(text or "").lower()
+    value = value.replace("không", "khong").replace("hài lòng", "hailong")
+    value = value.replace("thái độ", "thai_do").replace("hết món", "het_mon")
+    value = value.replace("chờ lâu", "cho_lau").replace("khó phục vụ", "khophucvu")
+    value = re.sub(r"[^a-z0-9À-ỹà-ỹ_\s]", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
 
-    if pos_hits > neg_hits:
+
+def sentiment_weight_score(tokens: list[str], weight_map: dict[str, float]) -> float:
+    score = 0.0
+    for token in tokens:
+        score += weight_map.get(token, 0.0)
+    return score
+
+
+def classify_sentiment(text: str) -> tuple[str, float, dict[str, float], dict[str, Any]]:
+    normalized_text = normalize_text_for_sentiment(text)
+    tokens = [token for token in normalized_text.split(" ") if token]
+
+    pos_score = sentiment_weight_score(tokens, POSITIVE_WORD_WEIGHTS)
+    neg_score = sentiment_weight_score(tokens, NEGATIVE_WORD_WEIGHTS)
+    delta = pos_score - neg_score
+
+    if delta > 0.35:
         label = "POSITIVE"
-        confidence = min(0.95, 0.62 + 0.08 * pos_hits)
-    elif neg_hits > pos_hits:
+    elif delta < -0.35:
         label = "NEGATIVE"
-        confidence = min(0.95, 0.62 + 0.08 * neg_hits)
     else:
         label = "NEUTRAL"
-        confidence = 0.65
 
-    scores = {
-        "POSITIVE": round(0.1 + (0.75 if label == "POSITIVE" else 0.15), 2),
-        "NEUTRAL": round(0.1 + (0.75 if label == "NEUTRAL" else 0.15), 2),
-        "NEGATIVE": round(0.1 + (0.75 if label == "NEGATIVE" else 0.15), 2),
+    magnitude = abs(delta)
+    confidence = max(0.55, min(0.97, 0.6 + (magnitude * 0.12)))
+
+    base_positive = max(0.05, pos_score + (0.8 if label == "POSITIVE" else 0.2))
+    base_negative = max(0.05, neg_score + (0.8 if label == "NEGATIVE" else 0.2))
+    base_neutral = max(0.1, 0.8 if label == "NEUTRAL" else 0.25)
+    total = base_positive + base_neutral + base_negative
+    normalized = {
+        "POSITIVE": round(base_positive / total, 2),
+        "NEUTRAL": round(base_neutral / total, 2),
+        "NEGATIVE": round(base_negative / total, 2),
     }
-    total = sum(scores.values())
-    normalized = {key: round(value / total, 2) for key, value in scores.items()}
-    return label, round(confidence, 2), normalized
+    explanation = {
+        "tokens": tokens[:20],
+        "positiveScore": round(pos_score, 3),
+        "negativeScore": round(neg_score, 3),
+        "delta": round(delta, 3),
+    }
+    return label, round(confidence, 2), normalized, explanation
 
 
 def decimal_from_any(value: Any, default: float = 0.0) -> float:
@@ -545,34 +605,39 @@ def build_revenue_forecast_from_history(branch_id: str, days: int) -> tuple[list
 
 
 def top_negative_issues(texts: list[str], limit: int = 3) -> list[dict[str, Any]]:
+    topic_counts: dict[str, int] = {key: 0 for key in ISSUE_TOPIC_KEYWORDS.keys()}
+    fallback_token_counts: dict[str, int] = {}
     stop_words = {
-        "la",
-        "va",
-        "cho",
-        "khong",
-        "qua",
-        "rat",
-        "bi",
-        "toi",
-        "ban",
-        "quan",
-        "phuc",
-        "vu",
-        "mon",
-        "nhan",
-        "vien",
-        "khach",
+        "la", "va", "cho", "khong", "qua", "rat", "bi", "toi", "ban", "quan",
+        "phuc", "vu", "mon", "nhan", "vien", "khach", "nay", "kia", "roi",
     }
-    counts: dict[str, int] = {}
     for text in texts:
-        normalized = re.sub(r"[^a-zA-Z0-9À-ỹà-ỹ\s]", " ", str(text or "").lower())
-        for token in normalized.split():
-            token = token.strip()
-            if len(token) < 3 or token in stop_words:
-                continue
-            counts[token] = counts.get(token, 0) + 1
-    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)[: max(1, min(limit, 10))]
-    return [{"issue": key, "count": value} for key, value in ranked]
+        normalized = normalize_text_for_sentiment(text)
+        tokens = [token.strip() for token in normalized.split() if token.strip()]
+        token_set = set(tokens)
+        matched_topic = False
+        for topic, keywords in ISSUE_TOPIC_KEYWORDS.items():
+            if token_set.intersection(keywords):
+                topic_counts[topic] += 1
+                matched_topic = True
+        if not matched_topic:
+            for token in tokens:
+                if len(token) < 3 or token in stop_words:
+                    continue
+                fallback_token_counts[token] = fallback_token_counts.get(token, 0) + 1
+    ranked_topics = sorted(
+        [(topic, count) for topic, count in topic_counts.items() if count > 0],
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    issues = [{"issue": topic, "count": count} for topic, count in ranked_topics]
+    if len(issues) < limit and fallback_token_counts:
+        fallback_ranked = sorted(fallback_token_counts.items(), key=lambda item: item[1], reverse=True)
+        for token, count in fallback_ranked:
+            if len(issues) >= limit:
+                break
+            issues.append({"issue": token, "count": count})
+    return issues[: max(1, min(limit, 10))]
 
 
 async def forecast_cron_loop():
@@ -1246,7 +1311,7 @@ def sentiment_issues_top(request: Request, branchId: str, days: int = 7, limit: 
 def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dict[str, Any]:
     authorize_request(request, payload.branchId, {"ADMIN", "MANAGER"})
     payload.branchId = normalize_branch_id(payload.branchId)
-    label, confidence, scores = classify_sentiment(payload.text)
+    label, confidence, scores, explanation = classify_sentiment(payload.text)
     persisted = False
     if REPORT_DATABASE_URL:
         try:
@@ -1264,21 +1329,28 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
                             payload.text,
                             label,
                             confidence,
-                            "lexicon_baseline_v1",
+                            "vi_weighted_lexicon_v2",
                             AI_ACTIVE_MODEL_VERSION,
                         ),
                     )
             persisted = True
         except Exception:
             persisted = False
-    log_audit("/api/ai/sentiment/analyze", "analyze", True, payload.branchId, metadata={"label": label})
+    log_audit(
+        "/api/ai/sentiment/analyze",
+        "analyze",
+        True,
+        payload.branchId,
+        metadata={"label": label, "positiveScore": explanation.get("positiveScore"), "negativeScore": explanation.get("negativeScore")},
+    )
     return {
         "branchId": payload.branchId,
         "label": label,
         "confidence": confidence,
         "scores": scores,
         "persisted": persisted,
-        "reason": "lexicon_baseline_v1",
+        "reason": "vi_weighted_lexicon_v2",
+        "explanation": explanation,
     }
 
 
