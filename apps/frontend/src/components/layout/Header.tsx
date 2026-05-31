@@ -56,6 +56,7 @@ export default function Header({
   const avatarSrc = useMemo(() => user?.avatarUrl || user?.avatar || '', [user?.avatarUrl, user?.avatar])
   const [avatarBroken, setAvatarBroken] = useState(false)
   const markAllNotificationsRead = useNotificationStore((state) => state.markAllRead)
+  const localNotificationEntries = useNotificationStore((state) => state.entries)
   const [notifOpen, setNotifOpen] = useState(false)
   const [notifLoading, setNotifLoading] = useState(false)
   const [notifItems, setNotifItems] = useState<NotificationApiItem[]>([])
@@ -111,6 +112,28 @@ export default function Header({
   const selectedNotif = useMemo(
     () => notifItems.find((item) => item.id === selectedNotifId) || null,
     [notifItems, selectedNotifId],
+  )
+
+  const fallbackLocalItems = useMemo<NotificationApiItem[]>(
+    () =>
+      localNotificationEntries.map((entry) => ({
+        id: entry.id,
+        type: entry.type,
+        payload: { title: entry.title, message: entry.message },
+        isRead: entry.read,
+        createdAt: entry.createdAt,
+      })),
+    [localNotificationEntries],
+  )
+
+  const visibleNotifItems = useMemo(
+    () => (notifItems.length > 0 ? notifItems : fallbackLocalItems),
+    [notifItems, fallbackLocalItems],
+  )
+
+  const selectedVisibleNotif = useMemo(
+    () => visibleNotifItems.find((item) => item.id === selectedNotifId) || visibleNotifItems[0] || null,
+    [visibleNotifItems, selectedNotifId],
   )
 
   const openNotificationTarget = (item: NotificationApiItem) => {
@@ -206,7 +229,12 @@ export default function Header({
                   className="rounded border border-amber-200 px-2 py-1 text-[11px] text-amber-700"
                   onClick={async () => {
                     const branchId = currentBranchId
-                    if (!branchId) return
+                    if (!branchId) {
+                      markAllNotificationsRead()
+                      setNotifItems([])
+                      setSelectedNotifId('')
+                      return
+                    }
                     try {
                       await api.patch('/notifications/read-all', {}, { params: { branchId } })
                       setNotifItems((prev) => prev.map((item) => ({ ...item, isRead: true })))
@@ -238,12 +266,12 @@ export default function Header({
               <div className="max-h-80 space-y-2 overflow-y-auto">
                 {notifLoading && <p className="text-xs text-slate-500">Đang tải...</p>}
                 {!notifLoading && notifError && <p className="text-xs text-red-600">{notifError}</p>}
-                {!notifLoading && !notifError && notifItems.length === 0 && (
+                {!notifLoading && !notifError && visibleNotifItems.length === 0 && (
                   <p className="text-xs text-slate-500">Không có thông báo</p>
                 )}
                 {!notifLoading &&
                   !notifError &&
-                  notifItems.map((item) => (
+                  visibleNotifItems.map((item) => (
                     <button
                       key={item.id}
                       type="button"
@@ -273,16 +301,16 @@ export default function Header({
                     </button>
                   ))}
 
-                {!notifLoading && !notifError && selectedNotif && (
+                {!notifLoading && !notifError && selectedVisibleNotif && (
                   <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50/40 p-2 text-xs">
-                    <p className="font-semibold text-slate-900">{selectedNotif.payload?.title || formatNotificationTypeLabel(selectedNotif.type)}</p>
-                    <p className="mt-1 text-slate-700">{selectedNotif.payload?.message || 'Có cập nhật mới trong hệ thống.'}</p>
+                    <p className="font-semibold text-slate-900">{selectedVisibleNotif.payload?.title || formatNotificationTypeLabel(selectedVisibleNotif.type)}</p>
+                    <p className="mt-1 text-slate-700">{selectedVisibleNotif.payload?.message || 'Có cập nhật mới trong hệ thống.'}</p>
                     <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-slate-600">
-                      <p>Loại: {formatNotificationTypeLabel(selectedNotif.type)}</p>
-                      <p>Thời gian: {new Date(selectedNotif.createdAt).toLocaleTimeString('vi-VN')}</p>
-                      <p>Đơn: {String(selectedNotif.payload?.orderId || '-')}</p>
-                      <p>Bàn: {String(selectedNotif.payload?.tableId || '-')}</p>
-                      <p className="col-span-2 break-all">Chat: {String(selectedNotif.payload?.chatId || '-')}</p>
+                      <p>Loại: {formatNotificationTypeLabel(selectedVisibleNotif.type)}</p>
+                      <p>Thời gian: {new Date(selectedVisibleNotif.createdAt).toLocaleTimeString('vi-VN')}</p>
+                      <p>Đơn: {String(selectedVisibleNotif.payload?.orderId || '-')}</p>
+                      <p>Bàn: {String(selectedVisibleNotif.payload?.tableId || '-')}</p>
+                      <p className="col-span-2 break-all">Chat: {String(selectedVisibleNotif.payload?.chatId || '-')}</p>
                     </div>
                     <div className="mt-2 flex items-center justify-between">
                       <span className="text-[11px] text-slate-500">
@@ -291,7 +319,7 @@ export default function Header({
                       <button
                         type="button"
                         className="rounded border border-amber-200 px-2 py-1 text-[11px] text-amber-700"
-                        onClick={() => openNotificationTarget(selectedNotif)}
+                        onClick={() => openNotificationTarget(selectedVisibleNotif)}
                       >
                         Mở chi tiết
                       </button>
