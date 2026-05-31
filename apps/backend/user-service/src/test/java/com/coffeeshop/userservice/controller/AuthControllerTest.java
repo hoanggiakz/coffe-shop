@@ -72,6 +72,8 @@ class AuthControllerTest {
                 "STAFF",
                 "0900000001",
                 "branch-1",
+                "EMP001",
+                null,
                 0,
                 "STANDARD",
                 0L
