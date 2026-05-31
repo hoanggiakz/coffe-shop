@@ -278,6 +278,29 @@ function normalizeSelections(selections: CartSelections): CartSelections {
   }, {})
 }
 
+function sanitizeSelectionsForMenuItem(menuItem: MenuItem | undefined, selections: CartSelections): CartSelections {
+  if (!menuItem) return normalizeSelections(selections || {})
+  const next: CartSelections = {}
+  ;(menuItem.customizations || []).forEach((group) => {
+    const raw = selections?.[group.id]
+    if (group.type === 'single') {
+      const allowed = new Set((group.options || []).map((opt) => String(opt.value || '')))
+      const selected = String(raw || '').trim()
+      const fallback = String(group.options?.[0]?.value || '')
+      next[group.id] = allowed.has(selected) ? selected : fallback
+      return
+    }
+    if (group.type === 'multi') {
+      const allowed = new Set((group.options || []).map((opt) => String(opt.value || '')))
+      const selectedValues = Array.isArray(raw) ? raw.map((entry) => String(entry || '').trim()) : []
+      next[group.id] = selectedValues.filter((entry) => allowed.has(entry))
+      return
+    }
+    next[group.id] = String(raw || '')
+  })
+  return normalizeSelections(next)
+}
+
 function buildCartLineKey(menuItemId: string, selections: CartSelections, note?: string): string {
   return JSON.stringify({
     menuItemId: String(menuItemId || '').trim(),
@@ -1157,10 +1180,36 @@ export default function CustomerMenu() {
     if (!cartLoaded) return
     if (!menuMap.size) return
     setCart((prev) => {
-      const next = Object.fromEntries(
-        Object.entries(prev).filter(([, line]) => menuMap.has(String(line?.menuItemId || ''))),
-      )
-      return Object.keys(next).length === Object.keys(prev).length ? prev : next
+      const rebuilt: Record<string, CartItem> = {}
+      Object.values(prev).forEach((line) => {
+        const menuItemId = String(line?.menuItemId || '').trim()
+        const menuItem = menuMap.get(menuItemId)
+        if (!menuItem) return
+        const sanitizedSelections = sanitizeSelectionsForMenuItem(menuItem, line.selections || {})
+        const normalizedNote = String(line.note || '')
+        const lineKey = buildCartLineKey(menuItemId, sanitizedSelections, normalizedNote)
+        const existing = rebuilt[lineKey]
+        rebuilt[lineKey] = {
+          branchMenuItemId: String(menuItem.branchMenuItemId || line.branchMenuItemId || ''),
+          menuItemId,
+          quantity: Number(existing?.quantity || 0) + Math.max(0, Number(line.quantity || 0)),
+          note: normalizedNote,
+          selections: sanitizedSelections,
+        }
+      })
+      return JSON.stringify(rebuilt) === JSON.stringify(prev) ? prev : rebuilt
+    })
+    setCartDrafts((prev) => {
+      const next: Record<string, CartDraft> = {}
+      Object.entries(prev).forEach(([menuItemId, draft]) => {
+        const menuItem = menuMap.get(String(menuItemId || '').trim())
+        if (!menuItem) return
+        next[menuItemId] = {
+          note: String(draft?.note || ''),
+          selections: sanitizeSelectionsForMenuItem(menuItem, draft?.selections || {}),
+        }
+      })
+      return JSON.stringify(next) === JSON.stringify(prev) ? prev : next
     })
   }, [cartLoaded, menuMap])
   const recommendationItems = useMemo(
@@ -1194,11 +1243,12 @@ export default function CustomerMenu() {
     menuItemId: string,
     sourceDrafts: Record<string, CartDraft> = cartDrafts,
   ): CartDraft => {
+    const menuItem = menuMap.get(menuItemId)
     const existing = sourceDrafts[menuItemId]
     if (existing) {
       return {
         note: String(existing.note || ''),
-        selections: normalizeSelections(existing.selections || {}),
+        selections: sanitizeSelectionsForMenuItem(menuItem, existing.selections || {}),
       }
     }
 
