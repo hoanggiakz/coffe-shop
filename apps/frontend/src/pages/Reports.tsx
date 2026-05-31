@@ -132,6 +132,43 @@ interface ReportChatResponse {
   sampleRows?: Array<Record<string, unknown>>
 }
 
+interface QualityCheckItem {
+  name: string
+  ok: boolean
+  detail?: unknown
+}
+
+interface QualitySummaryResponse {
+  timestamp: string
+  branchId?: string | null
+  quality: {
+    status: 'ok' | 'degraded'
+    source: string
+    checks: QualityCheckItem[]
+  }
+  fallbackRatios: Record<
+    string,
+    {
+      totalResponses: number
+      fallbackResponses: number
+      fallbackRatio: number
+      sources: Record<string, number>
+    }
+  >
+  attention: {
+    highFallbackEndpoints: Record<
+      string,
+      {
+        totalResponses: number
+        fallbackResponses: number
+        fallbackRatio: number
+        sources: Record<string, number>
+      }
+    >
+    count: number
+  }
+}
+
 function formatSentimentIssueLabel(issue: string): string {
   const normalized = String(issue || '').trim().toLowerCase()
   const topicMap: Record<string, string> = {
@@ -201,6 +238,7 @@ export default function Reports() {
   const [reportChatQuestion, setReportChatQuestion] = useState('')
   const [reportChatLoading, setReportChatLoading] = useState(false)
   const [reportChatResult, setReportChatResult] = useState<ReportChatResponse | null>(null)
+  const [qualitySummary, setQualitySummary] = useState<QualitySummaryResponse | null>(null)
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
@@ -247,17 +285,19 @@ export default function Reports() {
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
 
       try {
-        const [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult] = await Promise.allSettled([
+        const [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult, qualitySummaryResult] = await Promise.allSettled([
           requestAiWithRetry('/ai/forecast/revenue', { branchId: effectiveAiBranchId, days: 7 }),
           requestAiWithRetry('/ai/anomalies', { branchId: effectiveAiBranchId }),
           requestAiWithRetry('/ai/sentiment/summary', { branchId: effectiveAiBranchId }),
           requestAiWithRetry('/ai/sentiment/issues-top', { branchId: effectiveAiBranchId, days: 7, limit: 3 }),
+          requestAiWithRetry('/ai/ops/quality-summary', { branchId: effectiveAiBranchId }),
         ])
 
         const forecastData = forecastResult.status === 'fulfilled' ? forecastResult.value.data : null
         const anomalyData = anomalyResult.status === 'fulfilled' ? anomalyResult.value.data : null
         const sentimentData = sentimentResult.status === 'fulfilled' ? sentimentResult.value.data : null
         const sentimentIssuesData = sentimentIssuesResult.status === 'fulfilled' ? sentimentIssuesResult.value.data : null
+        const qualityData = qualitySummaryResult.status === 'fulfilled' ? qualitySummaryResult.value.data : null
         const aiAvailable = Boolean(forecastData || anomalyData || sentimentData || sentimentIssuesData)
         const reasons = [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult]
           .filter((item): item is PromiseRejectedResult => item.status === 'rejected')
@@ -286,6 +326,7 @@ export default function Reports() {
             : [],
           fallbackReason: reasons.length ? reasons.join('; ') : undefined,
         })
+        setQualitySummary((qualityData || null) as QualitySummaryResponse | null)
       } catch (aiError: any) {
         setAiInsight({
           available: false,
@@ -297,6 +338,7 @@ export default function Reports() {
           sentimentSource: '',
           fallbackReason: aiError?.response?.data?.message || 'AI service unavailable',
         })
+        setQualitySummary(null)
       }
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Không tải được dữ liệu báo cáo', 'Unable to load report data'))
@@ -583,6 +625,45 @@ export default function Reports() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card title="AI Quality Summary" subtitle="Theo dõi chất lượng dữ liệu và fallback ratio">
+        {!qualitySummary && <p className="text-sm text-slate-500">Chưa có dữ liệu quality summary.</p>}
+        {qualitySummary && (
+          <div className="space-y-3">
+            <div
+              className={`rounded-xl border px-3 py-2 text-sm ${
+                qualitySummary.quality.status === 'ok'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  : 'border-amber-200 bg-amber-50 text-amber-800'
+              }`}
+            >
+              Data quality: <span className="font-semibold">{qualitySummary.quality.status.toUpperCase()}</span>
+            </div>
+
+            {qualitySummary.attention.count > 0 && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                <p className="font-semibold">Cảnh báo fallback cao ({qualitySummary.attention.count} endpoint)</p>
+                <div className="mt-1 space-y-1 text-xs">
+                  {Object.entries(qualitySummary.attention.highFallbackEndpoints).map(([endpoint, item]) => (
+                    <p key={endpoint}>
+                      {endpoint}: <span className="font-semibold">{Math.round((item.fallbackRatio || 0) * 100)}%</span> fallback
+                      ({item.fallbackResponses}/{item.totalResponses})
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              {qualitySummary.quality.checks.map((check) => (
+                <p key={check.name} className={`text-xs ${check.ok ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {check.ok ? '✓' : '⚠'} {check.name}
+                </p>
+              ))}
             </div>
           </div>
         )}
