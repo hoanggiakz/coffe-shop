@@ -2776,19 +2776,37 @@ export default function CustomerMenu() {
         </div>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-sky-100 bg-white/95 px-3 py-2 backdrop-blur lg:hidden">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs text-slate-500">{cartItemCount} món trong giỏ</p>
-            <p className="truncate text-sm font-bold text-slate-900">Tạm tính {formatVnd(payableCartTotal)}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setCartDrawerOpen(true)}
-            className="inline-flex min-h-11 items-center rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white"
-          >
-            Xem giỏ hàng
-          </button>
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-sky-100 bg-white/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 backdrop-blur lg:hidden">
+        <div className="mx-auto max-w-7xl">
+          {cartItemCount > 0 ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs text-slate-500">{cartItemCount} món trong giỏ</p>
+                  <p className="truncate text-sm font-bold text-slate-900">Tạm tính {formatVnd(payableCartTotal)}</p>
+                </div>
+                <p className="text-xs font-medium text-emerald-700">Sẵn sàng gửi đơn</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCartDrawerOpen(true)}
+                className="inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white"
+              >
+                Xem giỏ hàng và đặt món
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2">
+              <p className="text-xs text-slate-600">Giỏ đang trống, hãy thêm món để bắt đầu.</p>
+              <button
+                type="button"
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                className="shrink-0 rounded-lg border border-sky-200 bg-white px-2 py-1 text-xs font-semibold text-sky-700"
+              >
+                Chọn món
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -3051,7 +3069,11 @@ export default function CustomerMenu() {
       )}
 
       {chatOpen && (
-        <div className="fixed inset-x-3 bottom-32 z-40 rounded-2xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-x-auto sm:right-4 sm:bottom-24 sm:w-[calc(100vw-2rem)] sm:max-w-sm lg:bottom-6">
+        <div
+          className={`fixed inset-x-3 z-40 rounded-2xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-x-auto sm:right-4 sm:w-[calc(100vw-2rem)] sm:max-w-sm lg:bottom-6 ${
+            cartItemCount > 0 ? 'bottom-36 sm:bottom-24' : 'bottom-20 sm:bottom-24'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <p className="font-semibold text-slate-900">Chat hỗ trợ - {tableName}</p>
             <div className="flex items-center gap-1">
@@ -3136,7 +3158,9 @@ export default function CustomerMenu() {
       <button
         type="button"
         onClick={toggleChatWidget}
-        className="fixed bottom-24 right-4 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-sky-700 text-white shadow-lg lg:bottom-6"
+        className={`fixed right-4 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-sky-700 text-white shadow-lg lg:bottom-6 ${
+          cartItemCount > 0 ? 'bottom-32' : 'bottom-6'
+        }`}
         aria-label="Mở chat hỗ trợ"
       >
         <ChatBubbleLeftRightIcon className="h-6 w-6" />
