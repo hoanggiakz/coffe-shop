@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import psycopg
 import sqlparse
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, Field
@@ -33,6 +33,8 @@ KB_REFRESH_INTERVAL_MINUTES = int(os.getenv("AI_KB_REFRESH_INTERVAL_MINUTES", "3
 AI_FORECAST_CRON_ENABLED = os.getenv("AI_FORECAST_CRON_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
 AI_FORECAST_CRON_HOUR_UTC = int(os.getenv("AI_FORECAST_CRON_HOUR_UTC", "19"))  # 02:00 ICT ~= 19:00 UTC (previous day)
 CHAT_SERVICE_API_URL = os.getenv("CHAT_SERVICE_API_URL", "http://chat-service:3007/api/chats").strip().rstrip("/")
+AI_ENFORCE_RBAC = os.getenv("AI_ENFORCE_RBAC", "false").strip().lower() in {"1", "true", "yes"}
+AI_ALLOW_LEGACY_NO_AUTH = os.getenv("AI_ALLOW_LEGACY_NO_AUTH", "true").strip().lower() in {"1", "true", "yes"}
 
 DEFAULT_MENU_KB = [
     {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
@@ -158,6 +160,29 @@ def normalize_limit(value: int, lower: int = 1, upper: int = 10) -> int:
     if value < lower or value > upper:
         raise HTTPException(status_code=400, detail=f"limit must be between {lower} and {upper}")
     return value
+
+
+def authorize_request(
+    request: Request,
+    branch_id: str | None,
+    allowed_roles: set[str],
+) -> dict[str, str]:
+    role = str(request.headers.get("x-actor-role") or request.headers.get("x-user-role") or "").strip().upper()
+    actor_branch_id = str(request.headers.get("x-actor-branch-id") or request.headers.get("x-branch-id") or "").strip()
+    actor_user_id = str(request.headers.get("x-actor-user-id") or request.headers.get("x-user-id") or "").strip()
+
+    if not role:
+        if AI_ENFORCE_RBAC and not AI_ALLOW_LEGACY_NO_AUTH:
+            raise HTTPException(status_code=401, detail="Missing actor role")
+        return {"role": "LEGACY", "branchId": actor_branch_id, "userId": actor_user_id}
+
+    if role not in allowed_roles:
+        raise HTTPException(status_code=403, detail="Insufficient role for this endpoint")
+
+    if role == "MANAGER" and branch_id and actor_branch_id and actor_branch_id != branch_id:
+        raise HTTPException(status_code=403, detail="Manager cannot access other branch scope")
+
+    return {"role": role, "branchId": actor_branch_id, "userId": actor_user_id}
 
 
 def reload_knowledge_base(source: str = "manual") -> dict[str, Any]:
@@ -644,7 +669,8 @@ def kb_reload() -> dict[str, Any]:
 
 @app.get("/api/ai/forecast/revenue")
 @metric_guard("forecast_revenue")
-def forecast_revenue(branchId: str, days: int = 7, granularity: str = "daily") -> dict[str, Any]:
+def forecast_revenue(request: Request, branchId: str, days: int = 7, granularity: str = "daily") -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
     days = max(1, min(days, 30))
     now = datetime.now(timezone.utc)
@@ -679,6 +705,7 @@ def forecast_revenue(branchId: str, days: int = 7, granularity: str = "daily") -
                     "modelVersion": AI_ACTIVE_MODEL_VERSION,
                     "mape": 12.5,
                     "source": "db",
+                    "available": True,
                 }
         except Exception:
             pass
@@ -705,12 +732,14 @@ def forecast_revenue(branchId: str, days: int = 7, granularity: str = "daily") -
         "modelVersion": AI_ACTIVE_MODEL_VERSION,
         "mape": 12.5,
         "source": "fallback",
+        "available": True,
     }
 
 
 @app.get("/api/ai/forecast/revenue/hourly")
 @metric_guard("forecast_hourly")
-def forecast_revenue_hourly(branchId: str) -> dict[str, Any]:
+def forecast_revenue_hourly(request: Request, branchId: str) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     points = [{"hour": hour, "predictedRevenue": 120_000 + (hour % 6) * 30_000} for hour in range(24)]
     log_audit("/api/ai/forecast/revenue/hourly", "predict", True, branchId)
     return {
@@ -723,7 +752,8 @@ def forecast_revenue_hourly(branchId: str) -> dict[str, Any]:
 
 @app.get("/api/ai/forecast/inventory")
 @metric_guard("forecast_inventory")
-def forecast_inventory(branchId: str, days: int = 7) -> dict[str, Any]:
+def forecast_inventory(request: Request, branchId: str, days: int = 7) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     log_audit("/api/ai/forecast/inventory", "predict", True, branchId)
     return {
         "branchId": branchId,
@@ -739,7 +769,8 @@ def forecast_inventory(branchId: str, days: int = 7) -> dict[str, Any]:
 
 @app.get("/api/ai/forecast/staffing")
 @metric_guard("forecast_staffing")
-def forecast_staffing(branchId: str) -> dict[str, Any]:
+def forecast_staffing(request: Request, branchId: str) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     log_audit("/api/ai/forecast/staffing", "predict", True, branchId)
     return {
         "branchId": branchId,
@@ -811,22 +842,24 @@ def recommend_feedback(payload: RecommendationFeedback) -> dict[str, Any]:
 
 @app.get("/api/ai/anomalies")
 @metric_guard("anomalies")
-def anomalies(branchId: str, severity: str | None = None) -> dict[str, Any]:
+def anomalies(request: Request, branchId: str, severity: str | None = None) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
     db_items = load_anomalies_from_db(branchId, severity)
     if db_items:
-        return {"branchId": branchId, "items": db_items}
+        return {"branchId": branchId, "items": db_items, "source": "db", "available": True}
 
     filtered = [a for a in ANOMALIES if a["branchId"] == branchId]
     if severity:
         filtered = [a for a in filtered if a["severity"] == severity.upper()]
     log_audit("/api/ai/anomalies", "list", True, branchId)
-    return {"branchId": branchId, "items": filtered}
+    return {"branchId": branchId, "items": filtered, "source": "fallback", "available": True}
 
 
 @app.post("/api/ai/anomalies/detect")
 @metric_guard("anomaly_detect")
-def detect_anomaly(payload: AnomalyDetectPayload) -> dict[str, Any]:
+def detect_anomaly(payload: AnomalyDetectPayload, request: Request) -> dict[str, Any]:
+    authorize_request(request, payload.branchId, {"ADMIN", "MANAGER"})
     payload.branchId = normalize_branch_id(payload.branchId)
     if payload.baselineStd < 0:
         raise HTTPException(status_code=400, detail="baselineStd must be >= 0")
@@ -913,9 +946,16 @@ def detect_anomaly(payload: AnomalyDetectPayload) -> dict[str, Any]:
 
 @app.put("/api/ai/anomalies/{anomaly_id}/resolve")
 @metric_guard("anomaly_resolve")
-def resolve_anomaly(anomaly_id: str, payload: ResolveAnomalyPayload) -> dict[str, Any]:
+def resolve_anomaly(anomaly_id: str, payload: ResolveAnomalyPayload, request: Request) -> dict[str, Any]:
+    # branch scope check follows anomaly lookup; role check first.
+    actor = authorize_request(request, None, {"ADMIN", "MANAGER"})
     for item in ANOMALIES:
         if item["id"] == anomaly_id:
+            if actor["role"] == "MANAGER":
+                item_branch = str(item.get("branchId") or "").strip()
+                actor_branch = str(actor.get("branchId") or "").strip()
+                if item_branch and actor_branch and item_branch != actor_branch:
+                    raise HTTPException(status_code=403, detail="Manager cannot resolve anomaly of other branch")
             item["isResolved"] = True
             item["resolvedAt"] = datetime.now(timezone.utc).isoformat()
             item["resolutionNote"] = payload.note
@@ -927,9 +967,10 @@ def resolve_anomaly(anomaly_id: str, payload: ResolveAnomalyPayload) -> dict[str
 
 @app.get("/api/ai/anomalies/summary")
 @metric_guard("anomaly_summary")
-def anomalies_summary(branchId: str) -> dict[str, Any]:
+def anomalies_summary(request: Request, branchId: str) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
-    items = anomalies(branchId).get("items", [])
+    items = anomalies(request, branchId).get("items", [])
     resolved = sum(1 for a in items if a.get("isResolved"))
     log_audit("/api/ai/anomalies/summary", "summary", True, branchId)
     return {"branchId": branchId, "total": len(items), "resolved": resolved, "open": len(items) - resolved}
@@ -937,7 +978,8 @@ def anomalies_summary(branchId: str) -> dict[str, Any]:
 
 @app.get("/api/ai/sentiment/summary")
 @metric_guard("sentiment_summary")
-def sentiment_summary(branchId: str) -> dict[str, Any]:
+def sentiment_summary(request: Request, branchId: str) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
     if REPORT_DATABASE_URL:
         try:
@@ -955,17 +997,19 @@ def sentiment_summary(branchId: str) -> dict[str, Any]:
                     "negative": round(mapped.get("NEGATIVE", 0) / total, 4),
                     "sampleSize": total,
                     "modelVersion": AI_ACTIVE_MODEL_VERSION,
+                    "source": "db",
                 }
         except Exception:
             pass
 
     log_audit("/api/ai/sentiment/summary", "summary", True, branchId)
-    return {"branchId": branchId, "positive": 0.78, "neutral": 0.15, "negative": 0.07, "sampleSize": 120, "modelVersion": AI_ACTIVE_MODEL_VERSION}
+    return {"branchId": branchId, "positive": 0.78, "neutral": 0.15, "negative": 0.07, "sampleSize": 120, "modelVersion": AI_ACTIVE_MODEL_VERSION, "source": "fallback"}
 
 
 @app.get("/api/ai/sentiment/trend")
 @metric_guard("sentiment_trend")
-def sentiment_trend(branchId: str, days: int = 7) -> dict[str, Any]:
+def sentiment_trend(request: Request, branchId: str, days: int = 7) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
     if REPORT_DATABASE_URL:
         try:
@@ -1013,7 +1057,8 @@ def sentiment_trend(branchId: str, days: int = 7) -> dict[str, Any]:
 
 @app.get("/api/ai/sentiment/issues-top")
 @metric_guard("sentiment_issues_top")
-def sentiment_issues_top(branchId: str, days: int = 7, limit: int = 3) -> dict[str, Any]:
+def sentiment_issues_top(request: Request, branchId: str, days: int = 7, limit: int = 3) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
     safe_days = max(1, min(days, 30))
     safe_limit = max(1, min(limit, 10))
@@ -1041,7 +1086,8 @@ def sentiment_issues_top(branchId: str, days: int = 7, limit: int = 3) -> dict[s
 
 @app.post("/api/ai/sentiment/analyze")
 @metric_guard("sentiment_analyze")
-def sentiment_analyze(payload: SentimentAnalyzePayload) -> dict[str, Any]:
+def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dict[str, Any]:
+    authorize_request(request, payload.branchId, {"ADMIN", "MANAGER"})
     payload.branchId = normalize_branch_id(payload.branchId)
     label, confidence, scores = classify_sentiment(payload.text)
     persisted = False
@@ -1140,7 +1186,8 @@ def ai_chat(payload: ChatPayload) -> dict[str, Any]:
 
 @app.get("/api/ai/chat/history")
 @metric_guard("chat_history")
-def ai_chat_history(branchId: str | None = None, limit: int = 20) -> dict[str, Any]:
+def ai_chat_history(request: Request, branchId: str | None = None, limit: int = 20) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     records = CHAT_HISTORY
     if branchId:
         records = [item for item in records if item.get("branchId") == branchId]
@@ -1149,13 +1196,14 @@ def ai_chat_history(branchId: str | None = None, limit: int = 20) -> dict[str, A
 
 @app.get("/api/ai/chat/suggestions")
 @metric_guard("chat_suggestions")
-def ai_chat_suggestions() -> dict[str, Any]:
+def ai_chat_suggestions(request: Request) -> dict[str, Any]:
+    authorize_request(request, None, {"ADMIN", "MANAGER"})
     return {"items": ["Doanh thu hôm nay so với hôm qua?", "Món bán chạy nhất tuần này?", "Có cảnh báo bất thường nào đang mở?", "Tồn kho nguyên liệu nào sắp hết?"]}
 
 
 @app.post("/api/ai/report-chat")
 @metric_guard("report_chat")
-def report_chat(payload: ReportChatPayload) -> dict[str, Any]:
+def report_chat(payload: ReportChatPayload, request: Request) -> dict[str, Any]:
     start = time.perf_counter()
     question = str(payload.question or "").strip()
     if not question:
@@ -1163,6 +1211,11 @@ def report_chat(payload: ReportChatPayload) -> dict[str, Any]:
 
     branch_id = normalize_branch_id(payload.branchId) if payload.branchId is not None else None
     role = str(payload.role or "MANAGER").upper()
+    actor = authorize_request(request, branch_id, {"ADMIN", "MANAGER"})
+    if actor["role"] == "ADMIN":
+        role = "ADMIN"
+    elif actor["role"] == "MANAGER":
+        role = "MANAGER"
     intent = infer_report_intent(question)
     sql = map_question_to_sql(question, branch_id)
 
