@@ -58,6 +58,7 @@ type RealtimeCartPayload = {
   branchId?: string;
   orderId: string;
   cartVersion: string;
+  versionVector: { orderId: string; revision: number };
   serverWins: true;
   promotionCode?: string | null;
   discountAmount?: number;
@@ -66,12 +67,28 @@ type RealtimeCartPayload = {
   cart: Record<string, RealtimeCartLine>;
 };
 
+type CartConflictTelemetryRecord = {
+  id: string;
+  timestamp: string;
+  tableId?: string;
+  orderId?: string;
+  branchId?: string;
+  localVersion?: string;
+  incomingVersion?: string;
+  action?: string;
+  reason?: string;
+  source?: string;
+  detail?: Record<string, any>;
+};
+
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
   private readonly tableOrderRateWindowMs = Math.max(Number(process.env.ORDER_TABLE_RATE_LIMIT_WINDOW_MS || 30000), 1000);
   private readonly tableOrderRateMax = Math.max(Number(process.env.ORDER_TABLE_RATE_LIMIT_MAX || 10), 1);
   private readonly tableOrderRateHits = new Map<string, number[]>();
+  private readonly cartTelemetryBuffer: CartConflictTelemetryRecord[] = [];
+  private readonly cartTelemetryMax = 500;
 
   constructor(
     private prisma: PrismaService,
@@ -3528,12 +3545,15 @@ export class OrderService {
     orderItems?: Array<{ menuItemId?: string; quantity?: number; note?: string | null; options?: string | null }>;
   }) {
     const cart = this.buildRealtimeCartFromOrderItems(order.orderItems || []);
-    const cartVersion = new Date(order.updatedAt || new Date()).toISOString();
+    const updatedAt = new Date(order.updatedAt || new Date());
+    const revision = updatedAt.getTime();
+    const cartVersion = `${order.id}:${revision}`;
     const payload: RealtimeCartPayload = {
       tableId: order.tableId,
       branchId: order.branchId || undefined,
       orderId: order.id,
       cartVersion,
+      versionVector: { orderId: order.id, revision },
       serverWins: true,
       promotionCode: order.promotionCode || undefined,
       discountAmount: Number(order.discountAmount || 0),
@@ -3584,6 +3604,41 @@ export class OrderService {
       };
     }
     return next;
+  }
+
+  recordCartConflictTelemetry(input: Partial<CartConflictTelemetryRecord>) {
+    const record: CartConflictTelemetryRecord = {
+      id: `ct_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: new Date().toISOString(),
+      tableId: input.tableId ? String(input.tableId) : undefined,
+      orderId: input.orderId ? String(input.orderId) : undefined,
+      branchId: input.branchId ? String(input.branchId) : undefined,
+      localVersion: input.localVersion ? String(input.localVersion) : undefined,
+      incomingVersion: input.incomingVersion ? String(input.incomingVersion) : undefined,
+      action: input.action ? String(input.action) : undefined,
+      reason: input.reason ? String(input.reason) : undefined,
+      source: input.source ? String(input.source) : undefined,
+      detail: input.detail && typeof input.detail === 'object' ? input.detail : undefined,
+    };
+    this.cartTelemetryBuffer.unshift(record);
+    if (this.cartTelemetryBuffer.length > this.cartTelemetryMax) {
+      this.cartTelemetryBuffer.length = this.cartTelemetryMax;
+    }
+    this.logger.log(
+      `[cart-telemetry] action=${record.action || '-'} order=${record.orderId || '-'} table=${record.tableId || '-'} local=${record.localVersion || '-'} incoming=${record.incomingVersion || '-'}`,
+    );
+    return { success: true, id: record.id };
+  }
+
+  listCartConflictTelemetry(limit = 100) {
+    const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(Number(limit)), 1), 500) : 100;
+    return {
+      data: this.cartTelemetryBuffer.slice(0, safeLimit),
+      meta: {
+        total: this.cartTelemetryBuffer.length,
+        limit: safeLimit,
+      },
+    };
   }
 
   private async emitStaffNotification(payload: {

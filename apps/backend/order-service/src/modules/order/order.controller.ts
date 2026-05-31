@@ -30,6 +30,30 @@ export class OrderController {
     };
   }
 
+  @Post('cart/telemetry')
+  @HttpCode(HttpStatus.OK)
+  recordCartTelemetry(
+    @Body()
+    body?: {
+      tableId?: string;
+      orderId?: string;
+      branchId?: string;
+      localVersion?: string;
+      incomingVersion?: string;
+      action?: string;
+      reason?: string;
+      source?: string;
+      detail?: Record<string, any>;
+    },
+  ) {
+    return this.orderService.recordCartConflictTelemetry(body || {});
+  }
+
+  @Get('cart/telemetry')
+  listCartTelemetry(@Query('limit') limit?: string) {
+    return this.orderService.listCartConflictTelemetry(Number(limit || 100));
+  }
+
   // ── Menu ────────────────────────────────────────────────
   @Get('menu')
   getMenu(

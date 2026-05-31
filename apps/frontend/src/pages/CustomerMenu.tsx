@@ -74,6 +74,7 @@ interface CartStorageSnapshot {
   subtotal: number
   finalAmount: number
   lastUpdated: string
+  cartVersion?: string
 }
 
 interface CartRealtimePayload {
@@ -81,6 +82,7 @@ interface CartRealtimePayload {
   orderId?: string
   cartVersion?: string
   serverWins?: boolean
+  versionVector?: { orderId?: string; revision?: number }
   promotionCode?: string | null
   discountAmount?: number
   subtotal?: number
@@ -532,6 +534,22 @@ function formatVnd(value: unknown): string {
   return `${normalizeVndAmount(value).toLocaleString('vi-VN')}đ`
 }
 
+function parseCartVersion(version: string): { orderId: string; revision: number } {
+  const raw = String(version || '').trim()
+  if (!raw) return { orderId: '', revision: 0 }
+  const separator = raw.lastIndexOf(':')
+  if (separator <= 0) return { orderId: '', revision: Number(raw) || 0 }
+  const orderId = raw.slice(0, separator).trim()
+  const revision = Number(raw.slice(separator + 1).trim() || 0)
+  return { orderId, revision: Number.isFinite(revision) ? revision : 0 }
+}
+
+function buildCartVersion(orderId: string | null | undefined, revision: number): string {
+  const normalizedOrderId = String(orderId || '').trim() || 'local'
+  const normalizedRevision = Number.isFinite(revision) ? Math.max(0, Math.floor(revision)) : Date.now()
+  return `${normalizedOrderId}:${normalizedRevision}`
+}
+
 function normalizeVietnameseText(input: unknown): string {
   const raw = String(input || '').trim()
   if (!raw) return ''
@@ -692,6 +710,34 @@ export default function CustomerMenu() {
   const lineRemoveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const cartVersionRef = useRef<string>('')
   const persistCartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastTelemetryKeyRef = useRef('')
+
+  const sendCartTelemetry = async (payload: {
+    action: string
+    reason: string
+    localVersion?: string
+    incomingVersion?: string
+    detail?: Record<string, any>
+  }) => {
+    const dedupKey = `${payload.action}:${payload.reason}:${payload.localVersion || ''}:${payload.incomingVersion || ''}`
+    if (lastTelemetryKeyRef.current === dedupKey) return
+    lastTelemetryKeyRef.current = dedupKey
+    try {
+      await api.post('/orders/cart/telemetry', {
+        tableId: tableId || undefined,
+        orderId: currentOrderId || undefined,
+        branchId: qrBranchId || undefined,
+        localVersion: payload.localVersion,
+        incomingVersion: payload.incomingVersion,
+        action: payload.action,
+        reason: payload.reason,
+        source: 'customer-menu',
+        detail: payload.detail,
+      })
+    } catch {
+      // ignore telemetry failures
+    }
+  }
 
   useEffect(() => {
     let ignore = false
@@ -859,9 +905,15 @@ export default function CustomerMenu() {
         const isSnapshot = Array.isArray(parsed?.items)
         const restored = isSnapshot ? restoreCartFromSnapshot(parsed) : restoreCartFromStorage(parsed)
         if (isSnapshot) {
-          cartVersionRef.current = String(parsed?.lastUpdated || '')
+          const savedVersion = String(parsed?.cartVersion || '').trim()
+          if (savedVersion) {
+            cartVersionRef.current = savedVersion
+          } else {
+            const fallbackRevision = new Date(String(parsed?.lastUpdated || new Date().toISOString())).getTime()
+            cartVersionRef.current = `${currentOrderId || 'local'}:${Number.isFinite(fallbackRevision) ? fallbackRevision : Date.now()}`
+          }
         } else if (!cartVersionRef.current) {
-          cartVersionRef.current = new Date().toISOString()
+          cartVersionRef.current = `${currentOrderId || 'local'}:${Date.now()}`
         }
         if (isSnapshot) {
           const discountCode = String(parsed?.discountCode || '').trim()
@@ -895,11 +947,14 @@ export default function CustomerMenu() {
       clearTimeout(persistCartTimerRef.current)
     }
     persistCartTimerRef.current = setTimeout(() => {
+      const nextRevision = Date.now()
+      const nextVersion = buildCartVersion(currentOrderId || null, nextRevision)
       const nextSnapshot: CartStorageSnapshot = {
         ...cartStorageSnapshot,
-        lastUpdated: new Date().toISOString(),
+        lastUpdated: new Date(nextRevision).toISOString(),
+        cartVersion: nextVersion,
       }
-      cartVersionRef.current = nextSnapshot.lastUpdated
+      cartVersionRef.current = nextVersion
       const serialized = JSON.stringify(nextSnapshot)
       try {
         localStorage.setItem(cartStorageKey, serialized)
@@ -922,7 +977,7 @@ export default function CustomerMenu() {
         persistCartTimerRef.current = null
       }
     }
-  }, [cartLoaded, cartSessionFallbackKey, cartStorageKey, cartStorageSnapshot])
+  }, [cartLoaded, cartSessionFallbackKey, cartStorageKey, cartStorageSnapshot, currentOrderId])
 
   useEffect(() => {
     const onEscCloseDrawer = (event: KeyboardEvent) => {
@@ -1379,11 +1434,41 @@ export default function CustomerMenu() {
     const onCartUpdated = (payload: CartRealtimePayload) => {
       if (String(payload?.tableId || '').trim() !== tableId) return
       if (!payload?.cart || typeof payload.cart !== 'object') return
-      const incomingVersion = String(payload?.cartVersion || '').trim()
       const localVersion = String(cartVersionRef.current || '').trim()
-      if (incomingVersion && localVersion && new Date(incomingVersion).getTime() < new Date(localVersion).getTime()) {
+      const localVector = parseCartVersion(localVersion)
+      const incomingOrderIdRaw = String(payload?.versionVector?.orderId || payload?.orderId || '').trim()
+      const incomingRevisionRaw = Number(payload?.versionVector?.revision || 0)
+      const incomingFallback = parseCartVersion(String(payload?.cartVersion || '').trim())
+      const incomingVector = {
+        orderId: incomingOrderIdRaw || incomingFallback.orderId,
+        revision: incomingRevisionRaw > 0 ? incomingRevisionRaw : incomingFallback.revision,
+      }
+      const incomingVersion = buildCartVersion(incomingVector.orderId || 'unknown', incomingVector.revision || Date.now())
+
+      if (!incomingVector.orderId || !incomingVector.revision) {
+        void sendCartTelemetry({
+          localVersion,
+          incomingVersion: String(payload?.cartVersion || '').trim(),
+          action: 'drop_invalid_payload',
+          reason: 'missing-version-vector',
+          detail: { hasOrderId: Boolean(payload?.orderId), hasRevision: Boolean(payload?.versionVector?.revision) },
+        })
         return
       }
+
+      const isSameOrder = !localVector.orderId || localVector.orderId === incomingVector.orderId
+      const isStaleSameOrder = isSameOrder && localVector.revision > 0 && incomingVector.revision <= localVector.revision
+      if (isStaleSameOrder) {
+        void sendCartTelemetry({
+          localVersion,
+          incomingVersion,
+          action: 'drop_stale',
+          reason: 'incoming-revision-not-newer',
+          detail: { localVector, incomingVector },
+        })
+        return
+      }
+
       const nextCart = Array.isArray((payload.cart as any)?.items)
         ? restoreCartFromSnapshot(payload.cart)
         : restoreCartFromStorage(payload.cart)
@@ -1402,9 +1487,14 @@ export default function CustomerMenu() {
         setPromoCode('')
         setPromoPreview(null)
       }
-      if (incomingVersion) {
-        cartVersionRef.current = incomingVersion
-      }
+      cartVersionRef.current = incomingVersion
+      void sendCartTelemetry({
+        localVersion,
+        incomingVersion,
+        action: 'apply_server_wins',
+        reason: payload.serverWins ? 'server-wins' : 'remote-update',
+        detail: { localVector, incomingVector, cartLines: Object.keys(nextCart).length },
+      })
       toast(payload.serverWins ? 'Giỏ hàng đã đồng bộ theo máy chủ (server-wins)' : 'Giỏ hàng vừa được cập nhật bởi nhân viên')
     }
 
