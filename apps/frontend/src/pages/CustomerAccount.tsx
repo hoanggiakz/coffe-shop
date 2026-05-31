@@ -52,6 +52,7 @@ type LoyaltyTx = {
 }
 
 const authStorageKey = 'customer-auth-session'
+const menuReturnUrlStorageKey = 'customer-menu-return-url'
 
 const formatVnd = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')}đ`
 
@@ -80,6 +81,19 @@ export default function CustomerAccount() {
     newPassword: '',
   })
   const [redeemPoints, setRedeemPoints] = useState('100')
+  const menuReturnUrl = useMemo(() => {
+    try {
+      const raw = String(localStorage.getItem(menuReturnUrlStorageKey) || '').trim()
+      if (raw.startsWith('/menu')) return raw
+    } catch {
+      // ignore
+    }
+    return '/menu'
+  }, [])
+  const menuReturnQuery = useMemo(() => {
+    const idx = menuReturnUrl.indexOf('?')
+    return idx >= 0 ? menuReturnUrl.slice(idx) : ''
+  }, [menuReturnUrl])
 
   useEffect(() => {
     try {
@@ -200,7 +214,7 @@ export default function CustomerAccount() {
         <div className="mx-auto max-w-xl rounded-2xl border border-amber-200 bg-white p-5">
           <p className="text-lg font-semibold text-slate-900">Bạn chưa đăng nhập tài khoản khách hàng</p>
           <p className="mt-2 text-sm text-slate-600">Vui lòng quay lại menu để đăng nhập rồi truy cập lại trang tài khoản.</p>
-          <Link to="/menu" className="mt-4 inline-flex rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white">
+          <Link to={menuReturnUrl} className="mt-4 inline-flex rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white">
             Quay lại menu
           </Link>
         </div>
@@ -218,8 +232,8 @@ export default function CustomerAccount() {
               <p className="text-sm text-slate-600">{profile?.name || session.name}</p>
             </div>
             <div className="flex gap-2">
-              <Link to="/menu/rewards" className="rounded-xl border border-emerald-200 px-3 py-2 text-sm text-emerald-700">Rewards</Link>
-              <Link to="/menu" className="rounded-xl border border-amber-200 px-3 py-2 text-sm text-amber-700">Về menu</Link>
+              <Link to={`/menu/rewards${menuReturnQuery}`} className="rounded-xl border border-emerald-200 px-3 py-2 text-sm text-emerald-700">Rewards</Link>
+              <Link to={menuReturnUrl} className="rounded-xl border border-amber-200 px-3 py-2 text-sm text-amber-700">Về menu</Link>
             </div>
           </div>
           <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">

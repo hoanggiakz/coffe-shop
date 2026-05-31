@@ -33,6 +33,8 @@ interface MenuItem {
   category: string
   available: boolean
   image?: string | null
+  badges?: string[]
+  quickNotes?: string[]
   customizations?: CustomizationGroup[]
 }
 
@@ -315,6 +317,41 @@ function normalizeCustomizations(raw: unknown): CustomizationGroup[] {
     .filter((entry) => entry.id && entry.label)
 }
 
+function normalizeSpecOptionsToCustomizations(raw: unknown): CustomizationGroup[] {
+  const options = raw && typeof raw === 'object' ? (raw as Record<string, any>) : {}
+  const sizes = Array.isArray(options.sizes) ? options.sizes : []
+  const toppings = Array.isArray(options.toppings) ? options.toppings : []
+  const groups: CustomizationGroup[] = []
+
+  if (sizes.length > 0) {
+    groups.push({
+      id: 'size',
+      label: 'Size',
+      type: 'single',
+      options: sizes.map((size: any) => ({
+        value: String(size?.name || ''),
+        label: String(size?.name || ''),
+        priceDelta: Number(size?.priceModifier || 0),
+      })),
+    })
+  }
+
+  if (toppings.length > 0) {
+    groups.push({
+      id: 'toppings',
+      label: 'Topping',
+      type: 'multi',
+      options: toppings.map((topping: any) => ({
+        value: String(topping?.name || ''),
+        label: String(topping?.name || ''),
+        priceDelta: Number(topping?.priceModifier || 0),
+      })),
+    })
+  }
+
+  return groups
+}
+
 function toNumber(value: string | null): number | null {
   if (!value) return null
   const parsed = Number(value)
@@ -461,6 +498,7 @@ type DiscountValidationCachePayload = {
 const CART_DB_NAME = 'coffee-cart-db'
 const CART_DB_VERSION = 1
 const CART_DB_STORE = 'cart_snapshots'
+const CUSTOMER_MENU_RETURN_URL_KEY = 'customer-menu-return-url'
 
 async function openCartIndexedDb(): Promise<IDBDatabase> {
   return await new Promise((resolve, reject) => {
@@ -633,6 +671,10 @@ export default function CustomerMenu() {
   const qrTableId = searchParams.get('tableId') || ''
   const qrBranchId = searchParams.get('branchId') || ''
   const qrTableNumber = toNumber(searchParams.get('tableNumber'))
+  const menuReturnUrl = useMemo(() => {
+    const query = searchParams.toString()
+    return query ? `/menu?${query}` : '/menu'
+  }, [searchParams])
 
   const [tableId, setTableId] = useState('')
   const [tableName, setTableName] = useState('Chưa xác định')
@@ -653,6 +695,7 @@ export default function CustomerMenu() {
   const [orderCustomerName, setOrderCustomerName] = useState('')
   const [orderCustomerPhone, setOrderCustomerPhone] = useState('')
   const [searchText, setSearchText] = useState('')
+  const [debouncedSearchText, setDebouncedSearchText] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('ALL')
 
   const [currentOrderId, setCurrentOrderId] = useState('')
@@ -681,6 +724,11 @@ export default function CustomerMenu() {
   const [staffTyping, setStaffTyping] = useState(false)
   const [cartDrawerOpen, setCartDrawerOpen] = useState(false)
   const [pendingLineRemoveConfirm, setPendingLineRemoveConfirm] = useState<Record<string, boolean>>({})
+  const [customizeOpen, setCustomizeOpen] = useState(false)
+  const [customizeMenuItemId, setCustomizeMenuItemId] = useState('')
+  const [customizeQuantity, setCustomizeQuantity] = useState(1)
+  const [customizeSelections, setCustomizeSelections] = useState<CartSelections>({})
+  const [customizeNote, setCustomizeNote] = useState('')
 
   const [customerToken, setCustomerToken] = useState('')
   const [customerSession, setCustomerSession] = useState<CustomerSession | null>(null)
@@ -708,6 +756,7 @@ export default function CustomerMenu() {
   const pendingChatFlushRef = useRef(false)
   const customerTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lineRemoveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const categorySectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const cartVersionRef = useRef<string>('')
   const persistCartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTelemetryKeyRef = useRef('')
@@ -738,6 +787,14 @@ export default function CustomerMenu() {
       // ignore telemetry failures
     }
   }
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CUSTOMER_MENU_RETURN_URL_KEY, menuReturnUrl)
+    } catch {
+      // ignore storage failure
+    }
+  }, [menuReturnUrl])
 
   useEffect(() => {
     let ignore = false
@@ -804,6 +861,13 @@ export default function CustomerMenu() {
     }
   }, [qrTableId, qrBranchId, qrTableNumber])
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchText(searchText)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchText])
+
   const normalizeMenuPayload = (payload: any): MenuItem[] => {
     const fromFlat = (rows: any[]) =>
       rows.map((item: any) => ({
@@ -816,6 +880,10 @@ export default function CustomerMenu() {
         price: normalizeVndAmount(item.price),
         available: item.available ?? item.is_available,
         category: item.category || item.category_name || 'Khac',
+        badges: Array.isArray(item.badges) ? item.badges.map((entry: any) => String(entry || '').trim()).filter(Boolean) : [],
+        quickNotes: Array.isArray(item.quickNotes)
+          ? item.quickNotes.map((entry: any) => String(entry || '').trim()).filter(Boolean)
+          : [],
         customizations: normalizeCustomizations(item.customizations ?? item.custom_options),
       }))
 
@@ -834,7 +902,15 @@ export default function CustomerMenu() {
           price: normalizeVndAmount(item.price),
           available: item.available ?? item.isAvailable ?? item.is_available,
           category: category.name || 'Khac',
-          customizations: normalizeCustomizations(item.customizations ?? item.custom_options ?? item.options),
+          badges: Array.isArray(item.badges) ? item.badges.map((entry: any) => String(entry || '').trim()).filter(Boolean) : [],
+          quickNotes: Array.isArray(item?.options?.quickNotes)
+            ? item.options.quickNotes.map((entry: any) => String(entry || '').trim()).filter(Boolean)
+            : [],
+          customizations: (() => {
+            const normalizedCustomizations = normalizeCustomizations(item.customizations ?? item.custom_options)
+            if (normalizedCustomizations.length > 0) return normalizedCustomizations
+            return normalizeSpecOptionsToCustomizations(item.options)
+          })(),
         })),
       )
     }
@@ -915,19 +991,7 @@ export default function CustomerMenu() {
         } else if (!cartVersionRef.current) {
           cartVersionRef.current = `${currentOrderId || 'local'}:${Date.now()}`
         }
-        if (isSnapshot) {
-          const discountCode = String(parsed?.discountCode || '').trim()
-          const discountAmount = Number(parsed?.discountAmount || 0)
-          if (discountCode && discountAmount > 0) {
-            setPromoCode(discountCode)
-            setPromoPreview({
-              code: discountCode.toUpperCase(),
-              discountAmount,
-              finalAmount: Number(parsed?.finalAmount || 0),
-              description: 'Khôi phục từ phiên trước',
-            })
-          }
-        }
+        // Spec alignment: discount code is validated per-session and not restored from local storage.
         if (active) setCart(restored)
       } catch {
         if (active) setCart({})
@@ -940,44 +1004,6 @@ export default function CustomerMenu() {
       active = false
     }
   }, [cartStorageKey, cartSessionFallbackKey])
-
-  useEffect(() => {
-    if (!cartStorageKey || !cartLoaded) return
-    if (persistCartTimerRef.current) {
-      clearTimeout(persistCartTimerRef.current)
-    }
-    persistCartTimerRef.current = setTimeout(() => {
-      const nextRevision = Date.now()
-      const nextVersion = buildCartVersion(currentOrderId || null, nextRevision)
-      const nextSnapshot: CartStorageSnapshot = {
-        ...cartStorageSnapshot,
-        lastUpdated: new Date(nextRevision).toISOString(),
-        cartVersion: nextVersion,
-      }
-      cartVersionRef.current = nextVersion
-      const serialized = JSON.stringify(nextSnapshot)
-      try {
-        localStorage.setItem(cartStorageKey, serialized)
-        if (cartSessionFallbackKey) {
-          sessionStorage.removeItem(cartSessionFallbackKey)
-        }
-        void deleteCartFromIndexedDb(cartStorageKey)
-      } catch {
-        if (cartSessionFallbackKey) {
-          sessionStorage.setItem(cartSessionFallbackKey, serialized)
-        }
-        void writeCartToIndexedDb(cartStorageKey, serialized)
-        toast.error('Bo nho localStorage day, da tam luu gio hang trong IndexedDB/session hien tai')
-      }
-    }, 300)
-
-    return () => {
-      if (persistCartTimerRef.current) {
-        clearTimeout(persistCartTimerRef.current)
-        persistCartTimerRef.current = null
-      }
-    }
-  }, [cartLoaded, cartSessionFallbackKey, cartStorageKey, cartStorageSnapshot, currentOrderId])
 
   useEffect(() => {
     const onEscCloseDrawer = (event: KeyboardEvent) => {
@@ -1553,16 +1579,29 @@ export default function CustomerMenu() {
   const categories = useMemo(() => ['ALL', ...new Set(menuItems.map((item) => item.category))], [menuItems])
 
   const filteredItems = useMemo(() => {
-    const keyword = searchText.trim().toLowerCase()
+    const keyword = debouncedSearchText.trim().toLowerCase()
     return menuItems.filter((item) => {
-      const byCategory = selectedCategory === 'ALL' || item.category === selectedCategory
       const byKeyword =
         !keyword ||
         item.name.toLowerCase().includes(keyword) ||
         (item.description || '').toLowerCase().includes(keyword)
-      return byCategory && byKeyword
+      return byKeyword
     })
-  }, [menuItems, searchText, selectedCategory])
+  }, [menuItems, debouncedSearchText])
+
+  const groupedFilteredItems = useMemo(() => {
+    const map = new Map<string, MenuItem[]>()
+    for (const item of filteredItems) {
+      const category = String(item.category || 'Khac')
+      const current = map.get(category) || []
+      current.push(item)
+      map.set(category, current)
+    }
+    return categories
+      .filter((category) => category !== 'ALL')
+      .map((category) => ({ category, items: map.get(category) || [] }))
+      .filter((entry) => entry.items.length > 0)
+  }, [categories, filteredItems])
 
   const buildDefaultSelections = (menuItemId: string): CartSelections => {
     const menuItem = menuMap.get(menuItemId)
@@ -1698,6 +1737,15 @@ export default function CustomerMenu() {
     return (prioritized.length ? prioritized : candidates).slice(0, 3)
   }, [cartLines, menuItems, menuMap])
 
+  const customizeMenuItem = useMemo(
+    () => (customizeMenuItemId ? menuMap.get(customizeMenuItemId) : undefined),
+    [customizeMenuItemId, menuMap],
+  )
+  const customizeUnitPrice = useMemo(() => {
+    if (!customizeMenuItem) return 0
+    return Number(customizeMenuItem.price || 0) + getCustomizationDelta(customizeMenuItem, customizeSelections)
+  }, [customizeMenuItem, customizeSelections])
+
   const cartStorageSnapshot = useMemo<CartStorageSnapshot>(() => {
     const branchId = String(qrBranchId || 'unknown').trim() || 'unknown'
     const snapshotItems: CartSnapshotItem[] = cartLines.map((line, index) => {
@@ -1729,13 +1777,51 @@ export default function CustomerMenu() {
       branchId,
       tableId: tableId || '',
       items: snapshotItems,
-      discountCode: promoPreview?.code || promoCode.trim() || undefined,
-      discountAmount: previewDiscount,
+      discountCode: undefined,
+      discountAmount: 0,
       subtotal: cartTotal,
       finalAmount: payableCartTotal,
       lastUpdated: new Date().toISOString(),
     }
-  }, [cartLines, cartTotal, menuMap, payableCartTotal, previewDiscount, promoCode, promoPreview?.code, qrBranchId, tableId])
+  }, [cartLines, cartTotal, menuMap, payableCartTotal, qrBranchId, tableId])
+
+  useEffect(() => {
+    if (!cartStorageKey || !cartLoaded) return
+    if (persistCartTimerRef.current) {
+      clearTimeout(persistCartTimerRef.current)
+    }
+    persistCartTimerRef.current = setTimeout(() => {
+      const nextRevision = Date.now()
+      const nextVersion = buildCartVersion(currentOrderId || null, nextRevision)
+      const nextSnapshot: CartStorageSnapshot = {
+        ...cartStorageSnapshot,
+        lastUpdated: new Date(nextRevision).toISOString(),
+        cartVersion: nextVersion,
+      }
+      cartVersionRef.current = nextVersion
+      const serialized = JSON.stringify(nextSnapshot)
+      try {
+        localStorage.setItem(cartStorageKey, serialized)
+        if (cartSessionFallbackKey) {
+          sessionStorage.removeItem(cartSessionFallbackKey)
+        }
+        void deleteCartFromIndexedDb(cartStorageKey)
+      } catch {
+        if (cartSessionFallbackKey) {
+          sessionStorage.setItem(cartSessionFallbackKey, serialized)
+        }
+        void writeCartToIndexedDb(cartStorageKey, serialized)
+        toast.error('Bo nho localStorage day, da tam luu gio hang trong IndexedDB/session hien tai')
+      }
+    }, 300)
+
+    return () => {
+      if (persistCartTimerRef.current) {
+        clearTimeout(persistCartTimerRef.current)
+        persistCartTimerRef.current = null
+      }
+    }
+  }, [cartLoaded, cartSessionFallbackKey, cartStorageKey, cartStorageSnapshot, currentOrderId])
 
   const increase = (menuItemId: string) => {
     const draft = getDraftForMenuItem(menuItemId)
@@ -1918,6 +2004,56 @@ export default function CustomerMenu() {
       const current = getDraftForMenuItem(menuItemId, prev)
       return { ...prev, [menuItemId]: { ...current, note } }
     })
+  }
+
+  const openCustomizeModal = (menuItemId: string) => {
+    const draft = getDraftForMenuItem(menuItemId)
+    setCustomizeMenuItemId(menuItemId)
+    setCustomizeSelections(normalizeSelections(draft.selections || {}))
+    setCustomizeNote(String(draft.note || ''))
+    setCustomizeQuantity(1)
+    setCustomizeOpen(true)
+  }
+
+  const closeCustomizeModal = () => {
+    setCustomizeOpen(false)
+  }
+
+  const addCustomizedItemToCart = () => {
+    const menuItem = menuMap.get(customizeMenuItemId)
+    if (!menuItem) return
+    const missingRequiredSingle = (menuItem.customizations || []).some(
+      (group) => group.type === 'single' && !(String(customizeSelections[group.id] || '').trim()),
+    )
+    if (missingRequiredSingle) {
+      toast.error('Vui lòng chọn đủ tuỳ chọn bắt buộc trước khi thêm vào giỏ')
+      return
+    }
+    const normalizedSelections = sanitizeSelectionsForMenuItem(menuItem, customizeSelections || {})
+    const normalizedNote = String(customizeNote || '')
+    const lineKey = buildCartLineKey(customizeMenuItemId, normalizedSelections, normalizedNote)
+    const qty = Math.max(1, Number(customizeQuantity || 1))
+    setCart((prev) => {
+      const current = prev[lineKey]
+      return {
+        ...prev,
+        [lineKey]: {
+          branchMenuItemId: String(menuItem.branchMenuItemId || ''),
+          menuItemId: customizeMenuItemId,
+          quantity: Number(current?.quantity || 0) + qty,
+          note: normalizedNote,
+          selections: normalizedSelections,
+        },
+      }
+    })
+    setCartDrafts((prev) => ({
+      ...prev,
+      [customizeMenuItemId]: {
+        note: normalizedNote,
+        selections: normalizedSelections,
+      },
+    }))
+    setCustomizeOpen(false)
   }
 
   const parseOrderItemSelections = (rawOptions?: string | null): CartSelections => {
@@ -2459,50 +2595,96 @@ export default function CustomerMenu() {
         <div className="flex items-center justify-start text-sm text-slate-500">{filteredItems.length} món hiển thị</div>
         <div className="hidden items-center justify-end text-xs text-slate-500 lg:flex">Chọn danh mục để lọc nhanh</div>
       </div>
-      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-        {categories.map((category) => (
-          <button
-            key={`chip-${category}`}
-            type="button"
-            onClick={() => setSelectedCategory(category)}
-            className={`whitespace-nowrap rounded-full px-3 py-2 text-sm ${
-              selectedCategory === category
-                ? 'bg-sky-600 text-white'
-                : 'border border-sky-100 bg-white text-slate-700'
-            }`}
+        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+          {categories.map((category) => (
+            <button
+              key={`chip-${category}`}
+              type="button"
+              onClick={() => {
+                setSelectedCategory(category)
+                if (category === 'ALL') {
+                  window.scrollTo({ top: 0, behavior: 'smooth' })
+                  return
+                }
+                categorySectionRefs.current[category]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }}
+              className={`whitespace-nowrap rounded-full px-3 py-2 text-sm ${
+                selectedCategory === category
+                  ? 'bg-sky-600 text-white'
+                  : 'border border-sky-100 bg-white text-slate-700'
+              }`}
           >
             {category === 'ALL' ? 'Tất cả' : category}
           </button>
         ))}
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          {loadingMenu && <p>Đang tải menu...</p>}
-          {!loadingMenu && (
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-              {filteredItems.map((item) => {
-                const draft = getDraftForMenuItem(item.id)
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            {loadingMenu && <p>Đang tải menu...</p>}
+            {!loadingMenu && (
+              <div className="space-y-6">
+              {groupedFilteredItems.map(({ category, items }) => (
+                <section
+                  key={`section-${category}`}
+                  ref={(node) => {
+                    categorySectionRefs.current[category] = node
+                  }}
+                >
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-base font-bold text-slate-900">{category}</h3>
+                    <span className="text-xs text-slate-500">{items.length} món</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+              {items.map((item) => {
                 const selectedCount = cartCountByMenuItem.get(item.id) || 0
                 return (
                   <div key={item.id} className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-md shadow-slate-100">
                     <img
                       src={resolvePublicMenuImage(item.image, item.name)}
                       alt={item.name}
-                      className="h-36 w-full rounded-xl object-cover sm:h-32"
+                      className="h-36 w-full cursor-pointer rounded-xl object-cover sm:h-32"
+                      onClick={() => openCustomizeModal(item.id)}
                       onError={(event) => {
                         event.currentTarget.src = fallbackMenuImage(item.name)
                       }}
                     />
                     <div className="mt-2 flex items-start justify-between gap-2">
-                      <p className="line-clamp-2 text-sm font-semibold text-slate-900">{item.name}</p>
+                      <button
+                        type="button"
+                        onClick={() => openCustomizeModal(item.id)}
+                        className="line-clamp-2 text-left text-sm font-semibold text-slate-900 hover:text-sky-700"
+                      >
+                        {item.name}
+                      </button>
                       <span className="shrink-0 text-sm font-bold text-sky-700">{formatVnd(item.price)}</span>
                     </div>
+                    {(item.badges || []).length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {item.badges?.slice(0, 3).map((badge) => (
+                          <span
+                            key={`${item.id}-${badge}`}
+                            className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                          >
+                            {badge === 'HOT' ? '🔥 Bán chạy' : badge === 'NEW' ? '🆕 Mới' : badge === 'RECOMMEND' ? '⭐ Đề xuất' : badge}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <p className="mt-1 line-clamp-2 text-xs text-slate-500">{item.description || '---'}</p>
+                    {item.available === false && (
+                      <p className="mt-1 text-xs font-semibold text-slate-500">⚫ Tạm hết</p>
+                    )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => increase(item.id)}
+                        onClick={() => {
+                          if ((item.customizations || []).length > 0) {
+                            openCustomizeModal(item.id)
+                            return
+                          }
+                          increase(item.id)
+                        }}
                         className={`${subtleActionButtonClass} min-w-20 px-3 py-2 text-xs disabled:opacity-60`}
                         disabled={!item.available}
                       >
@@ -2519,7 +2701,13 @@ export default function CustomerMenu() {
                         <span className="w-7 text-center text-sm font-semibold">{selectedCount}</span>
                         <button
                           type="button"
-                          onClick={() => increase(item.id)}
+                          onClick={() => {
+                            if ((item.customizations || []).length > 0) {
+                              openCustomizeModal(item.id)
+                              return
+                            }
+                            increase(item.id)
+                          }}
                           className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-base text-slate-700"
                           disabled={!item.available}
                         >
@@ -2527,78 +2715,21 @@ export default function CustomerMenu() {
                         </button>
                       </div>
                     </div>
-
                     {(item.customizations || []).length > 0 && (
-                      <details className="group mt-2 rounded-xl border border-sky-100 bg-sky-50/40 p-2">
-                        <summary className="cursor-pointer list-none text-xs font-semibold text-sky-700">
-                          <span className="group-open:hidden">▶ Chọn size / topping</span>
-                          <span className="hidden group-open:inline">▼ Ẩn tùy chọn</span>
-                        </summary>
-                        <div className="mt-2 space-y-2">
-                          {(item.customizations || []).map((group) => (
-                            <div key={`${item.id}-${group.id}`}>
-                              <p className="mb-1 text-[11px] font-semibold uppercase text-slate-500">{group.label}</p>
-                              {group.type === 'single' && (
-                                <select
-                                  value={String(draft.selections[group.id] || '')}
-                                  onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
-                                  className={fieldClass}
-                                >
-                                  {(group.options || []).map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                              {group.type === 'multi' && (
-                                <div className="space-y-1">
-                                  {(group.options || []).map((option) => {
-                                    const selectedValues = Array.isArray(draft.selections[group.id])
-                                      ? (draft.selections[group.id] as string[])
-                                      : []
-                                    const checked = selectedValues.includes(option.value)
-                                    return (
-                                      <label key={option.value} className="flex items-center gap-2 text-xs">
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={(e) => {
-                                            const nextValues = e.target.checked
-                                              ? Array.from(new Set([...selectedValues, option.value]))
-                                              : selectedValues.filter((entry) => entry !== option.value)
-                                            updateSelection(item.id, group.id, nextValues)
-                                          }}
-                                        />
-                                        {option.label}
-                                      </label>
-                                    )
-                                  })}
-                                </div>
-                              )}
-                              {group.type === 'text' && (
-                                <input
-                                  value={String(draft.selections[group.id] || '')}
-                                  onChange={(e) => updateSelection(item.id, group.id, e.target.value)}
-                                  className={fieldClass}
-                                  placeholder={group.placeholder || 'Nhập yêu cầu'}
-                                />
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </details>
+                      <button
+                        type="button"
+                        onClick={() => openCustomizeModal(item.id)}
+                        className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700"
+                      >
+                        Tùy chỉnh món
+                      </button>
                     )}
-                    <textarea
-                      value={draft.note}
-                      onChange={(e) => updateNote(item.id, e.target.value)}
-                      className={`${fieldClass} mt-2 min-h-0 py-1.5 text-xs`}
-                      rows={1}
-                      placeholder="Ghi chú ngắn (tùy chọn)"
-                    />
                   </div>
                 )
               })}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
         </div>
@@ -3263,7 +3394,7 @@ export default function CustomerMenu() {
                 onClick={() => setCartDrawerOpen(true)}
                 className="inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white"
               >
-                Xem giỏ hàng và đặt món
+                Xem giỏ hàng →
               </button>
             </div>
           ) : (
@@ -3288,6 +3419,142 @@ export default function CustomerMenu() {
           className="fixed inset-0 z-40 bg-black/40 lg:hidden"
           aria-label="Đóng ngăn giỏ hàng"
         />
+      )}
+
+      {customizeOpen && customizeMenuItem && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-0 sm:items-center sm:p-4">
+          <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-white p-4 sm:max-w-lg sm:rounded-3xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-bold text-slate-900">{customizeMenuItem.name}</p>
+                <p className="mt-1 text-xs text-slate-500">{customizeMenuItem.description || 'Tuỳ chỉnh món theo nhu cầu của bạn'}</p>
+                <p className="mt-1 text-sm font-semibold text-sky-700">Giá gốc: {formatVnd(customizeMenuItem.price)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeCustomizeModal}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-sky-200 text-slate-600"
+              >
+                <XMarkIcon className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {(customizeMenuItem.customizations || []).map((group) => (
+                <div key={`modal-${customizeMenuItem.id}-${group.id}`} className="rounded-xl border border-sky-100 p-3">
+                  <p className="mb-2 text-xs font-semibold uppercase text-slate-500">{group.label}</p>
+                  {group.type === 'single' && (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {(group.options || []).map((option) => {
+                        const checked = String(customizeSelections[group.id] || '') === String(option.value)
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setCustomizeSelections((prev) => ({ ...prev, [group.id]: option.value }))}
+                            className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                              checked ? 'border-sky-500 bg-sky-50 text-sky-700' : 'border-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {option.label} {Number(option.priceDelta || 0) > 0 ? `(+${formatVnd(option.priceDelta)})` : ''}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {group.type === 'multi' && (
+                    <div className="space-y-1.5">
+                      {(group.options || []).map((option) => {
+                        const selectedValues = Array.isArray(customizeSelections[group.id])
+                          ? (customizeSelections[group.id] as string[])
+                          : []
+                        const checked = selectedValues.includes(option.value)
+                        return (
+                          <label key={option.value} className="flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const nextValues = e.target.checked
+                                  ? Array.from(new Set([...selectedValues, option.value]))
+                                  : selectedValues.filter((entry) => entry !== option.value)
+                                setCustomizeSelections((prev) => ({ ...prev, [group.id]: nextValues }))
+                              }}
+                            />
+                            <span>{option.label} {Number(option.priceDelta || 0) > 0 ? `(+${formatVnd(option.priceDelta)})` : ''}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {group.type === 'text' && (
+                    <input
+                      value={String(customizeSelections[group.id] || '')}
+                      onChange={(e) => setCustomizeSelections((prev) => ({ ...prev, [group.id]: e.target.value }))}
+                      className={fieldClass}
+                      placeholder={group.placeholder || 'Nhap yeu cau'}
+                    />
+                  )}
+                </div>
+              ))}
+              {(customizeMenuItem.quickNotes || []).length > 0 && (
+                <div className="rounded-xl border border-sky-100 p-3">
+                  <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Ghi chú nhanh</p>
+                  <div className="flex flex-wrap gap-2">
+                    {customizeMenuItem.quickNotes?.slice(0, 8).map((quickNote) => (
+                      <button
+                        key={`modal-quick-note-${quickNote}`}
+                        type="button"
+                        onClick={() => setCustomizeNote(quickNote)}
+                        className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs text-sky-700"
+                      >
+                        {quickNote}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="rounded-xl border border-sky-100 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Ghi chú thêm</p>
+                <textarea
+                  value={customizeNote}
+                  onChange={(e) => setCustomizeNote(e.target.value)}
+                  className={`${fieldClass} min-h-20`}
+                  placeholder="Vi du: It da, khong duong"
+                />
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 mt-4 rounded-2xl border border-sky-100 bg-white/95 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="inline-flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCustomizeQuantity((prev) => Math.max(1, prev - 1))}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200"
+                  >
+                    -
+                  </button>
+                  <span className="w-6 text-center font-semibold">{customizeQuantity}</span>
+                  <button
+                    type="button"
+                    onClick={() => setCustomizeQuantity((prev) => prev + 1)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200"
+                  >
+                    +
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={addCustomizedItemToCart}
+                  className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white"
+                >
+                  Thêm vào giỏ {formatVnd(customizeUnitPrice * customizeQuantity)}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {customerHistoryOpen && customerSession && (

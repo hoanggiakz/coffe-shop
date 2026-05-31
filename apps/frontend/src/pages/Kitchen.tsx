@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import api from '@/utils/api'
-import { disconnectSocket, getSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { useUiStore } from '@/stores/uiStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -11,6 +10,8 @@ import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import { useI18n } from '@/utils/i18n'
 import { maDonHangNgan, trangThaiDonHang } from '@/utils/display'
+import { resolveWebsocketBaseUrl } from '@/utils/runtime-endpoints'
+import { io, type Socket } from 'socket.io-client'
 
 interface TableApi {
   id: string
@@ -54,6 +55,12 @@ interface StaffNotificationPayload {
   title: string
   message: string
   branchId?: string
+}
+
+interface KdsSocketPayload {
+  type?: string
+  title?: string
+  message?: string
 }
 
 type KdsStage = 'WAITING' | 'PREPARING' | 'READY'
@@ -125,6 +132,8 @@ export default function Kitchen() {
   const currentUser = useAuthStore((state) => state.user)
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const effectiveBranchId = String(selectedBranchId || currentUser?.branchId || '').trim()
+  const wsBaseUrl = resolveWebsocketBaseUrl()
+  const kdsSocketRef = useRef<Socket | null>(null)
 
   const loadData = async () => {
     try {
@@ -160,53 +169,89 @@ export default function Kitchen() {
   }, [effectiveBranchId])
 
   useEffect(() => {
-    const socket = getSocket()
+    const raw = typeof window !== 'undefined' ? sessionStorage.getItem('auth-storage') : ''
+    let token = ''
+    try {
+      const parsed = raw ? JSON.parse(raw) : null
+      token = String(parsed?.state?.token || '').trim()
+    } catch {
+      token = ''
+    }
+    const socket: Socket = io(`${wsBaseUrl}/kds`, {
+      transports: ['polling', 'websocket'],
+      upgrade: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
+      auth: token ? { token } : undefined,
+    })
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+    kdsSocketRef.current = socket
 
     const onConnect = () => {
       setSocketConnected(true)
-      socket.emit('join-staff', {
-        staffId: currentUser?.id,
-        staffName: currentUser?.name,
+      socket.emit('join-kds', {
         branchId: effectiveBranchId || undefined,
+        stationCode: 'ALL',
+        stationId: `${currentUser?.id || 'kds'}-all`,
       })
+      socket.emit('sync-request', {})
+      heartbeatTimer = setInterval(() => {
+        socket.emit('heartbeat', { stationId: `${currentUser?.id || 'kds'}-all`, ts: Date.now() })
+      }, 30000)
     }
 
-    const onDisconnect = () => setSocketConnected(false)
+    const onDisconnect = () => {
+      setSocketConnected(false)
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer)
+        heartbeatTimer = null
+      }
+    }
 
-    const onNotification = (payload: StaffNotificationPayload) => {
-      if (payload.type === 'ORDER_NEW') {
+    const onRealtimeEvent = (payload: StaffNotificationPayload | KdsSocketPayload) => {
+      const type = String(payload?.type || '').toUpperCase()
+      if (type === 'ORDER_NEW' || type === 'ORDER_CREATED') {
         showRealtimeNotification(
-          payload.title || tv('Có đơn mới', 'New order'),
-          payload.message || tv('KDS vừa nhận đơn mới', 'KDS received a new order'),
+          String(payload?.title || '') || tv('Có đơn mới', 'New order'),
+          String(payload?.message || '') || tv('KDS vừa nhận đơn mới', 'KDS received a new order'),
           'NEW_ORDER',
         )
         playKitchenOrderSound(soundEnabled)
         loadData()
         return
       }
-
-      if (payload.type === 'KDS_ITEM_STATUS' || payload.type === 'KDS_ORDER_READY') {
+      if (type === 'KDS_ITEM_STATUS' || type === 'KDS_ORDER_READY') {
         loadData()
       }
     }
+    const onSync = () => loadData()
 
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
-    socket.on('staff-notification', onNotification)
-
-    if (!socket.connected) {
-      socket.connect()
-    } else {
-      onConnect()
-    }
+    socket.on('sync-response', onSync)
+    socket.on('new-order', onRealtimeEvent)
+    socket.on('order-confirmed', onRealtimeEvent)
+    socket.on('item-updated', onRealtimeEvent)
+    socket.on('order-status-updated', onRealtimeEvent)
 
     return () => {
       socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
-      socket.off('staff-notification', onNotification)
-      disconnectSocket()
+      socket.off('sync-response', onSync)
+      socket.off('new-order', onRealtimeEvent)
+      socket.off('order-confirmed', onRealtimeEvent)
+      socket.off('item-updated', onRealtimeEvent)
+      socket.off('order-status-updated', onRealtimeEvent)
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
+      socket.disconnect()
+      if (kdsSocketRef.current === socket) {
+        kdsSocketRef.current = null
+      }
     }
-  }, [soundEnabled, currentUser?.id, currentUser?.name, effectiveBranchId])
+  }, [soundEnabled, currentUser?.id, effectiveBranchId, wsBaseUrl])
 
   const updateItemStatus = async (
     orderId: string,
@@ -215,11 +260,15 @@ export default function Kitchen() {
   ) => {
     setUpdatingId(itemId)
     try {
-      await api.patch(`/orders/${orderId}/items/${itemId}/status`, { status })
+      const socket = kdsSocketRef.current
+      if (!socket?.connected) {
+        throw new Error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      }
+      socket.emit(status === 'PREPARING' ? 'start-item' : 'complete-item', { orderId, itemId })
       await loadData()
       toast.success(tv(`Cập nhật món -> ${status}`, `Item updated -> ${status}`))
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Cập nhật món thất bại')
+      toast.error(error?.message || error.response?.data?.message || 'Cập nhật món thất bại')
     } finally {
       setUpdatingId(null)
     }
@@ -234,11 +283,32 @@ export default function Kitchen() {
 
     setUpdatingId(`order:${order.id}`)
     try {
-      await api.patch(`/orders/${order.id}/status`, { status: 'COMPLETED' })
+      const socket = kdsSocketRef.current
+      if (!socket?.connected) {
+        throw new Error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      }
+      socket.emit('complete-order', { orderId: order.id })
       await loadData()
-      toast.success(tv(`Đã hoàn thành đơn ${maDonHangNgan(order.id)}`, `Order ${maDonHangNgan(order.id)} completed`))
+      toast.success(tv(`Đã cập nhật đơn ${maDonHangNgan(order.id)}`, `Order ${maDonHangNgan(order.id)} updated`))
     } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không thể hoàn thành đơn', 'Unable to complete order'))
+      toast.error(error?.message || error.response?.data?.message || tv('Không thể hoàn thành đơn', 'Unable to complete order'))
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  const startOrder = async (order: OrderApi) => {
+    setUpdatingId(`order:start:${order.id}`)
+    try {
+      const socket = kdsSocketRef.current
+      if (!socket?.connected) {
+        throw new Error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      }
+      socket.emit('start-order', { orderId: order.id })
+      await loadData()
+      toast.success(tv(`Đã bắt đầu đơn ${maDonHangNgan(order.id)}`, `Order ${maDonHangNgan(order.id)} started`))
+    } catch (error: any) {
+      toast.error(error?.message || error.response?.data?.message || tv('Không thể bắt đầu đơn', 'Unable to start order'))
     } finally {
       setUpdatingId(null)
     }
@@ -247,6 +317,23 @@ export default function Kitchen() {
   const tableLabel = (tableId: string) => {
     const table = tables.find((item) => item.id === tableId)
     return table ? `Bàn ${table.number}` : tableId
+  }
+  const tableNumberById = useMemo(
+    () => new Map((tables || []).map((table) => [table.id, table.number])),
+    [tables],
+  )
+
+  const remindStaff = (order: OrderApi) => {
+    const socket = kdsSocketRef.current
+    if (!socket?.connected) {
+      toast.error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      return
+    }
+    socket.emit('remind-staff', {
+      orderId: order.id,
+      tableNumber: Number(tableNumberById.get(order.tableId) || 0),
+    })
+    toast.success(tv('Đã gửi nhắc nhân viên phục vụ', 'Staff reminder sent'))
   }
 
   const itemLabel = (menuItemId: string) => menuItems.find((m) => m.id === menuItemId)?.name || menuItemId
@@ -392,16 +479,38 @@ export default function Kitchen() {
                     <span>
                       Món chưa xong: <strong>{order.orderItems.filter((item) => item.status !== 'READY').length}</strong>
                     </span>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="w-full sm:w-auto"
-                      onClick={() => completeOrder(order)}
-                      loading={updatingId === `order:${order.id}`}
-                      disabled={order.status !== 'READY' || order.orderItems.some((item) => item.status !== 'READY')}
-                    >
-                      {tv('Hoàn thành đơn', 'Complete order')}
-                    </Button>
+                    <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+                      {orderKdsStage(order) === 'WAITING' && (
+                        <Button
+                          size="sm"
+                          className="w-full sm:w-auto"
+                          onClick={() => startOrder(order)}
+                          loading={updatingId === `order:start:${order.id}`}
+                        >
+                          {tv('Bắt đầu tất cả', 'Start all')}
+                        </Button>
+                      )}
+                      {order.status === 'READY' && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="w-full sm:w-auto"
+                          onClick={() => remindStaff(order)}
+                        >
+                          {tv('Nhắc nhân viên', 'Remind staff')}
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="w-full sm:w-auto"
+                        onClick={() => completeOrder(order)}
+                        loading={updatingId === `order:${order.id}`}
+                        disabled={order.status !== 'READY' || order.orderItems.some((item) => item.status !== 'READY')}
+                      >
+                        {tv('Hoàn thành đơn', 'Complete order')}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))}

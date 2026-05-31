@@ -105,12 +105,8 @@ export function phuongThucThanhToan(method?: string | null): string {
   switch (method) {
     case 'CASH':
       return 'Tiền mặt'
-    case 'VIETQR':
-      return 'VietQR'
     case 'SEPAY':
       return 'SePay'
-    case 'VNPAY':
-      return 'VNPay'
     default:
       return method || '-'
   }

@@ -190,8 +190,30 @@ export default function Tables() {
       }
     }
 
+    const onOrderItemReady = () => {
+      void loadTables()
+    }
+
+    const onTableStatusChanged = () => {
+      void loadTables()
+    }
+
+    const onPaymentConfirmed = () => {
+      void loadTables()
+    }
+
+    const onMenuUpdated = () => {
+      clearPosMenuCache(selectedBranchId || undefined)
+      toast.success('Menu vừa được cập nhật')
+      void loadTables()
+    }
+
     socket.on('connect', onConnect)
     socket.on('staff-notification', onStaffNotification)
+    socket.on('order-item-ready', onOrderItemReady)
+    socket.on('table-status-changed', onTableStatusChanged)
+    socket.on('payment-confirmed', onPaymentConfirmed)
+    socket.on('menu-updated', onMenuUpdated)
 
     if (!socket.connected) {
       socket.connect()
@@ -202,6 +224,10 @@ export default function Tables() {
     return () => {
       socket.off('connect', onConnect)
       socket.off('staff-notification', onStaffNotification)
+      socket.off('order-item-ready', onOrderItemReady)
+      socket.off('table-status-changed', onTableStatusChanged)
+      socket.off('payment-confirmed', onPaymentConfirmed)
+      socket.off('menu-updated', onMenuUpdated)
       disconnectSocket()
     }
   }, [selectedBranchId])

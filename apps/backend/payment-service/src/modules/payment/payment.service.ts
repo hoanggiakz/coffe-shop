@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { KafkaService } from '../../kafka/kafka.service';
 import { ConfigService } from '@nestjs/config';
+import PDFDocument from 'pdfkit';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { WebhookDto } from './dto/webhook.dto';
 import { PaymentReturnDto } from './dto/return.dto';
@@ -78,26 +79,6 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
 
   private get paymentReturnBaseUrl() {
     return `${this.appBaseUrl}/payment/return`;
-  }
-
-  private get vnpayPayUrl() {
-    return String(this.config.get<string>('VNPAY_PAY_URL', '') || '').trim();
-  }
-
-  private get vnpayTerminalCode() {
-    return String(this.config.get<string>('VNPAY_TMN_CODE', '') || '').trim();
-  }
-
-  private get vnpayHashSecret() {
-    return String(this.config.get<string>('VNPAY_HASH_SECRET', '') || '').trim();
-  }
-
-  private get vnpayQueryUrl() {
-    return String(this.config.get<string>('VNPAY_QUERY_URL', '') || '').trim();
-  }
-
-  private get vietQrQueryUrl() {
-    return String(this.config.get<string>('VIETQR_QUERY_URL', '') || '').trim();
   }
 
   private get sepayQueryUrl() {
@@ -364,8 +345,8 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
   }
 
   private getOnlineProviderStatusQueryUrl(provider: OnlineProvider) {
-    if (provider === 'SEPAY') return this.sepayQueryUrl || this.vietQrQueryUrl;
-    return this.sepayQueryUrl || this.vietQrQueryUrl;
+    if (provider === 'SEPAY') return this.sepayQueryUrl;
+    return this.sepayQueryUrl;
   }
 
   private getHeaderValue(headers: RequestHeaders | undefined, key: string) {
@@ -787,10 +768,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private buildFrontendReturnUrl(
-    provider: 'VIETQR' | 'SEPAY' | 'VNPAY',
-    payload: { orderId: string; transactionId: string; resultCode?: string; message?: string },
-  ) {
+  private buildFrontendReturnUrl(provider: 'SEPAY', payload: { orderId: string; transactionId: string; resultCode?: string; message?: string }) {
     const url = new URL(this.paymentReturnBaseUrl);
     url.searchParams.set('provider', provider);
     url.searchParams.set('orderId', payload.orderId);
@@ -802,74 +780,6 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     if (payload.message) {
       url.searchParams.set('message', payload.message);
     }
-
-    return url.toString();
-  }
-
-  private formatVnpayDate(value: Date) {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return (
-      `${value.getFullYear()}` +
-      `${pad(value.getMonth() + 1)}` +
-      `${pad(value.getDate())}` +
-      `${pad(value.getHours())}` +
-      `${pad(value.getMinutes())}` +
-      `${pad(value.getSeconds())}`
-    );
-  }
-
-  private encodeVnpayQueryComponent(input: string) {
-    return encodeURIComponent(input).replace(/%20/g, '+');
-  }
-
-  private buildVnpaySignData(params: Record<string, string>) {
-    return Object.keys(params)
-      .sort()
-      .map((key) => `${this.encodeVnpayQueryComponent(key)}=${this.encodeVnpayQueryComponent(params[key])}`)
-      .join('&');
-  }
-
-  private buildVnpayPaymentUrl(orderId: string, amount: number, transactionId: string) {
-    if (!this.vnpayPayUrl || !this.vnpayTerminalCode || !this.vnpayHashSecret) {
-      return this.buildFrontendReturnUrl('VNPAY', {
-        orderId,
-        transactionId,
-        resultCode: 'PENDING_SETUP',
-        message: 'VNPAY config missing (payUrl/tmnCode/hashSecret)',
-      });
-    }
-
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + this.onlinePaymentTimeoutMinutes * 60 * 1000);
-    const returnUrl = this.buildFrontendReturnUrl('VNPAY', { orderId, transactionId });
-
-    const params: Record<string, string> = {
-      vnp_Amount: String(Math.max(0, Math.round(amount)) * 100),
-      vnp_Command: 'pay',
-      vnp_CreateDate: this.formatVnpayDate(now),
-      vnp_CurrCode: 'VND',
-      vnp_ExpireDate: this.formatVnpayDate(expiresAt),
-      vnp_IpAddr: '127.0.0.1',
-      vnp_Locale: 'vn',
-      vnp_OrderInfo: `Thanh toan don ${orderId}`,
-      vnp_OrderType: 'other',
-      vnp_ReturnUrl: returnUrl,
-      vnp_TmnCode: this.vnpayTerminalCode,
-      vnp_TxnRef: orderId,
-      vnp_Version: '2.1.0',
-    };
-
-    const signData = this.buildVnpaySignData(params);
-    const secureHash = createHmac('sha512', this.vnpayHashSecret).update(signData, 'utf8').digest('hex');
-
-    const url = new URL(this.vnpayPayUrl);
-    Object.keys(params)
-      .sort()
-      .forEach((key) => {
-        url.searchParams.set(key, params[key]);
-      });
-    url.searchParams.set('vnp_SecureHashType', 'HMACSHA512');
-    url.searchParams.set('vnp_SecureHash', secureHash);
 
     return url.toString();
   }
@@ -894,7 +804,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     }
 
     return {
-      provider: 'VIETQR',
+      provider: 'SEPAY',
       qrImageUrl,
       htmlTag: `<img src='${qrImageUrl}'/>`,
       accountName: this.onlineQrAccountName,
@@ -1145,7 +1055,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     const p = String(provider || '').toUpperCase();
     if (p === 'CASH') return 'CASH';
     if (p === 'SEPAY') return 'SEPAY';
-    return 'BANK_TRANSFER';
+    return 'SEPAY';
   }
 
   private escapePdfText(value: string) {
@@ -1155,51 +1065,171 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       .replace(/\)/g, '\\)');
   }
 
-  private buildMinimalInvoicePdf(invoice: any) {
-    const lines = [
-      'COFFEE SHOP - HOA DON',
-      `So hoa don: ${invoice.invoiceNumber}`,
-      `Ngay: ${new Date(invoice.issueDate).toLocaleString('vi-VN')}`,
-      `Khach: ${invoice.customerName || 'Khach vang lai'}`,
-      `Tam tinh: ${Number(invoice.subtotal).toLocaleString('vi-VN')}d`,
-      `Giam gia: ${Number(invoice.discount).toLocaleString('vi-VN')}d`,
-      `Thue (${Number(invoice.taxRate)}%): ${Number(invoice.taxAmount).toLocaleString('vi-VN')}d`,
-      `Tong cong: ${Number(invoice.totalAmount).toLocaleString('vi-VN')}d`,
-      `Thanh toan: ${invoice.paymentMethod}`,
-    ];
+  private formatVnd(amount: number) {
+    return `${Number(amount || 0).toLocaleString('vi-VN')}d`;
+  }
 
-    const contentStream = [
-      'BT',
-      '/F1 12 Tf',
-      '50 780 Td',
-      ...lines.map((line, index) => `${index === 0 ? '' : '0 -18 Td ' }(${this.escapePdfText(line)}) Tj`),
-      'ET',
-    ].join('\n');
+  private padRight(value: string, width: number) {
+    const raw = String(value || '');
+    if (raw.length >= width) return raw.slice(0, width);
+    return `${raw}${' '.repeat(width - raw.length)}`;
+  }
 
-    const contentLength = Buffer.byteLength(contentStream, 'utf8');
-    const objects = [
-      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
-      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
-      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
-      '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
-      `5 0 obj << /Length ${contentLength} >> stream\n${contentStream}\nendstream endobj`,
-    ];
+  private padLeft(value: string, width: number) {
+    const raw = String(value || '');
+    if (raw.length >= width) return raw.slice(0, width);
+    return `${' '.repeat(width - raw.length)}${raw}`;
+  }
 
-    let pdf = '%PDF-1.4\n';
-    const offsets = [0];
-    for (const object of objects) {
-      offsets.push(Buffer.byteLength(pdf, 'utf8'));
-      pdf += `${object}\n`;
+  private buildInvoiceItemLines(items: Array<{ name?: string; quantity?: number; unitPrice?: number; totalPrice?: number }>) {
+    const lines: string[] = [];
+    const normalized = Array.isArray(items) ? items : [];
+    const header = `${this.padRight('Item', 22)} ${this.padLeft('Qty', 4)} ${this.padLeft('Price', 10)} ${this.padLeft('Total', 12)}`;
+    lines.push(header);
+    lines.push('-'.repeat(52));
+
+    for (const item of normalized.slice(0, 20)) {
+      const name = String(item?.name || 'Unknown item');
+      const qty = Number(item?.quantity || 0);
+      const unitPrice = Number(item?.unitPrice || 0);
+      const totalPrice = Number(item?.totalPrice || unitPrice * qty);
+      lines.push(
+        `${this.padRight(name, 22)} ${this.padLeft(String(qty), 4)} ${this.padLeft(this.formatVnd(unitPrice), 10)} ${this.padLeft(this.formatVnd(totalPrice), 12)}`,
+      );
+    }
+    if (normalized.length > 20) {
+      lines.push(`... ${normalized.length - 20} items more`);
+    }
+    return lines;
+  }
+
+  private async downloadImageBuffer(url: string): Promise<Buffer | null> {
+    const raw = String(url || '').trim();
+    if (!raw) return null;
+    try {
+      const response = await this.fetchWithRetry(raw, { method: 'GET' }, { attempts: 2, retryDelayMs: 200 });
+      if (!response.ok) return null;
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch {
+      return null;
+    }
+  }
+
+  private async buildMinimalInvoicePdf(invoice: any, format: 'a4' | 'thermal' = 'a4'): Promise<Buffer> {
+    const isThermal = format === 'thermal';
+    const thermalWidth = 226.77; // ~80mm
+    const thermalHeight = 1200;
+    const doc = new PDFDocument({
+      size: isThermal ? [thermalWidth, thermalHeight] : 'A4',
+      margin: isThermal ? 12 : 36,
+    });
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    const done = new Promise<Buffer>((resolve) => {
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+
+    const issueDate = new Date(invoice.issueDate).toLocaleString('vi-VN');
+    doc.fontSize(isThermal ? 12 : 20).text('COFFEE SHOP', { align: 'center' });
+    doc.fontSize(isThermal ? 10 : 14).text('HOA DON BAN HANG', { align: 'center' });
+    doc.moveDown(0.8);
+
+    doc.fontSize(isThermal ? 8 : 11);
+    doc.text(`So hoa don: ${invoice.invoiceNumber}`);
+    doc.text(`Ngay: ${issueDate}`);
+    doc.text(`Khach: ${invoice.customerName || 'Khach vang lai'}`);
+    doc.text(`SDT: ${invoice.customerPhone || '-'}`);
+    doc.text(`Thanh toan: ${invoice.paymentMethod}`);
+    doc.text(`Trang thai: ${invoice.status || 'ISSUED'}`);
+    doc.moveDown(0.8);
+
+    doc.fontSize(isThermal ? 8 : 11).text('Chi tiet mon:', { underline: true });
+    doc.moveDown(0.3);
+    doc.fontSize(isThermal ? 7 : 10);
+    const nameW = isThermal ? 14 : 26;
+    const qtyW = isThermal ? 4 : 5;
+    const priceW = isThermal ? 8 : 12;
+    const totalW = isThermal ? 10 : 14;
+    doc.text(this.padRight('Item', nameW) + this.padLeft('Qty', qtyW) + this.padLeft('Price', priceW) + this.padLeft('Total', totalW));
+    doc.text('-'.repeat(isThermal ? 42 : 70));
+    for (const item of Array.isArray(invoice?.items) ? invoice.items.slice(0, 60) : []) {
+      const name = this.padRight(String(item?.name || 'Unknown'), nameW);
+      const qty = this.padLeft(String(Number(item?.quantity || 0)), qtyW);
+      const price = this.padLeft(this.formatVnd(Number(item?.unitPrice || 0)), priceW);
+      const total = this.padLeft(this.formatVnd(Number(item?.totalPrice || 0)), totalW);
+      doc.text(`${name}${qty}${price}${total}`);
+    }
+    doc.moveDown(0.8);
+
+    doc.fontSize(isThermal ? 8 : 11);
+    doc.text(`Tam tinh: ${this.formatVnd(Number(invoice.subtotal || 0))}`, { align: 'right' });
+    doc.text(`Giam gia: ${this.formatVnd(Number(invoice.discount || 0))}`, { align: 'right' });
+    doc.text(`Thue (${Number(invoice.taxRate || 0)}%): ${this.formatVnd(Number(invoice.taxAmount || 0))}`, { align: 'right' });
+    doc.font('Helvetica-Bold').text(`Tong cong: ${this.formatVnd(Number(invoice.totalAmount || 0))}`, { align: 'right' });
+    doc.font('Helvetica');
+
+    if (invoice?.sepay?.transferContent || invoice?.sepay?.qrImageUrl) {
+      doc.moveDown(0.8);
+      doc.fontSize(isThermal ? 8 : 11).text('Thong tin SePay:', { underline: true });
+      if (invoice?.sepay?.transferContent) {
+        doc.fontSize(isThermal ? 7 : 10).text(`Noi dung CK: ${invoice.sepay.transferContent}`);
+      }
+      const qrImageBuffer = await this.downloadImageBuffer(String(invoice?.sepay?.qrImageUrl || ''));
+      if (qrImageBuffer) {
+        try {
+          doc.moveDown(0.3);
+          const qrSize = isThermal ? 95 : 140;
+          doc.image(qrImageBuffer, { fit: [qrSize, qrSize], align: 'center' });
+        } catch {
+          doc.fontSize(isThermal ? 7 : 10).text(`QR URL: ${invoice.sepay.qrImageUrl || ''}`);
+        }
+      } else if (invoice?.sepay?.qrImageUrl) {
+        doc.fontSize(isThermal ? 7 : 10).text(`QR URL: ${invoice.sepay.qrImageUrl}`);
+      }
     }
 
-    const xrefOffset = Buffer.byteLength(pdf, 'utf8');
-    pdf += `xref\n0 ${objects.length + 1}\n`;
-    pdf += '0000000000 65535 f \n';
-    for (let i = 1; i <= objects.length; i += 1) {
-      pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+    doc.moveDown(1.2);
+    doc.fontSize(isThermal ? 8 : 10).text('Cam on quy khach!', { align: 'center' });
+
+    if (String(invoice?.status || '').toUpperCase() === 'VOIDED') {
+      const savedX = doc.x;
+      const savedY = doc.y;
+      doc.rotate(-25, { origin: [doc.page.width / 2, doc.page.height / 2] });
+      doc.fontSize(isThermal ? 28 : 56).fillColor('#d11').opacity(0.15).text('VOIDED', 20, doc.page.height / 2 - 20, {
+        width: doc.page.width - 40,
+        align: 'center',
+      });
+      doc.opacity(1).fillColor('#000');
+      doc.rotate(25, { origin: [doc.page.width / 2, doc.page.height / 2] });
+      doc.x = savedX;
+      doc.y = savedY;
     }
-    pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-    return Buffer.from(pdf, 'utf8');
+
+    if (isThermal) {
+      // Compact layout for thermal printers: trim excessive bottom space.
+      (doc as any).page.height = Math.max(doc.y + 24, 180);
+    }
+
+    doc.end();
+    return done;
+  }
+
+  private async getPaymentSnapshot(paymentId?: string | null) {
+    const id = String(paymentId || '').trim();
+    if (!id) return null;
+    const payment = await this.prisma.payment.findUnique({ where: { id } });
+    if (!payment) return null;
+    const metadata =
+      payment.metadata && typeof payment.metadata === 'object' && !Array.isArray(payment.metadata)
+        ? (payment.metadata as Record<string, any>)
+        : {};
+    const vietQr = metadata?.vietQr && typeof metadata.vietQr === 'object' ? (metadata.vietQr as Record<string, any>) : null;
+    return {
+      provider: String(payment.provider || '').toUpperCase(),
+      transferContent: String((vietQr?.transferContent || payment.transferContent || '') ?? '').trim() || null,
+      qrImageUrl: String((vietQr?.qrImageUrl || '') ?? '').trim() || null,
+    };
   }
 
   async ensureInvoiceForPayment(payment: any, createdBy?: string) {
@@ -1251,7 +1281,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     query: { start_date?: string; end_date?: string; status?: string; page?: number; limit?: number },
     actor: ActorContext,
   ) {
-    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER']);
     this.enforceBranchAccess(actor, branchId);
     const status = this.normalizeInvoiceListStatus(query.status);
     const page = Number.isFinite(query.page) ? Math.max(1, Math.floor(Number(query.page))) : 1;
@@ -1301,11 +1331,12 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getInvoiceDetail(invoiceId: string, actor: ActorContext) {
-    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER']);
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) throw new NotFoundException('Invoice not found');
     this.enforceBranchAccess(actor, invoice.branchId);
     const order = await this.fetchOrderForInvoice(invoice.orderId);
+    const payment = await this.getPaymentSnapshot(invoice.paymentTransactionId);
     return {
       id: invoice.id,
       branchId: invoice.branchId,
@@ -1327,6 +1358,14 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       taxAmount: Number(invoice.taxAmount),
       totalAmount: Number(invoice.totalAmount),
       paymentMethod: invoice.paymentMethod,
+      ...(payment?.provider === 'SEPAY'
+        ? {
+            sepay: {
+              transferContent: payment.transferContent,
+              qrImageUrl: payment.qrImageUrl,
+            },
+          }
+        : {}),
       status: invoice.status,
       pdfUrl: invoice.pdfUrl,
       voidReason: invoice.voidReason,
@@ -1355,6 +1394,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) throw new NotFoundException('Invoice not found');
     const order = await this.fetchOrderForInvoice(invoice.orderId);
+    const payment = await this.getPaymentSnapshot(invoice.paymentTransactionId);
     return {
       id: invoice.id,
       branchId: invoice.branchId,
@@ -1375,6 +1415,14 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       taxAmount: Number(invoice.taxAmount),
       totalAmount: Number(invoice.totalAmount),
       paymentMethod: invoice.paymentMethod,
+      ...(payment?.provider === 'SEPAY'
+        ? {
+            sepay: {
+              transferContent: payment.transferContent,
+              qrImageUrl: payment.qrImageUrl,
+            },
+          }
+        : {}),
       status: invoice.status,
       pdfUrl: invoice.pdfUrl,
       voidReason: invoice.voidReason,
@@ -1382,14 +1430,14 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async getPublicInvoicePdf(invoiceId: string, token: string) {
+  async getPublicInvoicePdf(invoiceId: string, token: string, format: 'a4' | 'thermal' = 'a4') {
     const detail = await this.getPublicInvoiceDetail(invoiceId, token);
-    return this.buildMinimalInvoicePdf(detail);
+    return await this.buildMinimalInvoicePdf(detail, format);
   }
 
-  async getInvoicePdf(invoiceId: string, actor: ActorContext) {
+  async getInvoicePdf(invoiceId: string, actor: ActorContext, format: 'a4' | 'thermal' = 'a4') {
     const detail = await this.getInvoiceDetail(invoiceId, actor);
-    return this.buildMinimalInvoicePdf(detail);
+    return await this.buildMinimalInvoicePdf(detail, format);
   }
 
   async voidInvoice(invoiceId: string, reason: string, actor: ActorContext) {

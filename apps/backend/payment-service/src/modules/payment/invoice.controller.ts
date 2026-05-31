@@ -38,12 +38,17 @@ export class InvoiceController {
 
   @Get('invoices/:id/pdf')
   @Header('Content-Type', 'application/pdf')
-  async downloadInvoicePdf(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+  async downloadInvoicePdf(
+    @Param('id') id: string,
+    @Query('format') format: 'a4' | 'thermal' = 'a4',
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
     const invoice = await this.paymentService.getInvoiceDetail(id, this.actor(req));
     if (invoice.pdfUrl) {
       return res.redirect(invoice.pdfUrl);
     }
-    const content = await this.paymentService.getInvoicePdf(id, this.actor(req));
+    const content = await this.paymentService.getInvoicePdf(id, this.actor(req), format);
     return res.send(content);
   }
 
@@ -69,8 +74,13 @@ export class InvoiceController {
 
   @Get('public/invoices/:id/pdf')
   @Header('Content-Type', 'application/pdf')
-  async downloadPublicInvoicePdf(@Param('id') id: string, @Query('token') token = '', @Res() res: Response) {
-    const content = await this.paymentService.getPublicInvoicePdf(id, String(token || ''));
+  async downloadPublicInvoicePdf(
+    @Param('id') id: string,
+    @Query('token') token = '',
+    @Query('format') format: 'a4' | 'thermal' = 'a4',
+    @Res() res: Response,
+  ) {
+    const content = await this.paymentService.getPublicInvoicePdf(id, String(token || ''), format);
     return res.send(content);
   }
 }

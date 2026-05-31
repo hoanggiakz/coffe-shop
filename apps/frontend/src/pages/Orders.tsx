@@ -10,6 +10,7 @@ import { useI18n } from '@/utils/i18n'
 import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import { clearPosMenuCache, readPosMenuCache, writePosMenuCache } from '@/utils/posMenuCache'
+import { readPosOfflineQueue, writePosOfflineQueue } from '@/utils/posOfflineQueue'
 import { disconnectSocket, getSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { useAuthStore } from '@/stores/authStore'
@@ -24,6 +25,10 @@ interface MenuItemApi {
   name: string
   price: number
   available: boolean
+  options?: unknown
+  customOptions?: unknown
+  custom_options?: unknown
+  customizations?: unknown
 }
 
 interface OrderItemApi {
@@ -71,6 +76,7 @@ interface PaymentApi {
   paidAt?: string | null
   createdAt?: string | null
   updatedAt?: string | null
+  expiresAt?: string | null
 }
 
 type StaffNotificationType =
@@ -97,6 +103,7 @@ interface StaffNotificationPayload {
 interface OfflineOrderQueueItem {
   localId: string
   createdAt: string
+  syncStatus: 'PENDING_SYNC'
   branchId?: string
   tableId: string
   customerName: string
@@ -110,28 +117,6 @@ const paymentMethods: PaymentMethod[] = ['CASH', 'SEPAY']
 const orderStatuses: Array<OrderApi['status']> = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
 const selectClass =
   'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
-const offlineQueueStorageKey = (branchId?: string | null) => `pos_offline_order_queue_${branchId || 'all'}`
-
-const readOfflineQueue = (branchId?: string | null): OfflineOrderQueueItem[] => {
-  try {
-    const raw = localStorage.getItem(offlineQueueStorageKey(branchId))
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((item) => item && item.localId && item.tableId && Array.isArray(item.items))
-  } catch {
-    return []
-  }
-}
-
-const writeOfflineQueue = (branchId: string | null | undefined, queue: OfflineOrderQueueItem[]) => {
-  try {
-    localStorage.setItem(offlineQueueStorageKey(branchId), JSON.stringify(queue))
-  } catch {
-    // ignore localStorage write errors
-  }
-}
-
 const formatDateTimeFull = (value?: string | null) => {
   if (!value) return '-'
   const date = new Date(value)
@@ -160,6 +145,66 @@ const fallbackOrderItemName = (menuItemId?: string | null) => {
     .split(' ')
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
+}
+
+function normalizeCustomizations(raw: unknown): CustomizationGroup[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((entry: any) => ({
+      id: String(entry?.id || ''),
+      label: String(entry?.label || ''),
+      type: entry?.type === 'multi' ? 'multi' : 'single',
+      options: Array.isArray(entry?.options)
+        ? entry.options.map((opt: any) => ({
+            value: String(opt?.value || ''),
+            label: String(opt?.label || ''),
+            priceDelta: Number(opt?.priceDelta || 0),
+          }))
+        : [],
+    }))
+    .filter((entry) => entry.id && entry.label)
+}
+
+function normalizeSpecOptionsToCustomizations(raw: unknown): CustomizationGroup[] {
+  const options = raw && typeof raw === 'object' ? (raw as Record<string, any>) : {}
+  const sizes = Array.isArray(options.sizes) ? options.sizes : []
+  const toppings = Array.isArray(options.toppings) ? options.toppings : []
+  const groups: CustomizationGroup[] = []
+
+  if (sizes.length > 0) {
+    groups.push({
+      id: 'size',
+      label: 'Size',
+      type: 'single',
+      options: sizes.map((size: any) => ({
+        value: String(size?.name || ''),
+        label: String(size?.name || ''),
+        priceDelta: Number(size?.priceModifier || 0),
+      })),
+    })
+  }
+
+  if (toppings.length > 0) {
+    groups.push({
+      id: 'toppings',
+      label: 'Topping',
+      type: 'multi',
+      options: toppings.map((topping: any) => ({
+        value: String(topping?.name || ''),
+        label: String(topping?.name || ''),
+        priceDelta: Number(topping?.priceModifier || 0),
+      })),
+    })
+  }
+
+  return groups
+}
+
+function extractCustomizations(menuItem: MenuItemApi): CustomizationGroup[] {
+  const fromCustomizations = normalizeCustomizations(menuItem.customizations)
+  if (fromCustomizations.length > 0) return fromCustomizations
+  const options = menuItem.customOptions ?? menuItem.custom_options ?? menuItem.options
+  return normalizeSpecOptionsToCustomizations(options)
 }
 
 export default function Orders() {
@@ -197,10 +242,131 @@ export default function Orders() {
   const [offlineQueue, setOfflineQueue] = useState<OfflineOrderQueueItem[]>([])
   const [syncingOfflineQueue, setSyncingOfflineQueue] = useState(false)
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  const [cartHistory, setCartHistory] = useState<Record<string, number>[]>([])
+  const [customCartLines, setCustomCartLines] = useState<CustomCartLine[]>([])
+  const [customizingItem, setCustomizingItem] = useState<MenuItemApi | null>(null)
+  const [customSize, setCustomSize] = useState('')
+  const [customToppings, setCustomToppings] = useState<string[]>([])
+  const [customNote, setCustomNote] = useState('')
+  const [sepayExpiresAt, setSepayExpiresAt] = useState<string | null>(null)
+  const [sepaySecondsLeft, setSepaySecondsLeft] = useState(0)
+  const [sepayExpiredNotified, setSepayExpiredNotified] = useState(false)
+  const [autoPrintInvoiceAfterPaid, setAutoPrintInvoiceAfterPaid] = useState(true)
   const notifSyncKey = useMemo(() => `notif_last_received_at_${String(user?.id || 'guest')}`, [user?.id])
+  const normalizedRole = String(user?.role || '').toUpperCase()
+  const canManagePosAdvanced = normalizedRole === 'ADMIN' || normalizedRole === 'MANAGER'
+  const lastPrintedPaymentRef = useRef<string | null>(null)
 
-  const refreshOfflineQueue = () => {
-    setOfflineQueue(readOfflineQueue(selectedBranchId || undefined))
+  const printCurrentView = () => {
+    if (typeof window === 'undefined') return
+    window.print()
+  }
+
+  const escapeHtml = (value?: string | null) =>
+    String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+
+  const openPrintWindow = (title: string, body: string) => {
+    if (typeof window === 'undefined') return
+    const popup = window.open('', '_blank', 'width=760,height=900')
+    if (!popup) {
+      toast.error('Không mở được cửa sổ in. Hãy kiểm tra popup blocker.')
+      return
+    }
+    popup.document.write(`<!doctype html><html><head><meta charset="utf-8" />
+      <title>${escapeHtml(title)}</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 16px; color: #111; }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        .meta { font-size: 12px; color: #444; margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 12px; }
+        th { background: #f5f5f5; text-align: left; }
+        .right { text-align: right; }
+        .total { font-weight: bold; font-size: 14px; }
+      </style></head><body>${body}</body></html>`)
+    popup.document.close()
+    popup.focus()
+    popup.print()
+  }
+
+  const printOrderSlip = (order: OrderApi) => {
+    const rows = (order.orderItems || [])
+      .map((item) => {
+        const lineTotal = Number(item.quantity || 0) * Number(item.price || 0)
+        return `<tr>
+          <td>${escapeHtml(orderItemLabel(item))}</td>
+          <td class="right">${Number(item.quantity || 0)}</td>
+          <td class="right">${Number(item.price || 0).toLocaleString('vi-VN')}đ</td>
+          <td class="right">${lineTotal.toLocaleString('vi-VN')}đ</td>
+        </tr>`
+      })
+      .join('')
+    const html = `
+      <h1>PHIẾU ORDER - ${escapeHtml(maDonHangNgan(order.id))}</h1>
+      <div class="meta">Bàn: ${escapeHtml(orderTableLabel(order))} | Thời gian: ${escapeHtml(formatDateTimeFull(order.createdAt))}</div>
+      <table>
+        <thead><tr><th>Món</th><th class="right">SL</th><th class="right">Đơn giá</th><th class="right">Thành tiền</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="total right">TỔNG: ${Number(order.totalAmount || 0).toLocaleString('vi-VN')}đ</p>
+    `
+    openPrintWindow(`Order-${maDonHangNgan(order.id)}`, html)
+  }
+
+  const printInvoice = (order: OrderApi, payment?: PaymentApi | null) => {
+    const rows = (order.orderItems || [])
+      .map((item) => {
+        const lineTotal = Number(item.quantity || 0) * Number(item.price || 0)
+        return `<tr>
+          <td>${escapeHtml(orderItemLabel(item))}</td>
+          <td class="right">${Number(item.quantity || 0)}</td>
+          <td class="right">${Number(item.price || 0).toLocaleString('vi-VN')}đ</td>
+          <td class="right">${lineTotal.toLocaleString('vi-VN')}đ</td>
+        </tr>`
+      })
+      .join('')
+    const status = payment ? trangThaiThanhToan(payment.status) : 'Chưa thanh toán'
+    const method = payment ? phuongThucThanhToan(payment.provider) : phuongThucThanhToan(selectedMethod)
+    const html = `
+      <h1>HÓA ĐƠN TẠM - ${escapeHtml(maDonHangNgan(order.id))}</h1>
+      <div class="meta">Bàn: ${escapeHtml(orderTableLabel(order))} | Trạng thái TT: ${escapeHtml(status)} | Phương thức: ${escapeHtml(method)}</div>
+      <table>
+        <thead><tr><th>Món</th><th class="right">SL</th><th class="right">Đơn giá</th><th class="right">Thành tiền</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="right">Giảm giá: ${Number(order.discountAmount || 0).toLocaleString('vi-VN')}đ</p>
+      <p class="total right">TỔNG: ${Number(order.totalAmount || 0).toLocaleString('vi-VN')}đ</p>
+    `
+    openPrintWindow(`Invoice-${maDonHangNgan(order.id)}`, html)
+  }
+
+  const switchPaymentMethodByShortcut = () => {
+    if (!payingOrder) return
+    if (lockedProvider) return
+    setSelectedMethod((prev) => (prev === 'CASH' ? 'SEPAY' : 'CASH'))
+  }
+
+  const pushCartHistory = (snapshot: Record<string, number>) => {
+    setCartHistory((prev) => [snapshot, ...prev].slice(0, 30))
+  }
+
+  const undoCartChange = () => {
+    setCartHistory((prev) => {
+      if (!prev.length) return prev
+      const [latest, ...rest] = prev
+      setCart(latest)
+      return rest
+    })
+  }
+
+  const refreshOfflineQueue = async () => {
+    const queue = await readPosOfflineQueue<OfflineOrderQueueItem>(selectedBranchId || undefined)
+    setOfflineQueue(queue)
   }
 
   const loadData = async () => {
@@ -252,7 +418,7 @@ export default function Orders() {
   }, [selectedStatus, filterTableId, dateFrom, dateTo, selectedBranchId])
 
   useEffect(() => {
-    refreshOfflineQueue()
+    void refreshOfflineQueue()
   }, [selectedBranchId])
 
   const loadPaymentHistory = async () => {
@@ -275,6 +441,21 @@ export default function Orders() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (payingOrder && (event.key === 'F5' || (event.ctrlKey && event.key.toLowerCase() === 'p'))) {
+        event.preventDefault()
+        printCurrentView()
+        return
+      }
+      if (payingOrder && event.key === 'Tab') {
+        event.preventDefault()
+        switchPaymentMethodByShortcut()
+        return
+      }
+      if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+        event.preventDefault()
+        undoCartChange()
+        return
+      }
       if (event.key === 'F1') {
         event.preventDefault()
         navigate('/tables')
@@ -284,6 +465,16 @@ export default function Orders() {
         tableSelectRef.current?.focus()
       }
       if (event.key === 'F4' || event.key === 'Enter') {
+        if (payingOrder) {
+          const inlineCashDeficit = selectedMethod === 'CASH'
+            ? Math.max(0, Math.round(payingOrder.totalAmount - Number(cashReceived || '0')))
+            : 0
+          if (event.key === 'Enter' && !(selectedMethod === 'CASH' && inlineCashDeficit > 0) && !processingPayment) {
+            event.preventDefault()
+            void confirmPayment()
+          }
+          return
+        }
         const openOrder = orders.find((order) => order.status === 'READY')
         if (!openOrder) return
         event.preventDefault()
@@ -291,17 +482,22 @@ export default function Orders() {
         setPayingOrder(openOrder)
         setSelectedMethod('CASH')
         setCashReceived(String(openOrder.totalAmount))
+        setAutoPrintInvoiceAfterPaid(true)
       }
       if (event.key === 'Escape') {
         event.preventDefault()
         setDetailOrder(null)
         setEditingOrder(null)
         setPayingOrder(null)
+        lastPrintedPaymentRef.current = null
+        setSepayExpiresAt(null)
+        setSepaySecondsLeft(0)
+        setSepayExpiredNotified(false)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [navigate, orders])
+  }, [navigate, orders, payingOrder, selectedMethod, cashReceived, processingPayment])
 
   useEffect(() => {
     const socket = getSocket()
@@ -364,9 +560,32 @@ export default function Orders() {
       }
     }
 
+    const onOrderItemReady = () => {
+      void loadData()
+    }
+
+    const onTableStatusChanged = () => {
+      void loadData()
+    }
+
+    const onPaymentConfirmed = () => {
+      void loadData()
+      void loadPaymentHistory()
+    }
+
+    const onMenuUpdated = () => {
+      clearPosMenuCache(selectedBranchId || undefined)
+      toast.success('Menu vừa được cập nhật')
+      void loadData()
+    }
+
     socket.on('connect', onConnect)
     socket.on('staff-notification', onStaffNotification)
     socket.on('notification-batch', onNotificationBatch)
+    socket.on('order-item-ready', onOrderItemReady)
+    socket.on('table-status-changed', onTableStatusChanged)
+    socket.on('payment-confirmed', onPaymentConfirmed)
+    socket.on('menu-updated', onMenuUpdated)
 
     if (!socket.connected) {
       socket.connect()
@@ -378,12 +597,16 @@ export default function Orders() {
       socket.off('connect', onConnect)
       socket.off('staff-notification', onStaffNotification)
       socket.off('notification-batch', onNotificationBatch)
+      socket.off('order-item-ready', onOrderItemReady)
+      socket.off('table-status-changed', onTableStatusChanged)
+      socket.off('payment-confirmed', onPaymentConfirmed)
+      socket.off('menu-updated', onMenuUpdated)
       disconnectSocket()
     }
   }, [dateFrom, dateTo, filterTableId, notifSyncKey, selectedBranchId, selectedStatus, user?.branchId, user?.id, user?.name])
 
   const syncOfflineQueue = async () => {
-    const currentQueue = readOfflineQueue(selectedBranchId || undefined)
+    const currentQueue = await readPosOfflineQueue<OfflineOrderQueueItem>(selectedBranchId || undefined)
     if (!currentQueue.length) return
 
     setSyncingOfflineQueue(true)
@@ -398,7 +621,7 @@ export default function Orders() {
           items: item.items,
         })
         nextQueue = nextQueue.filter((queued) => queued.localId !== item.localId)
-        writeOfflineQueue(selectedBranchId || undefined, nextQueue)
+        await writePosOfflineQueue(selectedBranchId || undefined, nextQueue)
         successCount += 1
       } catch (error: any) {
         const message = String(error?.response?.data?.message || '')
@@ -410,7 +633,7 @@ export default function Orders() {
           toast.error(`Queue #${item.localId.slice(-6)} lỗi: ${message}`)
         }
         nextQueue = nextQueue.filter((queued) => queued.localId !== item.localId)
-        writeOfflineQueue(selectedBranchId || undefined, nextQueue)
+        await writePosOfflineQueue(selectedBranchId || undefined, nextQueue)
       }
     }
 
@@ -439,10 +662,23 @@ export default function Orders() {
   }, [selectedBranchId])
 
   const increase = (menuItemId: string) => {
+    const item = menuItems.find((entry) => entry.id === menuItemId)
+    if (!item) return
+    const customGroups = extractCustomizations(item)
+    if (customGroups.length > 0) {
+      const sizeGroup = customGroups.find((group) => group.type === 'single')
+      setCustomizingItem(item)
+      setCustomSize(String(sizeGroup?.options?.[0]?.value || ''))
+      setCustomToppings([])
+      setCustomNote('')
+      return
+    }
+    pushCartHistory({ ...cart })
     setCart((prev) => ({ ...prev, [menuItemId]: (prev[menuItemId] || 0) + 1 }))
   }
 
   const decrease = (menuItemId: string) => {
+    pushCartHistory({ ...cart })
     setCart((prev) => {
       const next = { ...prev }
       if (!next[menuItemId]) return prev
@@ -464,16 +700,82 @@ export default function Orders() {
     [cart, menuItems],
   )
 
+  const customCartTotal = useMemo(
+    () =>
+      customCartLines.reduce((sum, line) => {
+        const basePrice = Number(menuItems.find((entry) => entry.id === line.menuItemId)?.price || 0)
+        const sizeExtra = Number(line.selectedOptions.size?.priceModifier || 0)
+        const toppingsExtra = Array.isArray(line.selectedOptions.toppings)
+          ? line.selectedOptions.toppings.reduce((acc, item) => acc + Number(item.priceModifier || 0), 0)
+          : 0
+        return sum + (basePrice + sizeExtra + toppingsExtra) * line.quantity
+      }, 0),
+    [customCartLines, menuItems],
+  )
+
+  const applyCustomization = () => {
+    if (!customizingItem) return
+    const groups = extractCustomizations(customizingItem)
+    const sizeGroup = groups.find((group) => group.type === 'single')
+    const toppingGroup = groups.find((group) => group.type === 'multi')
+    const size = sizeGroup?.options?.find((option) => option.value === customSize)
+    const toppings = (toppingGroup?.options || []).filter((option) => customToppings.includes(option.value))
+    const selectedOptions: StaffSelectedOptions = {
+      ...(size ? { size: { name: size.label, priceModifier: Number(size.priceDelta || 0) } } : {}),
+      ...(toppings.length
+        ? {
+            toppings: toppings.map((item) => ({
+              name: item.label,
+              priceModifier: Number(item.priceDelta || 0),
+            })),
+          }
+        : {}),
+      ...(customNote.trim() ? { note: customNote.trim() } : {}),
+    }
+
+    const key = JSON.stringify({ menuItemId: customizingItem.id, selectedOptions })
+    setCustomCartLines((prev) => {
+      const existingIndex = prev.findIndex(
+        (line) =>
+          JSON.stringify({
+            menuItemId: line.menuItemId,
+            selectedOptions: line.selectedOptions,
+          }) === key,
+      )
+      if (existingIndex >= 0) {
+        return prev.map((line, index) => (index === existingIndex ? { ...line, quantity: line.quantity + 1 } : line))
+      }
+      return [
+        ...prev,
+        {
+          localId: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          menuItemId: customizingItem.id,
+          menuItemName: customizingItem.name,
+          quantity: 1,
+          selectedOptions,
+        },
+      ]
+    })
+    setCustomizingItem(null)
+  }
+
   const createOrder = async (e: FormEvent) => {
     e.preventDefault()
     if (!selectedTableId) {
       toast.error(tv('Chưa chọn bàn', 'No table selected'))
       return
     }
-    const items = Object.entries(cart).map(([menuItemId, quantity]) => ({
+    const baseItems = Object.entries(cart).map(([menuItemId, quantity]) => ({
       menuItemId,
       quantity,
     }))
+    const customItems = customCartLines.map((line) => ({
+      menuItemId: line.menuItemId,
+      quantity: line.quantity,
+      note: line.selectedOptions.note,
+      selectedOptions: line.selectedOptions,
+    }))
+    const items = [...baseItems, ...customItems]
     if (items.length === 0) {
       toast.error(tv('Chưa có món trong giỏ', 'Cart is empty'))
       return
@@ -487,6 +789,7 @@ export default function Orders() {
         items,
       })
       setCart({})
+      setCustomCartLines([])
       toast.success(tv('Tạo đơn thành công', 'Order created successfully'))
       await loadData()
     } catch (error: any) {
@@ -495,15 +798,18 @@ export default function Orders() {
         const queuedItem: OfflineOrderQueueItem = {
           localId: `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           createdAt: new Date().toISOString(),
+          syncStatus: 'PENDING_SYNC',
           branchId: selectedBranchId || undefined,
           tableId: selectedTableId,
           customerName: 'Khách tại quầy',
           items,
         }
-        const nextQueue = [...readOfflineQueue(selectedBranchId || undefined), queuedItem]
-        writeOfflineQueue(selectedBranchId || undefined, nextQueue)
+        const existingQueue = await readPosOfflineQueue<OfflineOrderQueueItem>(selectedBranchId || undefined)
+        const nextQueue = [...existingQueue, queuedItem]
+        await writePosOfflineQueue(selectedBranchId || undefined, nextQueue)
         setOfflineQueue(nextQueue)
         setCart({})
+        setCustomCartLines([])
         toast.success('Mất mạng: đã đưa đơn vào offline queue, sẽ tự đồng bộ khi có mạng')
       } else {
         toast.error(error.response?.data?.message || tv('Tạo đơn thất bại', 'Failed to create order'))
@@ -613,6 +919,10 @@ export default function Orders() {
       }
 
       setCreatedPayment(payment)
+      if (payment.provider === 'SEPAY') {
+        setSepayExpiresAt(String(payment.expiresAt || new Date(Date.now() + 5 * 60 * 1000).toISOString()))
+        setSepayExpiredNotified(false)
+      }
       if (payment.status === 'PAID') {
         await updateOrderStatus(orderId, 'COMPLETED')
       }
@@ -696,6 +1006,10 @@ export default function Orders() {
           toast.success(tv(`Tiền thừa: ${changeDue.toLocaleString()}đ`, `Change due: ${changeDue.toLocaleString()}đ`))
         }
         setPayingOrder(null)
+        lastPrintedPaymentRef.current = null
+        setSepayExpiresAt(null)
+        setSepaySecondsLeft(0)
+        setSepayExpiredNotified(false)
       } else {
         if (!existingPayment) {
           toast.success(tv('Đã tạo giao dịch online. Chờ webhook hoặc đối soát thanh toán', 'Online payment created. Waiting for webhook or reconciliation'))
@@ -723,6 +1037,10 @@ export default function Orders() {
         if (existing) {
           setCreatedPayment(existing)
           setSelectedMethod(existing.provider)
+          if (existing.provider === 'SEPAY') {
+            setSepayExpiresAt(String(existing.expiresAt || new Date(Date.now() + 5 * 60 * 1000).toISOString()))
+            setSepayExpiredNotified(false)
+          }
         }
       } catch (error: any) {
         if (!cancelled) {
@@ -763,19 +1081,48 @@ export default function Orders() {
   }, [createdPayment?.orderId, createdPayment?.provider, createdPayment?.status, payingOrder?.id])
 
   useEffect(() => {
+    if (!payingOrder || !createdPayment || !sepayExpiresAt) return
+    if (createdPayment.orderId !== payingOrder.id) return
+    if (createdPayment.provider !== 'SEPAY') return
+    if (!['PENDING', 'WAITING_TRANSFER'].includes(createdPayment.status)) return
+
+    const tick = () => {
+      const left = Math.max(0, Math.floor((new Date(sepayExpiresAt).getTime() - Date.now()) / 1000))
+      setSepaySecondsLeft(left)
+      if (left === 0 && !sepayExpiredNotified) {
+        setSepayExpiredNotified(true)
+        toast.error('Chưa nhận được xác nhận - kiểm tra lại ngân hàng')
+      }
+    }
+
+    tick()
+    const intervalId = window.setInterval(tick, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [createdPayment?.orderId, createdPayment?.provider, createdPayment?.status, payingOrder?.id, sepayExpiresAt, sepayExpiredNotified])
+
+  useEffect(() => {
     if (!payingOrder || !createdPayment) return
     if (createdPayment.orderId !== payingOrder.id) return
     if (createdPayment.status !== 'PAID') return
+
+    if (autoPrintInvoiceAfterPaid && lastPrintedPaymentRef.current !== createdPayment.paymentId) {
+      printInvoice(payingOrder, createdPayment)
+      lastPrintedPaymentRef.current = createdPayment.paymentId
+    }
 
     toast.success(tv('Thanh toán thành công', 'Payment completed'))
     const timeoutId = window.setTimeout(() => {
       setPayingOrder(null)
       setCreatedPayment(null)
+      lastPrintedPaymentRef.current = null
+      setSepayExpiresAt(null)
+      setSepaySecondsLeft(0)
+      setSepayExpiredNotified(false)
       void loadPaymentHistory()
     }, 1200)
 
     return () => window.clearTimeout(timeoutId)
-  }, [createdPayment?.orderId, createdPayment?.status, payingOrder?.id, tv])
+  }, [createdPayment?.orderId, createdPayment?.status, createdPayment?.paymentId, payingOrder?.id, tv, autoPrintInvoiceAfterPaid])
 
   const toggleHistoryRow = async (payment: PaymentApi) => {
     const key = payment.paymentId
@@ -933,7 +1280,7 @@ export default function Orders() {
             size="sm"
             variant="secondary"
             onClick={() => {
-              writeOfflineQueue(selectedBranchId || undefined, [])
+              void writePosOfflineQueue(selectedBranchId || undefined, [])
               setOfflineQueue([])
               toast.success('Đã xóa offline queue')
             }}
@@ -950,7 +1297,7 @@ export default function Orders() {
               return (
                 <div key={item.localId} className="rounded-lg bg-white/80 p-2 dark:bg-slate-900/40">
                   <p className="font-semibold">#{item.localId.slice(-6)} · Bàn {table?.number ?? item.tableId}</p>
-                  <p>{quantity} món · {formatDateTimeFull(item.createdAt)}</p>
+                  <p>{quantity} món · {formatDateTimeFull(item.createdAt)} · {item.syncStatus}</p>
                 </div>
               )
             })}
@@ -1008,8 +1355,37 @@ export default function Orders() {
 
             <div className="flex items-center justify-between border-t pt-2">
               <span className="font-semibold">{tv('Tổng', 'Total')}</span>
-              <span className="font-bold text-amber-700">{cartTotal.toLocaleString()}đ</span>
+              <span className="font-bold text-amber-700">{(cartTotal + customCartTotal).toLocaleString()}đ</span>
             </div>
+
+            {customCartLines.length > 0 && (
+              <div className="rounded-xl border border-amber-100 p-2 text-xs">
+                <p className="mb-1 font-semibold">Món đã tùy chỉnh</p>
+                <div className="space-y-1">
+                  {customCartLines.map((line) => (
+                    <div key={line.localId} className="flex items-start justify-between gap-2">
+                      <div>
+                        <p>{line.quantity}x {line.menuItemName}</p>
+                        <p className="text-slate-500">
+                          {line.selectedOptions.size?.name ? `Size ${line.selectedOptions.size.name}. ` : ''}
+                          {Array.isArray(line.selectedOptions.toppings) && line.selectedOptions.toppings.length > 0
+                            ? `Topping: ${line.selectedOptions.toppings.map((item) => item.name).join(', ')}. `
+                            : ''}
+                          {line.selectedOptions.note ? `Ghi chú: ${line.selectedOptions.note}` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded border border-amber-200 px-2 py-1"
+                        onClick={() => setCustomCartLines((prev) => prev.filter((entry) => entry.localId !== line.localId))}
+                      >
+                        Xóa
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <Button type="submit" className="w-full" loading={creating}>
               {tv('Tạo đơn cho bàn', 'Create order')}
@@ -1063,7 +1439,7 @@ export default function Orders() {
                 <Button size="sm" variant="secondary" onClick={() => setDetailOrder(order)}>
                   Chi tiết
                   </Button>
-                  {!['COMPLETED', 'CANCELLED'].includes(order.status) && (
+                  {!['COMPLETED', 'CANCELLED'].includes(order.status) && canManagePosAdvanced && (
                     <Button size="sm" variant="secondary" onClick={() => openEditOrder(order)}>
                       Sửa món
                     </Button>
@@ -1073,7 +1449,7 @@ export default function Orders() {
                       Xác nhận đơn
                     </Button>
                   )}
-                  {(order.status === 'CONFIRMED' || order.status === 'PREPARING') && (
+                  {(order.status === 'CONFIRMED' || order.status === 'PREPARING') && canManagePosAdvanced && (
                     <Button size="sm" variant="secondary" onClick={() => updateOrderStatus(order.id, 'READY')}>
                       Chuyển sang sẵn sàng
                     </Button>
@@ -1086,6 +1462,7 @@ export default function Orders() {
                         setPayingOrder(order)
                         setSelectedMethod('CASH')
                         setCashReceived(String(order.totalAmount))
+                        setAutoPrintInvoiceAfterPaid(true)
                       }}
                     >
                       Thanh toán
@@ -1230,6 +1607,12 @@ export default function Orders() {
                         <span className="font-semibold">{createdPayment.vietQr.transferContent || createdPayment.transferContent}</span>
                       </p>
                     )}
+                    <p className="mt-1 text-xs text-amber-700">
+                      Chờ xác nhận: <span className="font-semibold">{Math.floor(sepaySecondsLeft / 60)}:{String(sepaySecondsLeft % 60).padStart(2, '0')}</span>
+                    </p>
+                    {sepaySecondsLeft === 0 && (
+                      <p className="mt-1 text-xs text-red-600">Quá thời gian chờ xác nhận. Vui lòng kiểm tra lại ngân hàng.</p>
+                    )}
                   </div>
                 )}
                 {createdPayment.status !== 'PAID' && (
@@ -1244,6 +1627,33 @@ export default function Orders() {
               </div>
             )}
 
+            <div className="mt-3 space-y-2">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={autoPrintInvoiceAfterPaid}
+                  onChange={(e) => setAutoPrintInvoiceAfterPaid(e.target.checked)}
+                />
+                In hóa đơn sau khi thanh toán thành công
+              </label>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => printOrderSlip(payingOrder)}
+                >
+                  In order
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => printInvoice(payingOrder, createdPayment)}
+                >
+                  In trước
+                </Button>
+              </div>
+            </div>
+
             <div className="mt-4 flex gap-2">
               <Button
                 variant="secondary"
@@ -1251,6 +1661,10 @@ export default function Orders() {
                 onClick={() => {
                   setPayingOrder(null)
                   setCreatedPayment(null)
+                  lastPrintedPaymentRef.current = null
+                  setSepayExpiresAt(null)
+                  setSepaySecondsLeft(0)
+                  setSepayExpiredNotified(false)
                 }}
               >
                 Hủy
@@ -1269,7 +1683,7 @@ export default function Orders() {
               </Button>
             </div>
             <div className="mt-2 text-xs text-slate-500">
-              F1: Sơ đồ bàn | F3: Focus chọn bàn | F4/Enter: Mở thanh toán đơn READY | Esc: Đóng
+              F1: Sơ đồ bàn | F3: Focus chọn bàn | F4/Enter: Mở thanh toán đơn READY | Tab: Đổi phương thức | F5/Ctrl+P: In | Ctrl+Z: Undo giỏ | Esc: Đóng
             </div>
           </div>
         </div>
@@ -1307,6 +1721,60 @@ export default function Orders() {
             <div className="mt-4 flex justify-end">
               <Button variant="secondary" onClick={() => setDetailOrder(null)}>
                 Đóng
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {customizingItem && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 dark:bg-slate-900">
+            <p className="text-lg font-bold">Tùy chỉnh món: {customizingItem.name}</p>
+            {extractCustomizations(customizingItem).map((group) => (
+              <div key={group.id} className="mt-3">
+                <p className="mb-1 text-sm font-semibold">{group.label}</p>
+                {group.type === 'single' ? (
+                  <select className={selectClass} value={customSize} onChange={(e) => setCustomSize(e.target.value)}>
+                    {(group.options || []).map((option) => (
+                      <option key={`${group.id}-${option.value}`} value={option.value}>
+                        {option.label}{option.priceDelta ? ` (+${Number(option.priceDelta).toLocaleString()}đ)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="space-y-1 text-sm">
+                    {(group.options || []).map((option) => (
+                      <label key={`${group.id}-${option.value}`} className="flex items-center justify-between rounded border border-amber-100 px-2 py-1">
+                        <span>{option.label}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">{option.priceDelta ? `+${Number(option.priceDelta).toLocaleString()}đ` : ''}</span>
+                          <input
+                            type="checkbox"
+                            checked={customToppings.includes(option.value)}
+                            onChange={(e) =>
+                              setCustomToppings((prev) =>
+                                e.target.checked ? [...prev, option.value] : prev.filter((item) => item !== option.value),
+                              )
+                            }
+                          />
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            <div className="mt-3">
+              <p className="mb-1 text-sm font-semibold">Ghi chú</p>
+              <input className={selectClass} value={customNote} onChange={(e) => setCustomNote(e.target.value)} placeholder="Ít đá, ít ngọt..." />
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => setCustomizingItem(null)}>
+                Hủy
+              </Button>
+              <Button className="flex-1" onClick={applyCustomization}>
+                Thêm vào giỏ
               </Button>
             </div>
           </div>

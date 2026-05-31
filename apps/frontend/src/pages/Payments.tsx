@@ -50,14 +50,10 @@ const getMethodIcon = (provider: string): string => {
   switch (provider) {
     case 'CASH':
       return '💵'
-    case 'VIETQR':
-      return '🔳'
     case 'SEPAY':
       return '🏦'
-    case 'VNPAY':
-      return '🏦'
     default:
-      return '💳'
+      return '💱'
   }
 }
 

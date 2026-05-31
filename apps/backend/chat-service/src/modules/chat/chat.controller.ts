@@ -46,9 +46,16 @@ export class ChatController {
     @Query('page') page = '1',
     @Query('limit') limit = '50',
     @Query('before') before?: string,
+    @Query('token') token?: string,
     @Req() req?: Request,
   ) {
-    return this.chatService.getMessages(sessionId, this.actor(req!), Number(page), Number(limit), before);
+    const customerToken = String(token || req?.headers['x-chat-token'] || '');
+    return this.chatService.getMessages(sessionId, this.actor(req!), Number(page), Number(limit), before, customerToken);
+  }
+
+  @Post('api/chat/sessions/:sessionId/customer-token')
+  issueCustomerChatToken(@Param('sessionId') sessionId: string) {
+    return { token: this.chatService.issueCustomerSessionToken(sessionId) };
   }
 
   @Post('api/chat/sessions/:sessionId/close')
@@ -157,6 +164,7 @@ export class ChatController {
 
   @Get('api/chats/:id/messages')
   getMessagesLegacy(@Param('id') sessionId: string, @Req() req?: Request) {
-    return this.chatService.getMessages(sessionId, this.actor(req!), 1, 200);
+    const token = String(req?.query?.token || req?.headers['x-chat-token'] || '');
+    return this.chatService.getMessages(sessionId, this.actor(req!), 1, 200, undefined, token);
   }
 }

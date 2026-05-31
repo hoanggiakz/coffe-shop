@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import psycopg
 import sqlparse
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, Field
@@ -33,6 +33,8 @@ KB_REFRESH_INTERVAL_MINUTES = int(os.getenv("AI_KB_REFRESH_INTERVAL_MINUTES", "3
 AI_FORECAST_CRON_ENABLED = os.getenv("AI_FORECAST_CRON_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
 AI_FORECAST_CRON_HOUR_UTC = int(os.getenv("AI_FORECAST_CRON_HOUR_UTC", "19"))  # 02:00 ICT ~= 19:00 UTC (previous day)
 CHAT_SERVICE_API_URL = os.getenv("CHAT_SERVICE_API_URL", "http://chat-service:3007/api/chats").strip().rstrip("/")
+AI_ENFORCE_RBAC = os.getenv("AI_ENFORCE_RBAC", "false").strip().lower() in {"1", "true", "yes"}
+AI_ALLOW_LEGACY_NO_AUTH = os.getenv("AI_ALLOW_LEGACY_NO_AUTH", "true").strip().lower() in {"1", "true", "yes"}
 
 DEFAULT_MENU_KB = [
     {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
@@ -41,8 +43,40 @@ DEFAULT_MENU_KB = [
     {"keyword": "khuyến mãi", "answer": "Bạn có thể xem khuyến mãi đang chạy ở mục Khuyến mãi theo chi nhánh."},
 ]
 
-POSITIVE_WORDS = {"tốt", "ngon", "tuyệt", "hài lòng", "good", "great", "excellent", "friendly"}
-NEGATIVE_WORDS = {"tệ", "dở", "chậm", "lâu", "không hài lòng", "bad", "poor", "awful"}
+POSITIVE_WORD_WEIGHTS: dict[str, float] = {
+    "tot": 1.0,
+    "ngon": 1.2,
+    "tuyet": 1.4,
+    "hailong": 1.3,
+    "nhanh": 0.8,
+    "thanthien": 1.1,
+    "sach": 0.7,
+    "good": 1.0,
+    "great": 1.2,
+    "excellent": 1.5,
+    "friendly": 1.0,
+}
+NEGATIVE_WORD_WEIGHTS: dict[str, float] = {
+    "te": 1.3,
+    "do": 1.0,
+    "cham": 1.1,
+    "lau": 1.1,
+    "khonghailong": 1.4,
+    "hetmon": 1.5,
+    "khophucvu": 1.2,
+    "thaidoxau": 1.6,
+    "bad": 1.1,
+    "poor": 1.2,
+    "awful": 1.5,
+}
+
+ISSUE_TOPIC_KEYWORDS: dict[str, set[str]] = {
+    "cho_lau": {"cho", "cho_lau", "cham", "lau", "doi", "tre"},
+    "het_mon": {"het", "het_mon", "khong_co", "out_of_stock", "sold_out"},
+    "thai_do": {"thai_do", "nhan_vien", "tho_lo", "khophucvu", "cau_gat", "bat_lich_su"},
+    "chat_luong": {"do", "te", "nhat", "nguoi", "khong_ngon", "chat_luong"},
+    "gia_ca": {"gia", "dat", "mac", "phi", "khong_xung_dang"},
+}
 
 
 class RecommendationFeedback(BaseModel):
@@ -158,6 +192,29 @@ def normalize_limit(value: int, lower: int = 1, upper: int = 10) -> int:
     if value < lower or value > upper:
         raise HTTPException(status_code=400, detail=f"limit must be between {lower} and {upper}")
     return value
+
+
+def authorize_request(
+    request: Request,
+    branch_id: str | None,
+    allowed_roles: set[str],
+) -> dict[str, str]:
+    role = str(request.headers.get("x-actor-role") or request.headers.get("x-user-role") or "").strip().upper()
+    actor_branch_id = str(request.headers.get("x-actor-branch-id") or request.headers.get("x-branch-id") or "").strip()
+    actor_user_id = str(request.headers.get("x-actor-user-id") or request.headers.get("x-user-id") or "").strip()
+
+    if not role:
+        if AI_ENFORCE_RBAC and not AI_ALLOW_LEGACY_NO_AUTH:
+            raise HTTPException(status_code=401, detail="Missing actor role")
+        return {"role": "LEGACY", "branchId": actor_branch_id, "userId": actor_user_id}
+
+    if role not in allowed_roles:
+        raise HTTPException(status_code=403, detail="Insufficient role for this endpoint")
+
+    if role == "MANAGER" and branch_id and actor_branch_id and actor_branch_id != branch_id:
+        raise HTTPException(status_code=403, detail="Manager cannot access other branch scope")
+
+    return {"role": role, "branchId": actor_branch_id, "userId": actor_user_id}
 
 
 def reload_knowledge_base(source: str = "manual") -> dict[str, Any]:
@@ -318,29 +375,57 @@ def get_cooccurrence_items(branch_id: str, cart_item_ids: list[str], limit: int)
         return []
 
 
-def classify_sentiment(text: str) -> tuple[str, float, dict[str, float]]:
-    lowered = text.lower()
-    pos_hits = sum(1 for word in POSITIVE_WORDS if word in lowered)
-    neg_hits = sum(1 for word in NEGATIVE_WORDS if word in lowered)
+def normalize_text_for_sentiment(text: str) -> str:
+    value = str(text or "").lower()
+    value = value.replace("không", "khong").replace("hài lòng", "hailong")
+    value = value.replace("thái độ", "thai_do").replace("hết món", "het_mon")
+    value = value.replace("chờ lâu", "cho_lau").replace("khó phục vụ", "khophucvu")
+    value = re.sub(r"[^a-z0-9À-ỹà-ỹ_\s]", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
 
-    if pos_hits > neg_hits:
+
+def sentiment_weight_score(tokens: list[str], weight_map: dict[str, float]) -> float:
+    score = 0.0
+    for token in tokens:
+        score += weight_map.get(token, 0.0)
+    return score
+
+
+def classify_sentiment(text: str) -> tuple[str, float, dict[str, float], dict[str, Any]]:
+    normalized_text = normalize_text_for_sentiment(text)
+    tokens = [token for token in normalized_text.split(" ") if token]
+
+    pos_score = sentiment_weight_score(tokens, POSITIVE_WORD_WEIGHTS)
+    neg_score = sentiment_weight_score(tokens, NEGATIVE_WORD_WEIGHTS)
+    delta = pos_score - neg_score
+
+    if delta > 0.35:
         label = "POSITIVE"
-        confidence = min(0.95, 0.62 + 0.08 * pos_hits)
-    elif neg_hits > pos_hits:
+    elif delta < -0.35:
         label = "NEGATIVE"
-        confidence = min(0.95, 0.62 + 0.08 * neg_hits)
     else:
         label = "NEUTRAL"
-        confidence = 0.65
 
-    scores = {
-        "POSITIVE": round(0.1 + (0.75 if label == "POSITIVE" else 0.15), 2),
-        "NEUTRAL": round(0.1 + (0.75 if label == "NEUTRAL" else 0.15), 2),
-        "NEGATIVE": round(0.1 + (0.75 if label == "NEGATIVE" else 0.15), 2),
+    magnitude = abs(delta)
+    confidence = max(0.55, min(0.97, 0.6 + (magnitude * 0.12)))
+
+    base_positive = max(0.05, pos_score + (0.8 if label == "POSITIVE" else 0.2))
+    base_negative = max(0.05, neg_score + (0.8 if label == "NEGATIVE" else 0.2))
+    base_neutral = max(0.1, 0.8 if label == "NEUTRAL" else 0.25)
+    total = base_positive + base_neutral + base_negative
+    normalized = {
+        "POSITIVE": round(base_positive / total, 2),
+        "NEUTRAL": round(base_neutral / total, 2),
+        "NEGATIVE": round(base_negative / total, 2),
     }
-    total = sum(scores.values())
-    normalized = {key: round(value / total, 2) for key, value in scores.items()}
-    return label, round(confidence, 2), normalized
+    explanation = {
+        "tokens": tokens[:20],
+        "positiveScore": round(pos_score, 3),
+        "negativeScore": round(neg_score, 3),
+        "delta": round(delta, 3),
+    }
+    return label, round(confidence, 2), normalized, explanation
 
 
 def decimal_from_any(value: Any, default: float = 0.0) -> float:
@@ -350,35 +435,209 @@ def decimal_from_any(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def top_negative_issues(texts: list[str], limit: int = 3) -> list[dict[str, Any]]:
-    stop_words = {
-        "la",
-        "va",
-        "cho",
-        "khong",
-        "qua",
-        "rat",
-        "bi",
-        "toi",
-        "ban",
-        "quan",
-        "phuc",
-        "vu",
-        "mon",
-        "nhan",
-        "vien",
-        "khach",
+def median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    sorted_values = sorted(values)
+    mid = len(sorted_values) // 2
+    if len(sorted_values) % 2 == 0:
+        return (sorted_values[mid - 1] + sorted_values[mid]) / 2
+    return sorted_values[mid]
+
+
+def std_dev(values: list[float], mean_value: float) -> float:
+    if len(values) <= 1:
+        return 0.0
+    variance = sum((value - mean_value) ** 2 for value in values) / len(values)
+    return variance ** 0.5
+
+
+def historical_daily_revenue(branch_id: str, lookback_days: int = 90) -> list[dict[str, Any]]:
+    if not REPORT_DATABASE_URL:
+        return []
+    try:
+        rows = execute_sql(
+            """
+            SELECT DATE(o."createdAt") AS date, COALESCE(SUM(o."finalAmount"), 0) AS revenue
+            FROM order_entity o
+            WHERE o."branchId" = %s
+              AND COALESCE(o."paymentStatus", 'UNPAID') = 'PAID'
+              AND o."createdAt" >= (CURRENT_DATE - (%s::int || ' days')::interval)
+            GROUP BY DATE(o."createdAt")
+            ORDER BY DATE(o."createdAt") ASC
+            """,
+            [branch_id, max(7, min(lookback_days, 365))],
+        )
+        return rows
+    except Exception:
+        return []
+
+
+def merge_recommendation_candidates(
+    cooccurrence_items: list[dict[str, Any]],
+    popular_items: list[dict[str, Any]],
+    cart_item_ids: list[str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(limit, 10))
+    cart_set = set([str(item_id).strip() for item_id in cart_item_ids if str(item_id).strip()])
+    score_map: dict[str, dict[str, Any]] = {}
+
+    for idx, item in enumerate(cooccurrence_items):
+        item_id = str(item.get("branchMenuItemId") or item.get("menuItemId") or "").strip()
+        if not item_id or item_id in cart_set:
+            continue
+        co_score = decimal_from_any(item.get("score"), 0.0)
+        weighted = (0.72 * co_score) + max(0.0, 0.28 - idx * 0.03)
+        score_map[item_id] = {**item, "score": round(min(0.99, weighted), 4), "reason": "hybrid_cf_popularity"}
+
+    for idx, item in enumerate(popular_items):
+        item_id = str(item.get("branchMenuItemId") or item.get("menuItemId") or "").strip()
+        if not item_id or item_id in cart_set:
+            continue
+        pop_score = decimal_from_any(item.get("score"), 0.0)
+        weighted = (0.40 * pop_score) + max(0.0, 0.60 - idx * 0.04)
+        if item_id in score_map:
+            score_map[item_id]["score"] = round(min(0.99, score_map[item_id]["score"] + (weighted * 0.25)), 4)
+            continue
+        score_map[item_id] = {**item, "score": round(min(0.99, weighted), 4), "reason": "popularity_fallback"}
+
+    ranked = sorted(score_map.values(), key=lambda row: decimal_from_any(row.get("score"), 0), reverse=True)
+
+    # Diversify: avoid returning only one reason/type when list is long.
+    if len(ranked) > 3:
+        first = ranked[0]
+        others = [row for row in ranked[1:] if str(row.get("reason")) != str(first.get("reason"))]
+        if others:
+            ranked = [first, others[0]] + [row for row in ranked[1:] if row is not others[0]]
+
+    return ranked[:safe_limit]
+
+
+def build_revenue_forecast_from_history(branch_id: str, days: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    history = historical_daily_revenue(branch_id, 120)
+    if not history:
+        baseline = 4_200_000.0
+        points = []
+        for idx in range(days):
+            predicted = baseline * (1 + (0.015 * ((idx % 7) - 3)))
+            points.append(
+                {
+                    "date": (now + timedelta(days=idx)).date().isoformat(),
+                    "predictedRevenue": int(max(0.0, predicted)),
+                    "confidenceLow": int(max(0.0, predicted * 0.86)),
+                    "confidenceHigh": int(max(0.0, predicted * 1.14)),
+                    "confidence": 0.75,
+                }
+            )
+        return points, {"source": "fallback", "historyDays": 0, "baseline": baseline}
+
+    series: list[tuple[datetime.date, float]] = []
+    for row in history:
+        date_raw = str(row.get("date") or "")[:10]
+        try:
+            date_value = datetime.fromisoformat(date_raw).date()
+        except Exception:
+            continue
+        revenue_value = max(0.0, decimal_from_any(row.get("revenue"), 0))
+        series.append((date_value, revenue_value))
+    if not series:
+        baseline = 4_200_000.0
+        points = []
+        for idx in range(days):
+            predicted = baseline * (1 + (0.015 * ((idx % 7) - 3)))
+            points.append(
+                {
+                    "date": (now + timedelta(days=idx)).date().isoformat(),
+                    "predictedRevenue": int(max(0.0, predicted)),
+                    "confidenceLow": int(max(0.0, predicted * 0.86)),
+                    "confidenceHigh": int(max(0.0, predicted * 1.14)),
+                    "confidence": 0.75,
+                }
+            )
+        return points, {"source": "fallback", "historyDays": 0, "baseline": baseline}
+
+    values = [value for _, value in series]
+    mean_value = sum(values) / len(values)
+    day_factors = {idx: [] for idx in range(7)}
+    for day, value in series:
+        day_factors[day.weekday()].append(value)
+    weekday_factor: dict[int, float] = {}
+    for weekday in range(7):
+        weekday_avg = sum(day_factors[weekday]) / len(day_factors[weekday]) if day_factors[weekday] else mean_value
+        weekday_factor[weekday] = weekday_avg / max(mean_value, 1.0)
+
+    trend_window = min(14, len(values))
+    recent_avg = sum(values[-trend_window:]) / trend_window
+    past_avg = sum(values[-(trend_window * 2):-trend_window]) / trend_window if len(values) >= trend_window * 2 else mean_value
+    trend_ratio = recent_avg / max(past_avg, 1.0)
+    trend_ratio = max(0.85, min(1.2, trend_ratio))
+
+    mape_proxy = min(25.0, max(5.0, abs(trend_ratio - 1.0) * 100 + 7.5))
+    confidence_band = max(0.08, min(0.2, mape_proxy / 100))
+    confidence_score = round(max(0.65, min(0.9, 1 - (mape_proxy / 100))), 2)
+
+    points: list[dict[str, Any]] = []
+    for idx in range(days):
+        forecast_date = (now + timedelta(days=idx)).date()
+        seasonal = weekday_factor.get(forecast_date.weekday(), 1.0)
+        step_trend = 1 + ((trend_ratio - 1) * min(1.0, idx / max(1, days - 1)))
+        predicted = max(0.0, mean_value * seasonal * step_trend)
+        points.append(
+            {
+                "date": forecast_date.isoformat(),
+                "predictedRevenue": int(predicted),
+                "confidenceLow": int(max(0.0, predicted * (1 - confidence_band))),
+                "confidenceHigh": int(max(0.0, predicted * (1 + confidence_band))),
+                "confidence": confidence_score,
+            }
+        )
+
+    metadata = {
+        "source": "history-derived",
+        "historyDays": len(series),
+        "meanDailyRevenue": int(mean_value),
+        "trendRatio": round(trend_ratio, 4),
+        "mapeProxy": round(mape_proxy, 2),
     }
-    counts: dict[str, int] = {}
+    return points, metadata
+
+
+def top_negative_issues(texts: list[str], limit: int = 3) -> list[dict[str, Any]]:
+    topic_counts: dict[str, int] = {key: 0 for key in ISSUE_TOPIC_KEYWORDS.keys()}
+    fallback_token_counts: dict[str, int] = {}
+    stop_words = {
+        "la", "va", "cho", "khong", "qua", "rat", "bi", "toi", "ban", "quan",
+        "phuc", "vu", "mon", "nhan", "vien", "khach", "nay", "kia", "roi",
+    }
     for text in texts:
-        normalized = re.sub(r"[^a-zA-Z0-9À-ỹà-ỹ\s]", " ", str(text or "").lower())
-        for token in normalized.split():
-            token = token.strip()
-            if len(token) < 3 or token in stop_words:
-                continue
-            counts[token] = counts.get(token, 0) + 1
-    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)[: max(1, min(limit, 10))]
-    return [{"issue": key, "count": value} for key, value in ranked]
+        normalized = normalize_text_for_sentiment(text)
+        tokens = [token.strip() for token in normalized.split() if token.strip()]
+        token_set = set(tokens)
+        matched_topic = False
+        for topic, keywords in ISSUE_TOPIC_KEYWORDS.items():
+            if token_set.intersection(keywords):
+                topic_counts[topic] += 1
+                matched_topic = True
+        if not matched_topic:
+            for token in tokens:
+                if len(token) < 3 or token in stop_words:
+                    continue
+                fallback_token_counts[token] = fallback_token_counts.get(token, 0) + 1
+    ranked_topics = sorted(
+        [(topic, count) for topic, count in topic_counts.items() if count > 0],
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    issues = [{"issue": topic, "count": count} for topic, count in ranked_topics]
+    if len(issues) < limit and fallback_token_counts:
+        fallback_ranked = sorted(fallback_token_counts.items(), key=lambda item: item[1], reverse=True)
+        for token, count in fallback_ranked:
+            if len(issues) >= limit:
+                break
+            issues.append({"issue": token, "count": count})
+    return issues[: max(1, min(limit, 10))]
 
 
 async def forecast_cron_loop():
@@ -547,40 +806,7 @@ def health() -> dict[str, Any]:
 def rebuild_revenue_forecast(payload: ForecastRebuildPayload) -> dict[str, Any]:
     payload.branchId = normalize_branch_id(payload.branchId)
     payload.days = max(1, min(payload.days, 30))
-    now = datetime.now(timezone.utc)
-
-    baseline_daily = 4_200_000.0
-    if REPORT_DATABASE_URL:
-        try:
-            rows = execute_sql(
-                """
-                SELECT date, revenue
-                FROM daily_revenue
-                WHERE date >= (CURRENT_DATE - INTERVAL '30 days')
-                ORDER BY date ASC
-                """,
-            )
-            if rows:
-                recent_values = [decimal_from_any(row.get("revenue"), baseline_daily) for row in rows]
-                baseline_daily = sum(recent_values) / max(len(recent_values), 1)
-        except Exception:
-            pass
-
-    generated = []
-    for idx in range(payload.days):
-        date_value = (now + timedelta(days=idx)).date()
-        predicted = max(0.0, baseline_daily * (1 + (0.02 * (idx % 5 - 2))))
-        low = predicted * 0.9
-        high = predicted * 1.1
-        generated.append(
-            {
-                "date": date_value.isoformat(),
-                "predictedRevenue": int(predicted),
-                "confidenceLow": int(low),
-                "confidenceHigh": int(high),
-                "confidence": 0.8,
-            }
-        )
+    generated, forecast_meta = build_revenue_forecast_from_history(payload.branchId, payload.days)
 
     persisted = 0
     if REPORT_DATABASE_URL:
@@ -611,7 +837,7 @@ def rebuild_revenue_forecast(payload: ForecastRebuildPayload) -> dict[str, Any]:
                                 item["confidenceHigh"],
                                 item["confidence"],
                                 AI_ACTIVE_MODEL_VERSION,
-                                12.5,
+                                decimal_from_any(forecast_meta.get("mapeProxy"), 12.5),
                             ),
                         )
                         persisted += 1
@@ -623,7 +849,7 @@ def rebuild_revenue_forecast(payload: ForecastRebuildPayload) -> dict[str, Any]:
         "rebuild",
         True,
         payload.branchId,
-        metadata={"days": payload.days, "persisted": persisted},
+        metadata={"days": payload.days, "persisted": persisted, **forecast_meta},
     )
     return {
         "branchId": payload.branchId,
@@ -632,6 +858,8 @@ def rebuild_revenue_forecast(payload: ForecastRebuildPayload) -> dict[str, Any]:
         "persisted": persisted,
         "items": generated,
         "modelVersion": AI_ACTIVE_MODEL_VERSION,
+        "source": str(forecast_meta.get("source") or "fallback"),
+        "meta": forecast_meta,
     }
 
 
@@ -644,7 +872,8 @@ def kb_reload() -> dict[str, Any]:
 
 @app.get("/api/ai/forecast/revenue")
 @metric_guard("forecast_revenue")
-def forecast_revenue(branchId: str, days: int = 7, granularity: str = "daily") -> dict[str, Any]:
+def forecast_revenue(request: Request, branchId: str, days: int = 7, granularity: str = "daily") -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
     days = max(1, min(days, 30))
     now = datetime.now(timezone.utc)
@@ -679,23 +908,12 @@ def forecast_revenue(branchId: str, days: int = 7, granularity: str = "daily") -
                     "modelVersion": AI_ACTIVE_MODEL_VERSION,
                     "mape": 12.5,
                     "source": "db",
+                    "available": True,
                 }
         except Exception:
             pass
 
-    forecasts: list[dict[str, Any]] = []
-    base_value = 4_200_000
-    for idx in range(days):
-        predicted = base_value + (idx * 120_000)
-        forecasts.append(
-            {
-                "date": (now + timedelta(days=idx)).date().isoformat(),
-                "predictedRevenue": predicted,
-                "confidenceLow": int(predicted * 0.9),
-                "confidenceHigh": int(predicted * 1.1),
-                "confidence": 0.8,
-            }
-        )
+    forecasts, forecast_meta = build_revenue_forecast_from_history(branchId, days)
     log_audit("/api/ai/forecast/revenue", "predict", True, branchId)
     return {
         "branchId": branchId,
@@ -703,14 +921,17 @@ def forecast_revenue(branchId: str, days: int = 7, granularity: str = "daily") -
         "granularity": granularity,
         "forecasts": forecasts,
         "modelVersion": AI_ACTIVE_MODEL_VERSION,
-        "mape": 12.5,
-        "source": "fallback",
+        "mape": decimal_from_any(forecast_meta.get("mapeProxy"), 12.5),
+        "source": str(forecast_meta.get("source") or "fallback"),
+        "available": True,
+        "meta": forecast_meta,
     }
 
 
 @app.get("/api/ai/forecast/revenue/hourly")
 @metric_guard("forecast_hourly")
-def forecast_revenue_hourly(branchId: str) -> dict[str, Any]:
+def forecast_revenue_hourly(request: Request, branchId: str) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     points = [{"hour": hour, "predictedRevenue": 120_000 + (hour % 6) * 30_000} for hour in range(24)]
     log_audit("/api/ai/forecast/revenue/hourly", "predict", True, branchId)
     return {
@@ -723,7 +944,8 @@ def forecast_revenue_hourly(branchId: str) -> dict[str, Any]:
 
 @app.get("/api/ai/forecast/inventory")
 @metric_guard("forecast_inventory")
-def forecast_inventory(branchId: str, days: int = 7) -> dict[str, Any]:
+def forecast_inventory(request: Request, branchId: str, days: int = 7) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     log_audit("/api/ai/forecast/inventory", "predict", True, branchId)
     return {
         "branchId": branchId,
@@ -739,7 +961,8 @@ def forecast_inventory(branchId: str, days: int = 7) -> dict[str, Any]:
 
 @app.get("/api/ai/forecast/staffing")
 @metric_guard("forecast_staffing")
-def forecast_staffing(branchId: str) -> dict[str, Any]:
+def forecast_staffing(request: Request, branchId: str) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     log_audit("/api/ai/forecast/staffing", "predict", True, branchId)
     return {
         "branchId": branchId,
@@ -758,8 +981,11 @@ def forecast_staffing(branchId: str) -> dict[str, Any]:
 def recommend(branchId: str, limit: int = 5, customerId: str | None = None) -> dict[str, Any]:
     branchId = normalize_branch_id(branchId)
     safe_limit = normalize_limit(limit)
-    items = get_popular_items(branchId, safe_limit)
-    strategy = "user-history" if customerId else "popularity"
+    cart_seed = [customerId] if customerId else []
+    cooccurrence_items = get_cooccurrence_items(branchId, cart_seed, safe_limit) if customerId else []
+    popular_items = get_popular_items(branchId, max(safe_limit * 2, safe_limit))
+    items = merge_recommendation_candidates(cooccurrence_items, popular_items, cart_seed, safe_limit)
+    strategy = "hybrid-cf-popularity" if cooccurrence_items else "popularity"
     log_audit("/api/ai/recommend", "recommend", True, branchId, metadata={"limit": safe_limit, "strategy": strategy})
     return {
         "branchId": branchId,
@@ -776,10 +1002,10 @@ def recommend(branchId: str, limit: int = 5, customerId: str | None = None) -> d
 def recommend_post(payload: RecommendationPayload) -> dict[str, Any]:
     payload.branchId = normalize_branch_id(payload.branchId)
     safe_limit = normalize_limit(payload.limit)
-    cooccurrence_items = get_cooccurrence_items(payload.branchId, payload.cartItemIds, safe_limit)
-    strategy = "item-based-cf" if cooccurrence_items else "popularity"
-    items = cooccurrence_items if cooccurrence_items else get_popular_items(payload.branchId, safe_limit)
-    response_items = items[:safe_limit]
+    cooccurrence_items = get_cooccurrence_items(payload.branchId, payload.cartItemIds, max(safe_limit * 2, safe_limit))
+    popular_items = get_popular_items(payload.branchId, max(safe_limit * 2, safe_limit))
+    response_items = merge_recommendation_candidates(cooccurrence_items, popular_items, payload.cartItemIds, safe_limit)
+    strategy = "item-based-cf+popularity" if cooccurrence_items else "popularity"
     log_audit("/api/ai/recommend", "recommend", True, payload.branchId, metadata={"limit": safe_limit, "strategy": strategy})
     return {
         "branchId": payload.branchId,
@@ -811,29 +1037,34 @@ def recommend_feedback(payload: RecommendationFeedback) -> dict[str, Any]:
 
 @app.get("/api/ai/anomalies")
 @metric_guard("anomalies")
-def anomalies(branchId: str, severity: str | None = None) -> dict[str, Any]:
+def anomalies(request: Request, branchId: str, severity: str | None = None) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
     db_items = load_anomalies_from_db(branchId, severity)
     if db_items:
-        return {"branchId": branchId, "items": db_items}
+        return {"branchId": branchId, "items": db_items, "source": "db", "available": True}
 
     filtered = [a for a in ANOMALIES if a["branchId"] == branchId]
     if severity:
         filtered = [a for a in filtered if a["severity"] == severity.upper()]
     log_audit("/api/ai/anomalies", "list", True, branchId)
-    return {"branchId": branchId, "items": filtered}
+    return {"branchId": branchId, "items": filtered, "source": "fallback", "available": True}
 
 
 @app.post("/api/ai/anomalies/detect")
 @metric_guard("anomaly_detect")
-def detect_anomaly(payload: AnomalyDetectPayload) -> dict[str, Any]:
+def detect_anomaly(payload: AnomalyDetectPayload, request: Request) -> dict[str, Any]:
+    authorize_request(request, payload.branchId, {"ADMIN", "MANAGER"})
     payload.branchId = normalize_branch_id(payload.branchId)
     if payload.baselineStd < 0:
         raise HTTPException(status_code=400, detail="baselineStd must be >= 0")
 
     z_score = 0.0 if payload.baselineStd == 0 else (payload.value - payload.baselineMean) / payload.baselineStd
-    severity = calculate_anomaly_severity(z_score)
-    score = min(1.0, abs(z_score) / 5.0)
+    robust_scale = max(payload.baselineStd, abs(payload.baselineMean) * 0.15, 1.0)
+    robust_z_score = (payload.value - payload.baselineMean) / robust_scale
+    combined_score = (abs(z_score) * 0.6) + (abs(robust_z_score) * 0.4)
+    severity = calculate_anomaly_severity(combined_score)
+    score = min(1.0, combined_score / 5.0)
     description = (
         payload.description
         or f"{payload.type}: value={payload.value:.2f}, mean={payload.baselineMean:.2f}, std={payload.baselineStd:.2f}, z={z_score:.2f}"
@@ -852,6 +1083,14 @@ def detect_anomaly(payload: AnomalyDetectPayload) -> dict[str, Any]:
         "referenceType": payload.referenceType,
         "isResolved": False,
         "detectedAt": detected_at,
+        "explanation": {
+            "value": payload.value,
+            "baselineMean": payload.baselineMean,
+            "baselineStd": payload.baselineStd,
+            "zScore": round(z_score, 4),
+            "robustZScore": round(robust_z_score, 4),
+            "combinedScore": round(combined_score, 4),
+        },
     }
 
     persisted = False
@@ -895,6 +1134,8 @@ def detect_anomaly(payload: AnomalyDetectPayload) -> dict[str, Any]:
                     "severity": severity,
                     "anomalyScore": score,
                     "zScore": round(z_score, 4),
+                    "robustZScore": round(robust_z_score, 4),
+                    "combinedScore": round(combined_score, 4),
                     "referenceId": payload.referenceId,
                     "referenceType": payload.referenceType,
                 },
@@ -906,16 +1147,37 @@ def detect_anomaly(payload: AnomalyDetectPayload) -> dict[str, Any]:
         "detect",
         True,
         payload.branchId,
-        metadata={"severity": severity, "zScore": round(z_score, 4), "persisted": persisted, "notified": notified},
+        metadata={
+            "severity": severity,
+            "zScore": round(z_score, 4),
+            "robustZScore": round(robust_z_score, 4),
+            "combinedScore": round(combined_score, 4),
+            "persisted": persisted,
+            "notified": notified,
+        },
     )
-    return {**created, "zScore": round(z_score, 4), "persisted": persisted, "notified": notified}
+    return {
+        **created,
+        "zScore": round(z_score, 4),
+        "robustZScore": round(robust_z_score, 4),
+        "combinedScore": round(combined_score, 4),
+        "persisted": persisted,
+        "notified": notified,
+    }
 
 
 @app.put("/api/ai/anomalies/{anomaly_id}/resolve")
 @metric_guard("anomaly_resolve")
-def resolve_anomaly(anomaly_id: str, payload: ResolveAnomalyPayload) -> dict[str, Any]:
+def resolve_anomaly(anomaly_id: str, payload: ResolveAnomalyPayload, request: Request) -> dict[str, Any]:
+    # branch scope check follows anomaly lookup; role check first.
+    actor = authorize_request(request, None, {"ADMIN", "MANAGER"})
     for item in ANOMALIES:
         if item["id"] == anomaly_id:
+            if actor["role"] == "MANAGER":
+                item_branch = str(item.get("branchId") or "").strip()
+                actor_branch = str(actor.get("branchId") or "").strip()
+                if item_branch and actor_branch and item_branch != actor_branch:
+                    raise HTTPException(status_code=403, detail="Manager cannot resolve anomaly of other branch")
             item["isResolved"] = True
             item["resolvedAt"] = datetime.now(timezone.utc).isoformat()
             item["resolutionNote"] = payload.note
@@ -927,9 +1189,10 @@ def resolve_anomaly(anomaly_id: str, payload: ResolveAnomalyPayload) -> dict[str
 
 @app.get("/api/ai/anomalies/summary")
 @metric_guard("anomaly_summary")
-def anomalies_summary(branchId: str) -> dict[str, Any]:
+def anomalies_summary(request: Request, branchId: str) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
-    items = anomalies(branchId).get("items", [])
+    items = anomalies(request, branchId).get("items", [])
     resolved = sum(1 for a in items if a.get("isResolved"))
     log_audit("/api/ai/anomalies/summary", "summary", True, branchId)
     return {"branchId": branchId, "total": len(items), "resolved": resolved, "open": len(items) - resolved}
@@ -937,7 +1200,8 @@ def anomalies_summary(branchId: str) -> dict[str, Any]:
 
 @app.get("/api/ai/sentiment/summary")
 @metric_guard("sentiment_summary")
-def sentiment_summary(branchId: str) -> dict[str, Any]:
+def sentiment_summary(request: Request, branchId: str) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
     if REPORT_DATABASE_URL:
         try:
@@ -955,17 +1219,19 @@ def sentiment_summary(branchId: str) -> dict[str, Any]:
                     "negative": round(mapped.get("NEGATIVE", 0) / total, 4),
                     "sampleSize": total,
                     "modelVersion": AI_ACTIVE_MODEL_VERSION,
+                    "source": "db",
                 }
         except Exception:
             pass
 
     log_audit("/api/ai/sentiment/summary", "summary", True, branchId)
-    return {"branchId": branchId, "positive": 0.78, "neutral": 0.15, "negative": 0.07, "sampleSize": 120, "modelVersion": AI_ACTIVE_MODEL_VERSION}
+    return {"branchId": branchId, "positive": 0.78, "neutral": 0.15, "negative": 0.07, "sampleSize": 120, "modelVersion": AI_ACTIVE_MODEL_VERSION, "source": "fallback"}
 
 
 @app.get("/api/ai/sentiment/trend")
 @metric_guard("sentiment_trend")
-def sentiment_trend(branchId: str, days: int = 7) -> dict[str, Any]:
+def sentiment_trend(request: Request, branchId: str, days: int = 7) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
     if REPORT_DATABASE_URL:
         try:
@@ -1013,7 +1279,8 @@ def sentiment_trend(branchId: str, days: int = 7) -> dict[str, Any]:
 
 @app.get("/api/ai/sentiment/issues-top")
 @metric_guard("sentiment_issues_top")
-def sentiment_issues_top(branchId: str, days: int = 7, limit: int = 3) -> dict[str, Any]:
+def sentiment_issues_top(request: Request, branchId: str, days: int = 7, limit: int = 3) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     branchId = normalize_branch_id(branchId)
     safe_days = max(1, min(days, 30))
     safe_limit = max(1, min(limit, 10))
@@ -1041,9 +1308,10 @@ def sentiment_issues_top(branchId: str, days: int = 7, limit: int = 3) -> dict[s
 
 @app.post("/api/ai/sentiment/analyze")
 @metric_guard("sentiment_analyze")
-def sentiment_analyze(payload: SentimentAnalyzePayload) -> dict[str, Any]:
+def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dict[str, Any]:
+    authorize_request(request, payload.branchId, {"ADMIN", "MANAGER"})
     payload.branchId = normalize_branch_id(payload.branchId)
-    label, confidence, scores = classify_sentiment(payload.text)
+    label, confidence, scores, explanation = classify_sentiment(payload.text)
     persisted = False
     if REPORT_DATABASE_URL:
         try:
@@ -1061,21 +1329,28 @@ def sentiment_analyze(payload: SentimentAnalyzePayload) -> dict[str, Any]:
                             payload.text,
                             label,
                             confidence,
-                            "lexicon_baseline_v1",
+                            "vi_weighted_lexicon_v2",
                             AI_ACTIVE_MODEL_VERSION,
                         ),
                     )
             persisted = True
         except Exception:
             persisted = False
-    log_audit("/api/ai/sentiment/analyze", "analyze", True, payload.branchId, metadata={"label": label})
+    log_audit(
+        "/api/ai/sentiment/analyze",
+        "analyze",
+        True,
+        payload.branchId,
+        metadata={"label": label, "positiveScore": explanation.get("positiveScore"), "negativeScore": explanation.get("negativeScore")},
+    )
     return {
         "branchId": payload.branchId,
         "label": label,
         "confidence": confidence,
         "scores": scores,
         "persisted": persisted,
-        "reason": "lexicon_baseline_v1",
+        "reason": "vi_weighted_lexicon_v2",
+        "explanation": explanation,
     }
 
 
@@ -1140,7 +1415,8 @@ def ai_chat(payload: ChatPayload) -> dict[str, Any]:
 
 @app.get("/api/ai/chat/history")
 @metric_guard("chat_history")
-def ai_chat_history(branchId: str | None = None, limit: int = 20) -> dict[str, Any]:
+def ai_chat_history(request: Request, branchId: str | None = None, limit: int = 20) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
     records = CHAT_HISTORY
     if branchId:
         records = [item for item in records if item.get("branchId") == branchId]
@@ -1149,13 +1425,14 @@ def ai_chat_history(branchId: str | None = None, limit: int = 20) -> dict[str, A
 
 @app.get("/api/ai/chat/suggestions")
 @metric_guard("chat_suggestions")
-def ai_chat_suggestions() -> dict[str, Any]:
+def ai_chat_suggestions(request: Request) -> dict[str, Any]:
+    authorize_request(request, None, {"ADMIN", "MANAGER"})
     return {"items": ["Doanh thu hôm nay so với hôm qua?", "Món bán chạy nhất tuần này?", "Có cảnh báo bất thường nào đang mở?", "Tồn kho nguyên liệu nào sắp hết?"]}
 
 
 @app.post("/api/ai/report-chat")
 @metric_guard("report_chat")
-def report_chat(payload: ReportChatPayload) -> dict[str, Any]:
+def report_chat(payload: ReportChatPayload, request: Request) -> dict[str, Any]:
     start = time.perf_counter()
     question = str(payload.question or "").strip()
     if not question:
@@ -1163,6 +1440,11 @@ def report_chat(payload: ReportChatPayload) -> dict[str, Any]:
 
     branch_id = normalize_branch_id(payload.branchId) if payload.branchId is not None else None
     role = str(payload.role or "MANAGER").upper()
+    actor = authorize_request(request, branch_id, {"ADMIN", "MANAGER"})
+    if actor["role"] == "ADMIN":
+        role = "ADMIN"
+    elif actor["role"] == "MANAGER":
+        role = "MANAGER"
     intent = infer_report_intent(question)
     sql = map_question_to_sql(question, branch_id)
 

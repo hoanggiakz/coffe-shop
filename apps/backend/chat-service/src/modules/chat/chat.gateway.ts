@@ -83,6 +83,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       client.emit('error', { message: 'Missing or invalid staff token' });
       return;
     }
+    if (!['ADMIN', 'MANAGER', 'WAITER'].includes(String(staffIdentity.role || '').toUpperCase())) {
+      client.emit('error', { message: 'Forbidden' });
+      return;
+    }
     client.join('staff:global');
     const branchId = staffIdentity.branchId;
     if (branchId) {
@@ -156,8 +160,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     client.data.branchId = branchId;
 
     const messages = Array.isArray((session as any).messages) ? (session as any).messages : [];
-    client.emit('chat-joined', { sessionId: session.id, messages });
-    client.emit('joined', { chatId: session.id, room, messages });
+    const customerToken = this.chatService.issueCustomerSessionToken(session.id);
+    client.emit('chat-joined', { sessionId: session.id, messages, customerToken });
+    client.emit('joined', { chatId: session.id, room, messages, customerToken });
 
     if (messages.length === 0) {
       this.server.to(this.staffBranchRoom(branchId)).emit('new-message', {

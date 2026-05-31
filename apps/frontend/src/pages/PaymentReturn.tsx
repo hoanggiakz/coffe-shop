@@ -15,26 +15,19 @@ export default function PaymentReturn() {
     const orderId =
       searchParams.get('orderId') ||
       searchParams.get('txnRef') ||
-      searchParams.get('vnp_TxnRef') ||
-      searchParams.get('orderInfo') ||
       ''
 
-    const explicitProvider = String(searchParams.get('provider') || '').toUpperCase()
-    const inferredProvider = 'SEPAY'
-    const provider = explicitProvider || inferredProvider
+    const provider = 'SEPAY'
 
     const resultCode =
       searchParams.get('resultCode') ||
       searchParams.get('errorCode') ||
-      searchParams.get('vnp_ResponseCode') ||
       searchParams.get('transResult') ||
       ''
 
     const transactionId =
       searchParams.get('transId') ||
       searchParams.get('transactionId') ||
-      searchParams.get('vnp_TransactionNo') ||
-      searchParams.get('requestId') ||
       ''
 
     const returnMessage = searchParams.get('message') || ''

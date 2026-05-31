@@ -19,7 +19,7 @@ def test_recommend_get_contract():
     payload = response.json()
     assert payload['branchId'] == 'branch-e2e'
     assert len(payload['items']) == 3
-    assert payload['strategy'] in ['popularity', 'user-history']
+    assert payload['strategy'] in ['popularity', 'hybrid-cf-popularity']
 
 
 def test_recommend_post_contract():
@@ -35,7 +35,7 @@ def test_recommend_post_contract():
     payload = response.json()
     assert payload['branchId'] == 'branch-e2e'
     assert len(payload['recommendations']) == 3
-    assert payload['strategy'] in ['item-based-cf', 'popularity']
+    assert payload['strategy'] in ['item-based-cf+popularity', 'popularity']
 
 
 def test_sentiment_analyze_contract():

@@ -20,6 +20,7 @@ type LoyaltyTx = {
 }
 
 const authStorageKey = 'customer-auth-session'
+const menuReturnUrlStorageKey = 'customer-menu-return-url'
 
 const formatVnd = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')}đ`
 
@@ -36,6 +37,19 @@ export default function CustomerRewards() {
   const [profile, setProfile] = useState<CustomerProfile | null>(null)
   const [txs, setTxs] = useState<LoyaltyTx[]>([])
   const [loading, setLoading] = useState(true)
+  const menuReturnUrl = useMemo(() => {
+    try {
+      const raw = String(localStorage.getItem(menuReturnUrlStorageKey) || '').trim()
+      if (raw.startsWith('/menu')) return raw
+    } catch {
+      // ignore
+    }
+    return '/menu'
+  }, [])
+  const menuReturnQuery = useMemo(() => {
+    const idx = menuReturnUrl.indexOf('?')
+    return idx >= 0 ? menuReturnUrl.slice(idx) : ''
+  }, [menuReturnUrl])
 
   useEffect(() => {
     try {
@@ -76,7 +90,7 @@ export default function CustomerRewards() {
         <div className="mx-auto max-w-xl rounded-2xl border border-amber-200 bg-white p-5">
           <p className="text-lg font-semibold text-slate-900">Bạn chưa đăng nhập</p>
           <p className="mt-2 text-sm text-slate-600">Đăng nhập tại trang menu để xem rewards và ưu đãi theo hạng.</p>
-          <Link to="/menu" className="mt-4 inline-flex rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white">
+          <Link to={menuReturnUrl} className="mt-4 inline-flex rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white">
             Về menu
           </Link>
         </div>
@@ -97,8 +111,8 @@ export default function CustomerRewards() {
               <p className="text-sm text-slate-600">Hạng hiện tại: <span className="font-semibold text-amber-700">{tier}</span></p>
             </div>
             <div className="flex gap-2">
-              <Link to="/menu/account" className="rounded-xl border border-sky-200 px-3 py-2 text-sm text-sky-700">Hồ sơ</Link>
-              <Link to="/menu" className="rounded-xl border border-amber-200 px-3 py-2 text-sm text-amber-700">Menu</Link>
+              <Link to={`/menu/account${menuReturnQuery}`} className="rounded-xl border border-sky-200 px-3 py-2 text-sm text-sky-700">Hồ sơ</Link>
+              <Link to={menuReturnUrl} className="rounded-xl border border-amber-200 px-3 py-2 text-sm text-amber-700">Menu</Link>
             </div>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
@@ -143,4 +157,3 @@ export default function CustomerRewards() {
     </div>
   )
 }
-
