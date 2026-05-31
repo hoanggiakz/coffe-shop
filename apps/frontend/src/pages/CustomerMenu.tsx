@@ -2622,7 +2622,13 @@ export default function CustomerMenu() {
                       <p>
                         Trạng thái: <span className="font-semibold">{trangThaiThanhToan(currentPayment.status)}</span>
                       </p>
+                      {currentPayment.status === 'PAID' && (
+                        <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-emerald-700">
+                          Thanh toán thành công. Đơn hàng đã được ghi nhận.
+                        </div>
+                      )}
                       {currentPayment.provider === 'SEPAY' &&
+                        currentPayment.status !== 'PAID' &&
                         (currentPayment.paymentUrl || currentPayment.vietQr?.qrImageUrl) && (
                           <div className="space-y-2">
                             {currentPayment.vietQr?.qrImageUrl && (
