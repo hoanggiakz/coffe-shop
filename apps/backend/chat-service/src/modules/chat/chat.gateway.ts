@@ -160,8 +160,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     client.data.branchId = branchId;
 
     const messages = Array.isArray((session as any).messages) ? (session as any).messages : [];
-    client.emit('chat-joined', { sessionId: session.id, messages });
-    client.emit('joined', { chatId: session.id, room, messages });
+    const customerToken = this.chatService.issueCustomerSessionToken(session.id);
+    client.emit('chat-joined', { sessionId: session.id, messages, customerToken });
+    client.emit('joined', { chatId: session.id, room, messages, customerToken });
 
     if (messages.length === 0) {
       this.server.to(this.staffBranchRoom(branchId)).emit('new-message', {

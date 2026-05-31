@@ -1,4 +1,6 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as jwt from 'jsonwebtoken';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface ActorContext {
@@ -27,8 +29,20 @@ export interface CreateMessageDto {
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
   private readonly notificationRetentionHours = 72;
+  private readonly customerChatTokenTtl = '12h';
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  private customerChatTokenSecret() {
+    return String(
+      this.configService.get<string>('CHAT_CUSTOMER_TOKEN_SECRET') ||
+        this.configService.get<string>('JWT_SECRET') ||
+        'chat-customer-secret-dev',
+    );
+  }
 
   private normalizeStatus(status?: string) {
     const normalized = String(status || 'OPEN').toUpperCase();
@@ -50,6 +64,28 @@ export class ChatService {
     const actorRole = String(actor.role || '').toUpperCase();
     if (!['ADMIN', 'MANAGER', 'WAITER'].includes(actorRole)) {
       throw new ForbiddenException('Không có quyền truy cập module chat');
+    }
+  }
+
+  issueCustomerSessionToken(sessionId: string) {
+    return jwt.sign(
+      {
+        type: 'CHAT_CUSTOMER',
+        sessionId,
+      },
+      this.customerChatTokenSecret(),
+      { expiresIn: this.customerChatTokenTtl },
+    );
+  }
+
+  private canReadByCustomerToken(sessionId: string, token?: string) {
+    const normalized = String(token || '').trim();
+    if (!normalized) return false;
+    try {
+      const payload = jwt.verify(normalized, this.customerChatTokenSecret()) as any;
+      return payload?.type === 'CHAT_CUSTOMER' && String(payload?.sessionId || '') === sessionId;
+    } catch {
+      return false;
     }
   }
 
@@ -133,14 +169,17 @@ export class ChatService {
     }));
   }
 
-  async getMessages(sessionId: string, actor: ActorContext = {}, page = 1, limit = 50, before?: string) {
+  async getMessages(sessionId: string, actor: ActorContext = {}, page = 1, limit = 50, before?: string, customerToken?: string) {
     const session = await this.prisma.chatSession.findUnique({ where: { id: sessionId } });
     if (!session) {
       throw new NotFoundException('Không tìm thấy phiên chat');
     }
 
-    this.enforceStaffChatRole(actor);
-    this.enforceBranchAccess(actor, session.branchId);
+    const allowCustomerRead = this.canReadByCustomerToken(sessionId, customerToken);
+    if (!allowCustomerRead) {
+      this.enforceStaffChatRole(actor);
+      this.enforceBranchAccess(actor, session.branchId);
+    }
 
     const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
     const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 200) : 50;
