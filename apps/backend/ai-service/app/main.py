@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import psycopg
 import sqlparse
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, Field
@@ -35,6 +35,9 @@ AI_FORECAST_CRON_HOUR_UTC = int(os.getenv("AI_FORECAST_CRON_HOUR_UTC", "19"))  #
 CHAT_SERVICE_API_URL = os.getenv("CHAT_SERVICE_API_URL", "http://chat-service:3007/api/chats").strip().rstrip("/")
 AI_ENFORCE_RBAC = os.getenv("AI_ENFORCE_RBAC", "false").strip().lower() in {"1", "true", "yes"}
 AI_ALLOW_LEGACY_NO_AUTH = os.getenv("AI_ALLOW_LEGACY_NO_AUTH", "true").strip().lower() in {"1", "true", "yes"}
+AI_RATE_LIMIT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_PER_MINUTE", "120"))
+AI_RATE_LIMIT_REPORT_CHAT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_REPORT_CHAT_PER_MINUTE", "30"))
+AI_RATE_LIMIT_CHAT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_CHAT_PER_MINUTE", "60"))
 
 DEFAULT_MENU_KB = [
     {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
@@ -153,6 +156,16 @@ KB_STATE: dict[str, Any] = {
     "source": "bootstrap",
 }
 FORECAST_CRON_STATE: dict[str, Any] = {"running": False, "lastRunAt": None}
+RATE_LIMIT_COUNTERS: dict[str, dict[str, int]] = {}
+
+
+@app.middleware("http")
+async def attach_correlation_id(request: Request, call_next):
+    request_id = str(request.headers.get("x-request-id") or request.headers.get("x-correlation-id") or f"ai-{uuid4()}")
+    request.state.correlation_id = request_id
+    response: Response = await call_next(request)
+    response.headers["x-request-id"] = request_id
+    return response
 
 
 def metric_guard(endpoint: str):
@@ -215,6 +228,24 @@ def authorize_request(
         raise HTTPException(status_code=403, detail="Manager cannot access other branch scope")
 
     return {"role": role, "branchId": actor_branch_id, "userId": actor_user_id}
+
+
+def enforce_rate_limit(request: Request, scope: str, max_per_minute: int) -> None:
+    if max_per_minute <= 0:
+        return
+    client_ip = str(getattr(request.client, "host", "") or "unknown")
+    actor_id = str(request.headers.get("x-actor-user-id") or request.headers.get("x-user-id") or "").strip()
+    actor_key = actor_id or client_ip
+    key = f"{scope}:{actor_key}"
+    now = int(time.time())
+    bucket = RATE_LIMIT_COUNTERS.get(key)
+    if not bucket or now >= int(bucket.get("resetAt", 0)):
+        RATE_LIMIT_COUNTERS[key] = {"count": 1, "resetAt": now + 60}
+        return
+    current_count = int(bucket.get("count", 0)) + 1
+    bucket["count"] = current_count
+    if current_count > max_per_minute:
+        raise HTTPException(status_code=429, detail=f"Rate limit exceeded for {scope}")
 
 
 def reload_knowledge_base(source: str = "manual") -> dict[str, Any]:
@@ -653,7 +684,7 @@ async def forecast_cron_loop():
                 if not branch_ids:
                     branch_ids = ["branch-e2e"]
                 for branch_id in branch_ids:
-                    rebuild_revenue_forecast(ForecastRebuildPayload(branchId=branch_id, days=7, granularity="daily"))
+                    rebuild_revenue_forecast_internal(ForecastRebuildPayload(branchId=branch_id, days=7, granularity="daily"))
                 FORECAST_CRON_STATE["lastRunAt"] = datetime.now(timezone.utc).isoformat()
                 await asyncio.sleep(360)
             except Exception:
@@ -801,9 +832,41 @@ def health() -> dict[str, Any]:
     }
 
 
-@app.post("/api/ai/forecast/revenue/rebuild")
-@metric_guard("forecast_revenue_rebuild")
-def rebuild_revenue_forecast(payload: ForecastRebuildPayload) -> dict[str, Any]:
+@app.get("/api/ai/live")
+def live() -> dict[str, Any]:
+    return {"status": "alive", "service": "ai-service", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/ai/ready")
+def ready() -> dict[str, Any]:
+    db_ok = True
+    db_reason = "not-configured"
+    if REPORT_DATABASE_URL:
+        try:
+            with psycopg.connect(REPORT_DATABASE_URL) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SET LOCAL statement_timeout = '1000ms'")
+                    cur.execute("SELECT 1")
+            db_reason = "ok"
+        except Exception as error:
+            db_ok = False
+            db_reason = f"error:{error.__class__.__name__}"
+
+    kb_ok = int(KB_STATE.get("itemCount", len(DEFAULT_MENU_KB))) > 0
+    status = "ready" if db_ok and kb_ok else "degraded"
+    return {
+        "status": status,
+        "service": "ai-service",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": {
+            "database": {"ok": db_ok, "reason": db_reason},
+            "knowledgeBase": {"ok": kb_ok, "itemCount": int(KB_STATE.get("itemCount", len(DEFAULT_MENU_KB)))},
+            "rbac": {"enforce": AI_ENFORCE_RBAC, "allowLegacyNoAuth": AI_ALLOW_LEGACY_NO_AUTH},
+        },
+    }
+
+
+def rebuild_revenue_forecast_internal(payload: ForecastRebuildPayload) -> dict[str, Any]:
     payload.branchId = normalize_branch_id(payload.branchId)
     payload.days = max(1, min(payload.days, 30))
     generated, forecast_meta = build_revenue_forecast_from_history(payload.branchId, payload.days)
@@ -861,6 +924,13 @@ def rebuild_revenue_forecast(payload: ForecastRebuildPayload) -> dict[str, Any]:
         "source": str(forecast_meta.get("source") or "fallback"),
         "meta": forecast_meta,
     }
+
+
+@app.post("/api/ai/forecast/revenue/rebuild")
+@metric_guard("forecast_revenue_rebuild")
+def rebuild_revenue_forecast(payload: ForecastRebuildPayload, request: Request) -> dict[str, Any]:
+    enforce_rate_limit(request, "forecast_rebuild", AI_RATE_LIMIT_PER_MINUTE)
+    return rebuild_revenue_forecast_internal(payload)
 
 
 @app.post("/api/ai/kb/reload")
@@ -1054,6 +1124,7 @@ def anomalies(request: Request, branchId: str, severity: str | None = None) -> d
 @app.post("/api/ai/anomalies/detect")
 @metric_guard("anomaly_detect")
 def detect_anomaly(payload: AnomalyDetectPayload, request: Request) -> dict[str, Any]:
+    enforce_rate_limit(request, "anomaly_detect", AI_RATE_LIMIT_PER_MINUTE)
     authorize_request(request, payload.branchId, {"ADMIN", "MANAGER"})
     payload.branchId = normalize_branch_id(payload.branchId)
     if payload.baselineStd < 0:
@@ -1356,7 +1427,8 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
 
 @app.post("/api/ai/chat")
 @metric_guard("chat")
-def ai_chat(payload: ChatPayload) -> dict[str, Any]:
+def ai_chat(payload: ChatPayload, request: Request) -> dict[str, Any]:
+    enforce_rate_limit(request, "ai_chat", AI_RATE_LIMIT_CHAT_PER_MINUTE)
     start = time.perf_counter()
     ensure_kb_fresh()
     if payload.branchId is not None:
@@ -1433,6 +1505,7 @@ def ai_chat_suggestions(request: Request) -> dict[str, Any]:
 @app.post("/api/ai/report-chat")
 @metric_guard("report_chat")
 def report_chat(payload: ReportChatPayload, request: Request) -> dict[str, Any]:
+    enforce_rate_limit(request, "report_chat", AI_RATE_LIMIT_REPORT_CHAT_PER_MINUTE)
     start = time.perf_counter()
     question = str(payload.question or "").strip()
     if not question:
