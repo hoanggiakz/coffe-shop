@@ -46,6 +46,36 @@ interface CartItem {
   selections: CartSelections
 }
 
+interface CartSnapshotItem {
+  cartItemId: string
+  branchMenuItemId?: string
+  menuItemId: string
+  name: string
+  imageUrl?: string | null
+  basePrice: number
+  quantity: number
+  selectedOptions: {
+    size?: { name: string; priceModifier: number }
+    toppings?: Array<{ name: string; priceModifier: number }>
+    note?: string
+  }
+  unitPrice: number
+  totalPrice: number
+  addedAt: string
+  rawSelections?: CartSelections
+}
+
+interface CartStorageSnapshot {
+  branchId: string
+  tableId: string
+  items: CartSnapshotItem[]
+  discountCode?: string
+  discountAmount: number
+  subtotal: number
+  finalAmount: number
+  lastUpdated: string
+}
+
 interface CartDraft {
   note: string
   selections: CartSelections
@@ -373,9 +403,102 @@ function restoreCartFromStorage(raw: unknown): Record<string, CartItem> {
   return next
 }
 
+function restoreCartFromSnapshot(raw: unknown): Record<string, CartItem> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const snapshot = raw as Partial<CartStorageSnapshot>
+  const items = Array.isArray(snapshot.items) ? snapshot.items : []
+  const next: Record<string, CartItem> = {}
+  for (const item of items) {
+    const menuItemId = String(item?.menuItemId || '').trim()
+    if (!menuItemId) continue
+    const quantity = Math.max(0, Number(item?.quantity || 0))
+    if (quantity <= 0) continue
+    const rawSelections = item?.rawSelections && typeof item.rawSelections === 'object'
+      ? normalizeSelections(item.rawSelections as CartSelections)
+      : null
+    const selectionsFromOptions: CartSelections = {}
+    const sizeName = String(item?.selectedOptions?.size?.name || '').trim()
+    if (sizeName) selectionsFromOptions.size = sizeName
+    const toppings = Array.isArray(item?.selectedOptions?.toppings)
+      ? item.selectedOptions.toppings.map((entry) => String(entry?.name || '').trim()).filter(Boolean)
+      : []
+    if (toppings.length) selectionsFromOptions.toppings = toppings
+    const note = String(item?.selectedOptions?.note || '').trim()
+    const normalizedSelections = rawSelections || normalizeSelections(selectionsFromOptions)
+    const lineKey = buildCartLineKey(menuItemId, normalizedSelections, note)
+    const existing = next[lineKey]
+    next[lineKey] = {
+      branchMenuItemId: String(item?.branchMenuItemId || '').trim() || undefined,
+      menuItemId,
+      quantity: Number(existing?.quantity || 0) + quantity,
+      note,
+      selections: normalizedSelections,
+    }
+  }
+  return next
+}
+
 type DiscountValidationCachePayload = {
   savedAt: number
   data: PromotionPreview
+}
+
+const CART_DB_NAME = 'coffee-cart-db'
+const CART_DB_VERSION = 1
+const CART_DB_STORE = 'cart_snapshots'
+
+async function openCartIndexedDb(): Promise<IDBDatabase> {
+  return await new Promise((resolve, reject) => {
+    const request = indexedDB.open(CART_DB_NAME, CART_DB_VERSION)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains(CART_DB_STORE)) {
+        db.createObjectStore(CART_DB_STORE)
+      }
+    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+}
+
+async function readCartFromIndexedDb(key: string): Promise<string | null> {
+  if (typeof indexedDB === 'undefined' || !key) return null
+  try {
+    const db = await openCartIndexedDb()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(CART_DB_STORE, 'readonly')
+      const store = tx.objectStore(CART_DB_STORE)
+      const request = store.get(key)
+      request.onsuccess = () => resolve(String(request.result || '') || null)
+      request.onerror = () => reject(request.error)
+    })
+  } catch {
+    return null
+  }
+}
+
+async function writeCartToIndexedDb(key: string, value: string): Promise<void> {
+  if (typeof indexedDB === 'undefined' || !key) return
+  const db = await openCartIndexedDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(CART_DB_STORE, 'readwrite')
+    const store = tx.objectStore(CART_DB_STORE)
+    store.put(value, key)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+async function deleteCartFromIndexedDb(key: string): Promise<void> {
+  if (typeof indexedDB === 'undefined' || !key) return
+  const db = await openCartIndexedDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(CART_DB_STORE, 'readwrite')
+    const store = tx.objectStore(CART_DB_STORE)
+    store.delete(key)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
 }
 
 const fieldClass =
@@ -495,6 +618,9 @@ export default function CustomerMenu() {
   const [promoCode, setPromoCode] = useState('')
   const [promoPreview, setPromoPreview] = useState<PromotionPreview | null>(null)
   const [applyingPromo, setApplyingPromo] = useState(false)
+  const [customerInfoOpen, setCustomerInfoOpen] = useState(false)
+  const [orderCustomerName, setOrderCustomerName] = useState('')
+  const [orderCustomerPhone, setOrderCustomerPhone] = useState('')
   const [searchText, setSearchText] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('ALL')
 
@@ -703,33 +829,63 @@ export default function CustomerMenu() {
 
   useEffect(() => {
     if (!cartStorageKey) return
-    try {
-      const raw = localStorage.getItem(cartStorageKey)
-      const fallbackRaw = cartSessionFallbackKey ? sessionStorage.getItem(cartSessionFallbackKey) : null
-      const source = raw || fallbackRaw
-      setCart(source ? restoreCartFromStorage(JSON.parse(source)) : {})
-    } catch {
-      setCart({})
-    } finally {
-      setCartLoaded(true)
+    let active = true
+    const loadCart = async () => {
+      try {
+        const raw = localStorage.getItem(cartStorageKey)
+        const fallbackRaw = cartSessionFallbackKey ? sessionStorage.getItem(cartSessionFallbackKey) : null
+        const indexedRaw = await readCartFromIndexedDb(cartStorageKey)
+        const source = raw || fallbackRaw || indexedRaw
+        if (!source) {
+          if (active) setCart({})
+          return
+        }
+        const parsed = JSON.parse(source)
+        const isSnapshot = Array.isArray(parsed?.items)
+        const restored = isSnapshot ? restoreCartFromSnapshot(parsed) : restoreCartFromStorage(parsed)
+        if (isSnapshot) {
+          const discountCode = String(parsed?.discountCode || '').trim()
+          const discountAmount = Number(parsed?.discountAmount || 0)
+          if (discountCode && discountAmount > 0) {
+            setPromoCode(discountCode)
+            setPromoPreview({
+              code: discountCode.toUpperCase(),
+              discountAmount,
+              finalAmount: Number(parsed?.finalAmount || 0),
+              description: 'Khôi phục từ phiên trước',
+            })
+          }
+        }
+        if (active) setCart(restored)
+      } catch {
+        if (active) setCart({})
+      } finally {
+        if (active) setCartLoaded(true)
+      }
+    }
+    void loadCart()
+    return () => {
+      active = false
     }
   }, [cartStorageKey, cartSessionFallbackKey])
 
   useEffect(() => {
     if (!cartStorageKey || !cartLoaded) return
-    const serialized = JSON.stringify(cart)
+    const serialized = JSON.stringify(cartStorageSnapshot)
     try {
       localStorage.setItem(cartStorageKey, serialized)
       if (cartSessionFallbackKey) {
         sessionStorage.removeItem(cartSessionFallbackKey)
       }
+      void deleteCartFromIndexedDb(cartStorageKey)
     } catch {
       if (cartSessionFallbackKey) {
         sessionStorage.setItem(cartSessionFallbackKey, serialized)
       }
-      toast.error('Bo nho localStorage day, da tam luu gio hang trong session hien tai')
+      void writeCartToIndexedDb(cartStorageKey, serialized)
+      toast.error('Bo nho localStorage day, da tam luu gio hang trong IndexedDB/session hien tai')
     }
-  }, [cartStorageKey, cart, cartLoaded, cartSessionFallbackKey])
+  }, [cartLoaded, cartSessionFallbackKey, cartStorageKey, cartStorageSnapshot])
 
   useEffect(() => {
     const onEscCloseDrawer = (event: KeyboardEvent) => {
@@ -761,6 +917,8 @@ export default function CustomerMenu() {
       setCustomerSession(user)
       setChatCustomerName(String(user.name || ''))
       if (user.phone) setChatCustomerPhone(String(user.phone))
+      setOrderCustomerName(String(user.name || ''))
+      if (user.phone) setOrderCustomerPhone(String(user.phone))
     } catch {
       // ignore broken storage
     }
@@ -774,6 +932,8 @@ export default function CustomerMenu() {
         const parsed = JSON.parse(raw)
         setChatCustomerName(String(parsed?.name || ''))
         setChatCustomerPhone(String(parsed?.phone || ''))
+        setOrderCustomerName(String(parsed?.name || customerSession?.name || ''))
+        setOrderCustomerPhone(String(parsed?.phone || customerSession?.phone || ''))
         return
       }
     } catch {
@@ -781,6 +941,8 @@ export default function CustomerMenu() {
     }
     setChatCustomerName(customerSession?.name || '')
     setChatCustomerPhone(customerSession?.phone || '')
+    setOrderCustomerName(customerSession?.name || '')
+    setOrderCustomerPhone(customerSession?.phone || '')
     setMessages([])
   }, [chatProfileStorageKey, customerSession?.id])
 
@@ -1179,12 +1341,15 @@ export default function CustomerMenu() {
 
     const onCartUpdated = (payload: {
       tableId?: string
-      cart?: Record<string, CartItem>
+      cart?: Record<string, CartItem> | CartStorageSnapshot
       updatedBy?: string
     }) => {
       if (String(payload?.tableId || '').trim() !== tableId) return
       if (!payload?.cart || typeof payload.cart !== 'object') return
-      setCart(restoreCartFromStorage(payload.cart))
+      const nextCart = Array.isArray((payload.cart as any)?.items)
+        ? restoreCartFromSnapshot(payload.cart)
+        : restoreCartFromStorage(payload.cart)
+      setCart(nextCart)
       toast('Giỏ hàng vừa được cập nhật bởi nhân viên')
     }
 
@@ -1349,6 +1514,45 @@ export default function CustomerMenu() {
       return acc
     }, new Map<string, number>())
   }, [cartLines])
+
+  const cartStorageSnapshot = useMemo<CartStorageSnapshot>(() => {
+    const branchId = String(qrBranchId || 'unknown').trim() || 'unknown'
+    const snapshotItems: CartSnapshotItem[] = cartLines.map((line, index) => {
+      const menuItem = menuMap.get(line.menuItemId)
+      const basePrice = Number(menuItem?.price || 0)
+      const selectedOptions = inferSelectedOptions(menuItem, line.selections, line.note || '')
+      const sizeExtra = Number(selectedOptions.size?.priceModifier || 0)
+      const toppingsExtra = Array.isArray(selectedOptions.toppings)
+        ? selectedOptions.toppings.reduce((sum, topping) => sum + Number(topping.priceModifier || 0), 0)
+        : 0
+      const unitPrice = basePrice + sizeExtra + toppingsExtra
+      return {
+        cartItemId: `${line.menuItemId}_${index + 1}`,
+        branchMenuItemId: line.branchMenuItemId,
+        menuItemId: line.menuItemId,
+        name: String(menuItem?.name || line.menuItemId),
+        imageUrl: menuItem?.image || null,
+        basePrice,
+        quantity: Number(line.quantity || 0),
+        selectedOptions,
+        unitPrice,
+        totalPrice: unitPrice * Number(line.quantity || 0),
+        addedAt: new Date().toISOString(),
+        rawSelections: normalizeSelections(line.selections || {}),
+      }
+    })
+
+    return {
+      branchId,
+      tableId: tableId || '',
+      items: snapshotItems,
+      discountCode: promoPreview?.code || promoCode.trim() || undefined,
+      discountAmount: previewDiscount,
+      subtotal: cartTotal,
+      finalAmount: payableCartTotal,
+      lastUpdated: new Date().toISOString(),
+    }
+  }, [cartLines, cartTotal, menuMap, payableCartTotal, previewDiscount, promoCode, promoPreview?.code, qrBranchId, tableId])
 
   const increase = (menuItemId: string) => {
     const draft = getDraftForMenuItem(menuItemId)
@@ -1842,8 +2046,8 @@ export default function CustomerMenu() {
             branchId: qrBranchId || undefined,
             customerId: customerSession?.id || undefined,
             customerEmail: customerSession?.email || undefined,
-            customerName: customerSession?.name || chatCustomerName || tableName,
-            customerPhone: customerSession?.phone || chatCustomerPhone || undefined,
+            customerName: customerSession?.name || orderCustomerName.trim() || chatCustomerName || tableName,
+            customerPhone: customerSession?.phone || orderCustomerPhone.trim() || chatCustomerPhone || undefined,
             paymentMethod: paymentMode,
             discountCode: promoPreview?.code || promoCode.trim() || undefined,
             promoCode: promoPreview?.code || promoCode.trim() || undefined,
@@ -1875,7 +2079,7 @@ export default function CustomerMenu() {
                 provider: paymentProvider,
                 tableId,
                 branchId: qrBranchId || undefined,
-                customerName: customerSession?.name || tableName,
+                customerName: customerSession?.name || orderCustomerName.trim() || tableName,
               },
               customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
             )
@@ -1897,6 +2101,15 @@ export default function CustomerMenu() {
       setCart({})
       setPromoCode('')
       setPromoPreview(null)
+      if (cartStorageKey) {
+        try {
+          localStorage.removeItem(cartStorageKey)
+          if (cartSessionFallbackKey) sessionStorage.removeItem(cartSessionFallbackKey)
+        } catch {
+          // ignore
+        }
+        void deleteCartFromIndexedDb(cartStorageKey)
+      }
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Đặt món thất bại')
     } finally {
@@ -2491,6 +2704,33 @@ export default function CustomerMenu() {
                 >
                   <option value="SEPAY">SePay</option>
                 </select>
+              )}
+            </div>
+
+            <div className="mt-3 rounded-xl border border-sky-100 p-3">
+              <button
+                type="button"
+                onClick={() => setCustomerInfoOpen((prev) => !prev)}
+                className="flex w-full items-center justify-between text-left"
+              >
+                <p className="text-xs font-semibold uppercase text-slate-500">Thông tin khách hàng (tùy chọn)</p>
+                <span className="text-xs text-sky-700">{customerInfoOpen ? 'Thu gọn' : 'Mở'}</span>
+              </button>
+              {customerInfoOpen && (
+                <div className="mt-2 space-y-2">
+                  <input
+                    value={orderCustomerName}
+                    onChange={(e) => setOrderCustomerName(e.target.value)}
+                    className={fieldClass}
+                    placeholder="Họ và tên người đặt (ví dụ: Nguyễn Văn A)"
+                  />
+                  <input
+                    value={orderCustomerPhone}
+                    onChange={(e) => setOrderCustomerPhone(e.target.value)}
+                    className={fieldClass}
+                    placeholder="Số điện thoại nhận hỗ trợ (ví dụ: 09xxxxxxxx)"
+                  />
+                </div>
               )}
             </div>
 

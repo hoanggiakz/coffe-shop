@@ -45,6 +45,14 @@ type EnrichedOrder = {
   orderItems?: EnrichedOrderItem[];
 };
 
+type RealtimeCartLine = {
+  branchMenuItemId?: string;
+  menuItemId: string;
+  quantity: number;
+  note: string;
+  selections: Record<string, any>;
+};
+
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
@@ -2971,6 +2979,7 @@ export class OrderService {
       throw new NotFoundException(`Không tìm thấy đơn ${orderId}`);
     }
 
+    await this.notifyCartUpdated(updated);
     this.logger.log(`Cap nhat mon trong don ${orderId}`);
     return this.enrichOrder(updated);
   }
@@ -3494,13 +3503,65 @@ export class OrderService {
     });
   }
 
+  private async notifyCartUpdated(order: {
+    id: string;
+    tableId: string;
+    branchId?: string | null;
+    orderItems?: Array<{ menuItemId?: string; quantity?: number; note?: string | null; options?: string | null }>;
+  }) {
+    const cart = this.buildRealtimeCartFromOrderItems(order.orderItems || []);
+    await this.emitStaffNotification({
+      type: 'CART_UPDATED',
+      title: 'Giỏ hàng đã cập nhật',
+      message: `Đơn ${order.id} vừa được cập nhật`,
+      orderId: order.id,
+      tableId: order.tableId,
+      branchId: order.branchId || undefined,
+      cart,
+    });
+  }
+
+  private buildRealtimeCartFromOrderItems(
+    items: Array<{ menuItemId?: string; quantity?: number; note?: string | null; options?: string | null }>,
+  ): Record<string, RealtimeCartLine> {
+    const next: Record<string, RealtimeCartLine> = {};
+    for (const item of items || []) {
+      const menuItemId = String(item?.menuItemId || '').trim();
+      const quantity = Number(item?.quantity || 0);
+      if (!menuItemId || quantity <= 0) continue;
+      let parsedSelections: Record<string, any> = {};
+      try {
+        const parsedOptions = JSON.parse(String(item?.options || '{}'));
+        parsedSelections =
+          parsedOptions && typeof parsedOptions === 'object' && !Array.isArray(parsedOptions)
+            ? (parsedOptions.selections || {})
+            : {};
+      } catch {
+        parsedSelections = {};
+      }
+      const lineKey = JSON.stringify({
+        menuItemId,
+        selections: parsedSelections,
+        note: String(item?.note || '').trim(),
+      });
+      next[lineKey] = {
+        menuItemId,
+        quantity,
+        note: String(item?.note || ''),
+        selections: parsedSelections,
+      };
+    }
+    return next;
+  }
+
   private async emitStaffNotification(payload: {
-    type: 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY';
+    type: 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY' | 'CART_UPDATED';
     title: string;
     message: string;
     orderId?: string;
     tableId?: string;
     branchId?: string;
+    cart?: Record<string, RealtimeCartLine>;
   }) {
     try {
       const response = await this.fetchWithRetry(`${this.chatServiceApiUrl}/staff-notifications`, {

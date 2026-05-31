@@ -40,6 +40,7 @@ export interface StaffNotificationInput {
   orderId?: string;
   id?: string;
   createdAt?: string;
+  cart?: Record<string, any>;
 }
 
 @WebSocketGateway({
@@ -328,6 +329,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   emitStaffNotificationEvent(input: StaffNotificationInput) {
     return this.notificationRouter.dispatch(input);
+  }
+
+  @SubscribeMessage('join-room')
+  handleJoinRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data?: { room?: string },
+  ) {
+    const room = String(data?.room || '').trim();
+    if (!room) return;
+    client.join(room);
+    client.emit('joined', { room });
   }
 
   emitMessageToSession(sessionId: string, message: any) {

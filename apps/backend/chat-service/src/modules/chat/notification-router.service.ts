@@ -13,6 +13,7 @@ export type RoutedNotificationInput = {
   chatId?: string;
   messageId?: string;
   createdAt?: string;
+  cart?: Record<string, any>;
 };
 
 @Injectable()
@@ -35,6 +36,7 @@ export class NotificationRouterService {
       chatId: input.chatId ? String(input.chatId) : undefined,
       messageId: input.messageId ? String(input.messageId) : undefined,
       createdAt: input.createdAt ? new Date(input.createdAt).toISOString() : new Date().toISOString(),
+      cart: input.cart && typeof input.cart === 'object' ? input.cart : undefined,
     };
 
     const branchRooms = payload.branchId ? [`branch:${payload.branchId}`] : [];
@@ -72,6 +74,7 @@ export class NotificationRouterService {
         break;
       case 'CART_UPDATED':
         this.hub.emitToRooms('/customer', 'cart-updated', tableRooms, payload);
+        this.hub.emitToRooms('/chat', 'cart-updated', tableRooms, payload);
         break;
       default:
         this.hub.emitToRooms('/pos', 'notification', branchRooms, payload);
@@ -106,4 +109,3 @@ export class NotificationRouterService {
     return map[type] || 'Thông báo';
   }
 }
-
