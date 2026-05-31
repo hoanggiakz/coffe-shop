@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface StaffShiftRepository extends JpaRepository<StaffShift, String> {
+    boolean existsByStaffId(String staffId);
     List<StaffShift> findByShiftDateBetweenOrderByShiftDateAsc(LocalDate from, LocalDate to);
     List<StaffShift> findByStaffIdAndShiftDateBetweenOrderByShiftDateAsc(String staffId, LocalDate from, LocalDate to);
     Optional<StaffShift> findByStaffIdAndShiftDateAndShiftType(String staffId, LocalDate shiftDate, ShiftType shiftType);

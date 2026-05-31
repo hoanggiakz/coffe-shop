@@ -3,6 +3,7 @@ import {
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -10,9 +11,26 @@ import {
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
+import { NotificationHubService } from './notification-hub.service';
+import { SocketAuthService } from './socket-auth.service';
+import { NotificationRouterService } from './notification-router.service';
 
 export interface StaffNotificationInput {
-  type: 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY' | 'LOW_STOCK' | 'PAYMENT_SUCCESS';
+  type:
+    | 'ORDER_NEW'
+    | 'ORDER_CREATED'
+    | 'CALL_STAFF'
+    | 'CALL_WAITER'
+    | 'CHAT_MESSAGE'
+    | 'CHAT_OPENED'
+    | 'NEW_MESSAGE'
+    | 'KDS_ITEM_STATUS'
+    | 'KDS_ORDER_READY'
+    | 'ITEM_READY'
+    | 'LOW_STOCK'
+    | 'LOW_INVENTORY'
+    | 'PAYMENT_SUCCESS'
+    | 'CART_UPDATED';
   title: string;
   message: string;
   branchId?: string;
@@ -22,20 +40,30 @@ export interface StaffNotificationInput {
   orderId?: string;
   id?: string;
   createdAt?: string;
+  cart?: Record<string, any>;
 }
 
 @WebSocketGateway({
   cors: { origin: '*' },
   namespace: '/chat',
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger('ChatGateway');
   private readonly customerRateLimitWindowMs = 60_000;
   private readonly customerRateLimitMax = 10;
   private readonly customerRateMap = new Map<string, number[]>();
 
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly hub: NotificationHubService,
+    private readonly authService: SocketAuthService,
+    private readonly notificationRouter: NotificationRouterService,
+  ) {}
+
+  afterInit(server: Server) {
+    this.hub.register('/chat', server);
+  }
 
   handleConnection(client: Socket) {
     this.logger.log(`Client ${client.id} connected`);
@@ -50,20 +78,55 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data?: { staffId?: string; staffName?: string; branchId?: string; role?: string },
   ) {
+    const staffIdentity = this.authService.verifyStaffFromSocket(client);
+    if (!staffIdentity) {
+      client.emit('error', { message: 'Missing or invalid staff token' });
+      return;
+    }
     client.join('staff:global');
-    const branchId = String(data?.branchId || '').trim();
+    const branchId = staffIdentity.branchId;
     if (branchId) {
       client.join(this.staffBranchRoom(branchId));
       client.data.branchId = branchId;
     }
+    client.join(`branch:${branchId}`);
+    client.join(`user:${staffIdentity.userId}`);
     client.data.isStaff = true;
-    client.data.staffId = data?.staffId;
+    client.data.staffId = staffIdentity.userId;
     client.data.staffName = data?.staffName;
-    client.data.role = String(data?.role || '').toUpperCase();
+    client.data.role = staffIdentity.role;
     client.emit('joined-staff', {
       room: 'staff:global',
       branchRoom: branchId ? this.staffBranchRoom(branchId) : null,
+      canonicalRoom: branchId ? `branch:${branchId}` : null,
     });
+  }
+
+  @SubscribeMessage('sync-notifications')
+  async handleSyncNotifications(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data?: { branchId?: string; lastReceivedAt?: string; limit?: number },
+  ) {
+    if (!client.data?.isStaff) {
+      client.emit('notification-batch', []);
+      return;
+    }
+    const branchId = String(client.data.branchId || data?.branchId || '').trim();
+    if (!branchId) {
+      client.emit('notification-batch', []);
+      return;
+    }
+    const rows = await this.chatService.listNotificationsSince(
+      branchId,
+      {
+        role: String(client.data.role || ''),
+        branchId,
+        userId: String(client.data.staffId || ''),
+      },
+      data?.lastReceivedAt,
+      Number(data?.limit || 100),
+    );
+    client.emit('notification-batch', rows);
   }
 
   @SubscribeMessage('join-chat')
@@ -265,28 +328,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   emitStaffNotificationEvent(input: StaffNotificationInput) {
-    const payload = {
-      id: String(input.id || '').trim() || `${input.type}:${Date.now()}`,
-      type: input.type,
-      title: String(input.title || '').trim() || 'Thông báo',
-      message: String(input.message || '').trim() || 'Có cập nhật mới',
-      branchId: input.branchId ? String(input.branchId) : undefined,
-      chatId: input.chatId ? String(input.chatId) : undefined,
-      tableId: input.tableId ? String(input.tableId) : undefined,
-      messageId: input.messageId ? String(input.messageId) : undefined,
-      orderId: input.orderId ? String(input.orderId) : undefined,
-      createdAt: input.createdAt ? new Date(input.createdAt).toISOString() : new Date().toISOString(),
-    };
+    return this.notificationRouter.dispatch(input);
+  }
 
-    if (payload.branchId) {
-      this.server.to(this.staffBranchRoom(payload.branchId)).emit('staff-notification', payload);
-    } else {
-      this.server.to('staff:global').emit('staff-notification', payload);
-    }
-
-    void this.chatService.logStaffNotification(payload);
-
-    return payload;
+  @SubscribeMessage('join-room')
+  handleJoinRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data?: { room?: string },
+  ) {
+    const room = String(data?.room || '').trim();
+    if (!room) return;
+    client.join(room);
+    client.emit('joined', { room });
   }
 
   emitMessageToSession(sessionId: string, message: any) {
@@ -318,4 +371,5 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.customerRateMap.set(sessionId, fresh);
     return true;
   }
+
 }

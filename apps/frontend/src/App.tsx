@@ -8,6 +8,8 @@ import { useI18n } from './utils/i18n'
 const Login = lazy(() => import('./pages/auth/Login'))
 const Register = lazy(() => import('./pages/auth/Register'))
 const CustomerMenu = lazy(() => import('./pages/CustomerMenu'))
+const CustomerAccount = lazy(() => import('./pages/CustomerAccount'))
+const CustomerRewards = lazy(() => import('./pages/CustomerRewards'))
 const PaymentReturn = lazy(() => import('./pages/PaymentReturn'))
 const PublicInvoice = lazy(() => import('./pages/PublicInvoice'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -59,6 +61,8 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/menu" element={<CustomerMenu />} />
+          <Route path="/menu/account" element={<CustomerAccount />} />
+          <Route path="/menu/rewards" element={<CustomerRewards />} />
           <Route path="/payment/return" element={<PaymentReturn />} />
           <Route path="/invoice/public/:id" element={<PublicInvoice />} />
 

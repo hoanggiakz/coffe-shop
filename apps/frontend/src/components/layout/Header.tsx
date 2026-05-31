@@ -8,6 +8,7 @@ import BranchScopeSelector from './BranchScopeSelector'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import api from '@/utils/api'
+import { playNotificationTone } from '@/utils/notifications'
 
 type NotificationApiItem = {
   id: string
@@ -56,7 +57,10 @@ export default function Header({
   const avatarSrc = useMemo(() => user?.avatarUrl || user?.avatar || '', [user?.avatarUrl, user?.avatar])
   const [avatarBroken, setAvatarBroken] = useState(false)
   const markAllNotificationsRead = useNotificationStore((state) => state.markAllRead)
+  const setUnreadCount = useNotificationStore((state) => state.setUnreadCount)
   const localNotificationEntries = useNotificationStore((state) => state.entries)
+  const setSoundEnabled = useUiStore((state) => state.setSoundEnabled)
+  const soundEnabled = useUiStore((state) => state.soundEnabled)
   const [notifOpen, setNotifOpen] = useState(false)
   const [notifLoading, setNotifLoading] = useState(false)
   const [notifItems, setNotifItems] = useState<NotificationApiItem[]>([])
@@ -64,6 +68,7 @@ export default function Header({
   const [notifOnlyUnread, setNotifOnlyUnread] = useState(true)
   const [notifError, setNotifError] = useState('')
   const bellPanelRef = useRef<HTMLDivElement | null>(null)
+  const [showSoundBanner, setShowSoundBanner] = useState(false)
 
   useEffect(() => {
     setAvatarBroken(false)
@@ -95,6 +100,7 @@ export default function Header({
         },
       })
       const items = Array.isArray(data?.data) ? data.data : []
+      setUnreadCount(Number(data?.meta?.unreadCount || 0))
       setNotifItems(items)
       setSelectedNotifId((prev) => (prev && items.some((item: NotificationApiItem) => item.id === prev) ? prev : (items[0]?.id || '')))
     } catch (error: any) {
@@ -108,6 +114,17 @@ export default function Header({
     if (!notifOpen) return
     void fetchNotifications(notifOnlyUnread)
   }, [notifOpen, notifOnlyUnread, currentBranchId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const role = String(user?.role || '').toUpperCase()
+    if (!['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF'].includes(role)) return
+    const seenKey = `notif_sound_prompt_seen_${String(user?.id || 'guest')}`
+    const seen = sessionStorage.getItem(seenKey) === '1'
+    if (!seen && !soundEnabled) {
+      setShowSoundBanner(true)
+    }
+  }, [soundEnabled, user?.id, user?.role])
 
   const selectedNotif = useMemo(
     () => notifItems.find((item) => item.id === selectedNotifId) || null,
@@ -193,6 +210,41 @@ export default function Header({
       </div>
 
       <div className="flex items-center gap-2 sm:gap-3">
+        {showSoundBanner && (
+          <div className="hidden items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800 sm:flex">
+            <span>Bật âm thanh thông báo?</span>
+            <button
+              type="button"
+              className="rounded border border-amber-300 px-2 py-0.5"
+              onClick={async () => {
+                setSoundEnabled(true)
+                try {
+                  await playNotificationTone('SYSTEM')
+                } catch {
+                  // ignore
+                }
+                if (typeof window !== 'undefined') {
+                  sessionStorage.setItem(`notif_sound_prompt_seen_${String(user?.id || 'guest')}`, '1')
+                }
+                setShowSoundBanner(false)
+              }}
+            >
+              Bật
+            </button>
+            <button
+              type="button"
+              className="rounded border border-amber-200 px-2 py-0.5"
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  sessionStorage.setItem(`notif_sound_prompt_seen_${String(user?.id || 'guest')}`, '1')
+                }
+                setShowSoundBanner(false)
+              }}
+            >
+              Để sau
+            </button>
+          </div>
+        )}
         <BranchScopeSelector />
 
         <div className="hidden items-center rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-1 text-xs font-medium text-amber-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 sm:flex">
@@ -239,6 +291,7 @@ export default function Header({
                       await api.patch('/notifications/read-all', {}, { params: { branchId } })
                       setNotifItems((prev) => prev.map((item) => ({ ...item, isRead: true })))
                       markAllNotificationsRead()
+                      setUnreadCount(0)
                     } catch (error: any) {
                       setNotifError(error?.response?.data?.message || 'Khong the danh dau tat ca thong bao da doc')
                     }
@@ -292,6 +345,7 @@ export default function Header({
                               setSelectedNotifId(item.id)
                               await api.patch(`/notifications/${item.id}/read`)
                               setNotifItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, isRead: true } : entry)))
+                              setUnreadCount(Math.max(0, visibleNotifItems.filter((entry) => !entry.isRead).length - 1))
                             }}
                           >
                             Đã đọc

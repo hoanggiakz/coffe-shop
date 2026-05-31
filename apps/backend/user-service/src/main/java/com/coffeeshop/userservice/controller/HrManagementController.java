@@ -16,6 +16,7 @@ import com.coffeeshop.userservice.entity.EmployeeSalaryComponent;
 import com.coffeeshop.userservice.entity.HrShift;
 import com.coffeeshop.userservice.entity.Payroll;
 import com.coffeeshop.userservice.entity.PayrollDetail;
+import com.coffeeshop.userservice.entity.SalaryHistory;
 import com.coffeeshop.userservice.entity.SalaryComponent;
 import com.coffeeshop.userservice.service.HrManagementService;
 import jakarta.validation.Valid;
@@ -76,7 +77,7 @@ public class HrManagementController {
             @RequestParam(value = "permanent", required = false, defaultValue = "false") Boolean permanent
     ) {
         if (Boolean.TRUE.equals(permanent)) {
-            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Hard delete chua ho tro");
+            return ResponseEntity.ok(hrManagementService.hardDeleteStaff(extractToken(authHeader), userId));
         }
         return ResponseEntity.ok(hrManagementService.softDeleteStaff(extractToken(authHeader), userId));
     }
@@ -118,6 +119,23 @@ public class HrManagementController {
             @PathVariable String userId
     ) {
         return ResponseEntity.ok(hrManagementService.getStaffQr(extractToken(authHeader), userId));
+    }
+
+    @GetMapping("/staff/{userId}/salary-history")
+    public ResponseEntity<List<SalaryHistory>> getStaffSalaryHistory(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String userId
+    ) {
+        return ResponseEntity.ok(hrManagementService.listSalaryHistory(extractToken(authHeader), userId));
+    }
+
+    @GetMapping("/branches/{branchId}/staff/export")
+    public ResponseEntity<Map<String, Object>> exportBranchStaffCsv(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String branchId,
+            @RequestParam(value = "includeInactive", required = false) Boolean includeInactive
+    ) {
+        return ResponseEntity.ok(hrManagementService.exportBranchStaffCsv(extractToken(authHeader), branchId, includeInactive));
     }
 
     @GetMapping("/branches/{branchId}/shifts")

@@ -375,7 +375,7 @@ export class ChatService {
     };
 
     if (scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') {
-      where.userId = scope.userId || '__none__';
+      where.OR = [{ userId: scope.userId || '__none__' }, { userId: null }];
     }
 
     const updated = await this.prisma.notificationLog.updateMany({
@@ -384,5 +384,34 @@ export class ChatService {
     });
 
     return { success: true, updatedCount: updated.count };
+  }
+
+  async listNotificationsSince(branchId: string, actor: ActorContext = {}, lastReceivedAt?: string, limit = 100) {
+    const scope = this.resolveNotificationScope(actor, branchId);
+    const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(Number(limit)), 1), 200) : 100;
+    const since = String(lastReceivedAt || '').trim();
+    const createdAfter = since ? new Date(since) : null;
+    const where: any = {
+      branchId: scope.branchId,
+      ...(createdAfter && !Number.isNaN(createdAfter.getTime()) ? { createdAt: { gt: createdAfter } } : {}),
+    };
+
+    if ((scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') && scope.userId) {
+      where.OR = [{ userId: scope.userId }, { userId: null }];
+    }
+
+    const rows = await this.prisma.notificationLog.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      take: safeLimit,
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      payload: row.payload,
+      isRead: row.isRead,
+      createdAt: row.createdAt,
+    }));
   }
 }

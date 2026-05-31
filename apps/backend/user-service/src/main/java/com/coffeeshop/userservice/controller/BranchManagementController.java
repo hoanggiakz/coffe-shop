@@ -5,6 +5,7 @@ import com.coffeeshop.userservice.dto.BranchResponse;
 import com.coffeeshop.userservice.dto.BranchUpdateRequest;
 import com.coffeeshop.userservice.dto.StaffCreateRequest;
 import com.coffeeshop.userservice.dto.StaffResponse;
+import com.coffeeshop.userservice.entity.User;
 import com.coffeeshop.userservice.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping({"/api/users/admin/branches", "/api/branches"})
@@ -83,12 +85,33 @@ public class BranchManagementController {
     }
 
     @GetMapping("/{id}/staff")
-    public ResponseEntity<List<StaffResponse>> listBranchStaff(
+    public ResponseEntity<Map<String, Object>> listBranchStaff(
             @RequestHeader("Authorization") String authHeader,
             @PathVariable("id") String id,
-            @RequestParam(value = "includeInactive", required = false) Boolean includeInactive
+            @RequestParam(value = "includeInactive", required = false) Boolean includeInactive,
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "role", required = false) User.Role role,
+            @RequestParam(value = "isActive", required = false) Boolean isActive,
+            @RequestParam(value = "search", required = false) String search,
+            @RequestParam(value = "sortBy", required = false) String sortBy,
+            @RequestParam(value = "sortOrder", required = false) String sortOrder
     ) {
-        return ResponseEntity.ok(userService.listBranchStaff(extractToken(authHeader), id, includeInactive));
+        Boolean effectiveIsActive = isActive;
+        if (effectiveIsActive == null && Boolean.TRUE.equals(includeInactive)) {
+            effectiveIsActive = null;
+        }
+        return ResponseEntity.ok(userService.listBranchStaffPaged(
+                extractToken(authHeader),
+                id,
+                page,
+                limit,
+                role,
+                effectiveIsActive,
+                search,
+                sortBy,
+                sortOrder
+        ));
     }
 
     @PostMapping("/{id}/staff")

@@ -25,6 +25,7 @@ interface NotificationState {
   unreadCount: number
   push: (entry: Omit<NotificationEntry, 'id' | 'createdAt' | 'read'>) => void
   markAllRead: () => void
+  setUnreadCount: (count: number) => void
 }
 
 const MAX_ENTRIES = 120
@@ -50,10 +51,10 @@ export const useNotificationStore = create<NotificationState>()(
         const nextEntries = get().entries.map((item) => ({ ...item, read: true }))
         set({ entries: nextEntries, unreadCount: 0 })
       },
+      setUnreadCount: (count) => set({ unreadCount: Math.max(0, Number(count || 0)) }),
     }),
     {
       name: 'notification-center',
     },
   ),
 )
-

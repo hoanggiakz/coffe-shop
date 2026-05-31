@@ -12,6 +12,7 @@ import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import { clearPosMenuCache, readPosMenuCache, writePosMenuCache } from '@/utils/posMenuCache'
 import { disconnectSocket, getSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
+import { useAuthStore } from '@/stores/authStore'
 
 interface TableApi {
   id: string
@@ -72,7 +73,15 @@ interface PaymentApi {
   updatedAt?: string | null
 }
 
-type StaffNotificationType = 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'LOW_STOCK' | 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY'
+type StaffNotificationType =
+  | 'ORDER_NEW'
+  | 'CALL_STAFF'
+  | 'CHAT_MESSAGE'
+  | 'CHAT_OPENED'
+  | 'LOW_STOCK'
+  | 'KDS_ITEM_STATUS'
+  | 'KDS_ORDER_READY'
+  | 'CART_UPDATED'
 
 interface StaffNotificationPayload {
   id: string
@@ -157,6 +166,7 @@ export default function Orders() {
   const navigate = useNavigate()
   const { tv } = useI18n()
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
+  const user = useAuthStore((state) => state.user)
   const [tables, setTables] = useState<TableApi[]>([])
   const [menuItems, setMenuItems] = useState<MenuItemApi[]>([])
   const [orders, setOrders] = useState<OrderApi[]>([])
@@ -187,6 +197,7 @@ export default function Orders() {
   const [offlineQueue, setOfflineQueue] = useState<OfflineOrderQueueItem[]>([])
   const [syncingOfflineQueue, setSyncingOfflineQueue] = useState(false)
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  const notifSyncKey = useMemo(() => `notif_last_received_at_${String(user?.id || 'guest')}`, [user?.id])
 
   const refreshOfflineQueue = () => {
     setOfflineQueue(readOfflineQueue(selectedBranchId || undefined))
@@ -298,29 +309,64 @@ export default function Orders() {
     const joinStaffRoom = () => {
       socket.emit('join-staff', {
         branchId: selectedBranchId || undefined,
+        staffId: user?.id,
+        staffName: user?.name,
       })
     }
 
     const onConnect = () => {
       joinStaffRoom()
+      const lastReceivedAt = typeof window !== 'undefined' ? localStorage.getItem(notifSyncKey) || undefined : undefined
+      socket.emit('sync-notifications', {
+        branchId: selectedBranchId || user?.branchId,
+        lastReceivedAt,
+        limit: 100,
+      })
     }
 
     const onStaffNotification = (payload: StaffNotificationPayload) => {
       if (payload.branchId && selectedBranchId && payload.branchId !== selectedBranchId) {
         return
       }
-      if (payload.type === 'KDS_ORDER_READY' || payload.type === 'ORDER_NEW' || payload.type === 'KDS_ITEM_STATUS') {
+      if (
+        payload.type === 'KDS_ORDER_READY' ||
+        payload.type === 'ORDER_NEW' ||
+        payload.type === 'KDS_ITEM_STATUS' ||
+        payload.type === 'CART_UPDATED'
+      ) {
         showRealtimeNotification(
           payload.title,
           payload.message,
-          payload.type === 'ORDER_NEW' ? 'NEW_ORDER' : 'ITEM_READY',
+          payload.type === 'ORDER_NEW'
+            ? 'NEW_ORDER'
+            : payload.type === 'CART_UPDATED'
+              ? 'CART_UPDATED'
+              : 'ITEM_READY',
         )
+        if (typeof window !== 'undefined' && payload.createdAt) {
+          localStorage.setItem(notifSyncKey, payload.createdAt)
+        }
+        void loadData()
+      }
+    }
+
+    const onNotificationBatch = (batch: StaffNotificationPayload[]) => {
+      if (!Array.isArray(batch) || batch.length === 0) return
+      const latest = batch.at(-1)?.createdAt
+      if (typeof window !== 'undefined' && latest) {
+        localStorage.setItem(notifSyncKey, latest)
+      }
+      const hasOrderRelated = batch.some(
+        (item) => item?.type === 'KDS_ORDER_READY' || item?.type === 'ORDER_NEW' || item?.type === 'KDS_ITEM_STATUS',
+      )
+      if (hasOrderRelated) {
         void loadData()
       }
     }
 
     socket.on('connect', onConnect)
     socket.on('staff-notification', onStaffNotification)
+    socket.on('notification-batch', onNotificationBatch)
 
     if (!socket.connected) {
       socket.connect()
@@ -331,9 +377,10 @@ export default function Orders() {
     return () => {
       socket.off('connect', onConnect)
       socket.off('staff-notification', onStaffNotification)
+      socket.off('notification-batch', onNotificationBatch)
       disconnectSocket()
     }
-  }, [selectedBranchId, selectedStatus, filterTableId, dateFrom, dateTo])
+  }, [dateFrom, dateTo, filterTableId, notifSyncKey, selectedBranchId, selectedStatus, user?.branchId, user?.id, user?.name])
 
   const syncOfflineQueue = async () => {
     const currentQueue = readOfflineQueue(selectedBranchId || undefined)

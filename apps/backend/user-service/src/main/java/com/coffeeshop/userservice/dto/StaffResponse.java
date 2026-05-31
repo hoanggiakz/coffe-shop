@@ -4,6 +4,8 @@ import com.coffeeshop.userservice.entity.User;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -20,6 +22,9 @@ public class StaffResponse {
     private String branchId;
     private String branchName;
     private Boolean isActive;
+    private LocalDate hireDate;
+    private BigDecimal baseSalary;
+    private String salaryType;
     private LocalDateTime createdAt;
 
     public static StaffResponse from(User user) {
@@ -39,6 +44,9 @@ public class StaffResponse {
                 user.getBranchId(),
                 branchName,
                 user.getIsActive(),
+                user.getHireDate(),
+                user.getBaseSalary(),
+                user.getSalaryType() == null ? null : user.getSalaryType().name(),
                 user.getCreatedAt()
         );
     }

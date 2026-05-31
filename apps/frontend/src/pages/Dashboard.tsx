@@ -108,6 +108,7 @@ export default function Dashboard() {
   const knownOrderIdsRef = useRef<Set<string>>(new Set())
   const bootstrappedOrdersRef = useRef(false)
   const seenNotificationsRef = useRef<Set<string>>(new Set())
+  const notifSyncKey = useMemo(() => `notif_last_received_at_${String(user?.id || 'guest')}`, [user?.id])
 
   const orderTableLabel = (order: OrderApi) => {
     if (order.tableNumber !== null && order.tableNumber !== undefined) {
@@ -242,12 +243,19 @@ export default function Dashboard() {
       socket.emit('join-staff', {
         staffId: user?.id,
         staffName: user?.name,
+        branchId: selectedBranchId || user?.branchId,
       })
     }
 
     const onConnect = () => {
       setSocketConnected(true)
       joinStaffRoom()
+      const lastReceivedAt = typeof window !== 'undefined' ? localStorage.getItem(notifSyncKey) || undefined : undefined
+      socket.emit('sync-notifications', {
+        branchId: selectedBranchId || user?.branchId,
+        lastReceivedAt,
+        limit: 100,
+      })
     }
 
     const onDisconnect = () => {
@@ -256,14 +264,27 @@ export default function Dashboard() {
 
     const onStaffNotification = (payload: StaffNotificationPayload) => {
       pushNotification(payload, 'SOCKET', true)
+      if (typeof window !== 'undefined' && payload.createdAt) {
+        localStorage.setItem(notifSyncKey, payload.createdAt)
+      }
       if (payload.type === 'ORDER_NEW') {
         loadOverview(false)
+      }
+    }
+
+    const onNotificationBatch = (batch: StaffNotificationPayload[]) => {
+      if (!Array.isArray(batch)) return
+      batch.forEach((item) => pushNotification(item, 'POLL', false))
+      const latest = batch.at(-1)?.createdAt
+      if (typeof window !== 'undefined' && latest) {
+        localStorage.setItem(notifSyncKey, latest)
       }
     }
 
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
     socket.on('staff-notification', onStaffNotification)
+    socket.on('notification-batch', onNotificationBatch)
 
     if (!socket.connected) {
       socket.connect()
@@ -275,9 +296,10 @@ export default function Dashboard() {
       socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
       socket.off('staff-notification', onStaffNotification)
+      socket.off('notification-batch', onNotificationBatch)
       disconnectSocket()
     }
-  }, [selectedBranchId, user?.id, user?.name])
+  }, [notifSyncKey, selectedBranchId, user?.branchId, user?.id, user?.name])
 
   const activeTables = useMemo(
     () => tables.filter((table) => table.status === 'OCCUPIED').length,
