@@ -72,6 +72,7 @@ interface PaymentApi {
   paidAt?: string | null
   createdAt?: string | null
   updatedAt?: string | null
+  expiresAt?: string | null
 }
 
 type StaffNotificationType =
@@ -178,7 +179,36 @@ export default function Orders() {
   const [syncingOfflineQueue, setSyncingOfflineQueue] = useState(false)
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
   const [cartHistory, setCartHistory] = useState<Record<string, number>[]>([])
+  const [sepayExpiresAt, setSepayExpiresAt] = useState<string | null>(null)
+  const [sepaySecondsLeft, setSepaySecondsLeft] = useState(0)
+  const [sepayExpiredNotified, setSepayExpiredNotified] = useState(false)
   const notifSyncKey = useMemo(() => `notif_last_received_at_${String(user?.id || 'guest')}`, [user?.id])
+  const normalizedRole = String(user?.role || '').toUpperCase()
+  const canManagePosAdvanced = normalizedRole === 'ADMIN' || normalizedRole === 'MANAGER'
+
+  const printCurrentView = () => {
+    if (typeof window === 'undefined') return
+    window.print()
+  }
+
+  const switchPaymentMethodByShortcut = () => {
+    if (!payingOrder) return
+    if (lockedProvider) return
+    setSelectedMethod((prev) => (prev === 'CASH' ? 'SEPAY' : 'CASH'))
+  }
+
+  const pushCartHistory = (snapshot: Record<string, number>) => {
+    setCartHistory((prev) => [snapshot, ...prev].slice(0, 30))
+  }
+
+  const undoCartChange = () => {
+    setCartHistory((prev) => {
+      if (!prev.length) return prev
+      const [latest, ...rest] = prev
+      setCart(latest)
+      return rest
+    })
+  }
 
   const refreshOfflineQueue = async () => {
     const queue = await readPosOfflineQueue<OfflineOrderQueueItem>(selectedBranchId || undefined)
@@ -282,7 +312,10 @@ export default function Orders() {
       }
       if (event.key === 'F4' || event.key === 'Enter') {
         if (payingOrder) {
-          if (event.key === 'Enter' && !(selectedMethod === 'CASH' && cashDeficit > 0) && !processingPayment) {
+          const inlineCashDeficit = selectedMethod === 'CASH'
+            ? Math.max(0, Math.round(payingOrder.totalAmount - Number(cashReceived || '0')))
+            : 0
+          if (event.key === 'Enter' && !(selectedMethod === 'CASH' && inlineCashDeficit > 0) && !processingPayment) {
             event.preventDefault()
             void confirmPayment()
           }
@@ -301,11 +334,14 @@ export default function Orders() {
         setDetailOrder(null)
         setEditingOrder(null)
         setPayingOrder(null)
+        setSepayExpiresAt(null)
+        setSepaySecondsLeft(0)
+        setSepayExpiredNotified(false)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [navigate, orders, payingOrder, lockedProvider, selectedMethod, cashDeficit, processingPayment, confirmPayment])
+  }, [navigate, orders, payingOrder, selectedMethod, cashReceived, processingPayment])
 
   useEffect(() => {
     const socket = getSocket()
@@ -368,9 +404,32 @@ export default function Orders() {
       }
     }
 
+    const onOrderItemReady = () => {
+      void loadData()
+    }
+
+    const onTableStatusChanged = () => {
+      void loadData()
+    }
+
+    const onPaymentConfirmed = () => {
+      void loadData()
+      void loadPaymentHistory()
+    }
+
+    const onMenuUpdated = () => {
+      clearPosMenuCache(selectedBranchId || undefined)
+      toast.success('Menu vừa được cập nhật')
+      void loadData()
+    }
+
     socket.on('connect', onConnect)
     socket.on('staff-notification', onStaffNotification)
     socket.on('notification-batch', onNotificationBatch)
+    socket.on('order-item-ready', onOrderItemReady)
+    socket.on('table-status-changed', onTableStatusChanged)
+    socket.on('payment-confirmed', onPaymentConfirmed)
+    socket.on('menu-updated', onMenuUpdated)
 
     if (!socket.connected) {
       socket.connect()
@@ -382,6 +441,10 @@ export default function Orders() {
       socket.off('connect', onConnect)
       socket.off('staff-notification', onStaffNotification)
       socket.off('notification-batch', onNotificationBatch)
+      socket.off('order-item-ready', onOrderItemReady)
+      socket.off('table-status-changed', onTableStatusChanged)
+      socket.off('payment-confirmed', onPaymentConfirmed)
+      socket.off('menu-updated', onMenuUpdated)
       disconnectSocket()
     }
   }, [dateFrom, dateTo, filterTableId, notifSyncKey, selectedBranchId, selectedStatus, user?.branchId, user?.id, user?.name])
@@ -621,6 +684,10 @@ export default function Orders() {
       }
 
       setCreatedPayment(payment)
+      if (payment.provider === 'SEPAY') {
+        setSepayExpiresAt(String(payment.expiresAt || new Date(Date.now() + 5 * 60 * 1000).toISOString()))
+        setSepayExpiredNotified(false)
+      }
       if (payment.status === 'PAID') {
         await updateOrderStatus(orderId, 'COMPLETED')
       }
@@ -704,6 +771,9 @@ export default function Orders() {
           toast.success(tv(`Tiền thừa: ${changeDue.toLocaleString()}đ`, `Change due: ${changeDue.toLocaleString()}đ`))
         }
         setPayingOrder(null)
+        setSepayExpiresAt(null)
+        setSepaySecondsLeft(0)
+        setSepayExpiredNotified(false)
       } else {
         if (!existingPayment) {
           toast.success(tv('Đã tạo giao dịch online. Chờ webhook hoặc đối soát thanh toán', 'Online payment created. Waiting for webhook or reconciliation'))
@@ -731,6 +801,10 @@ export default function Orders() {
         if (existing) {
           setCreatedPayment(existing)
           setSelectedMethod(existing.provider)
+          if (existing.provider === 'SEPAY') {
+            setSepayExpiresAt(String(existing.expiresAt || new Date(Date.now() + 5 * 60 * 1000).toISOString()))
+            setSepayExpiredNotified(false)
+          }
         }
       } catch (error: any) {
         if (!cancelled) {
@@ -771,6 +845,26 @@ export default function Orders() {
   }, [createdPayment?.orderId, createdPayment?.provider, createdPayment?.status, payingOrder?.id])
 
   useEffect(() => {
+    if (!payingOrder || !createdPayment || !sepayExpiresAt) return
+    if (createdPayment.orderId !== payingOrder.id) return
+    if (createdPayment.provider !== 'SEPAY') return
+    if (!['PENDING', 'WAITING_TRANSFER'].includes(createdPayment.status)) return
+
+    const tick = () => {
+      const left = Math.max(0, Math.floor((new Date(sepayExpiresAt).getTime() - Date.now()) / 1000))
+      setSepaySecondsLeft(left)
+      if (left === 0 && !sepayExpiredNotified) {
+        setSepayExpiredNotified(true)
+        toast.error('Chưa nhận được xác nhận - kiểm tra lại ngân hàng')
+      }
+    }
+
+    tick()
+    const intervalId = window.setInterval(tick, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [createdPayment?.orderId, createdPayment?.provider, createdPayment?.status, payingOrder?.id, sepayExpiresAt, sepayExpiredNotified])
+
+  useEffect(() => {
     if (!payingOrder || !createdPayment) return
     if (createdPayment.orderId !== payingOrder.id) return
     if (createdPayment.status !== 'PAID') return
@@ -779,6 +873,9 @@ export default function Orders() {
     const timeoutId = window.setTimeout(() => {
       setPayingOrder(null)
       setCreatedPayment(null)
+      setSepayExpiresAt(null)
+      setSepaySecondsLeft(0)
+      setSepayExpiredNotified(false)
       void loadPaymentHistory()
     }, 1200)
 
@@ -1071,7 +1168,7 @@ export default function Orders() {
                 <Button size="sm" variant="secondary" onClick={() => setDetailOrder(order)}>
                   Chi tiết
                   </Button>
-                  {!['COMPLETED', 'CANCELLED'].includes(order.status) && (
+                  {!['COMPLETED', 'CANCELLED'].includes(order.status) && canManagePosAdvanced && (
                     <Button size="sm" variant="secondary" onClick={() => openEditOrder(order)}>
                       Sửa món
                     </Button>
@@ -1081,7 +1178,7 @@ export default function Orders() {
                       Xác nhận đơn
                     </Button>
                   )}
-                  {(order.status === 'CONFIRMED' || order.status === 'PREPARING') && (
+                  {(order.status === 'CONFIRMED' || order.status === 'PREPARING') && canManagePosAdvanced && (
                     <Button size="sm" variant="secondary" onClick={() => updateOrderStatus(order.id, 'READY')}>
                       Chuyển sang sẵn sàng
                     </Button>
@@ -1238,6 +1335,12 @@ export default function Orders() {
                         <span className="font-semibold">{createdPayment.vietQr.transferContent || createdPayment.transferContent}</span>
                       </p>
                     )}
+                    <p className="mt-1 text-xs text-amber-700">
+                      Chờ xác nhận: <span className="font-semibold">{Math.floor(sepaySecondsLeft / 60)}:{String(sepaySecondsLeft % 60).padStart(2, '0')}</span>
+                    </p>
+                    {sepaySecondsLeft === 0 && (
+                      <p className="mt-1 text-xs text-red-600">Quá thời gian chờ xác nhận. Vui lòng kiểm tra lại ngân hàng.</p>
+                    )}
                   </div>
                 )}
                 {createdPayment.status !== 'PAID' && (
@@ -1259,6 +1362,9 @@ export default function Orders() {
                 onClick={() => {
                   setPayingOrder(null)
                   setCreatedPayment(null)
+                  setSepayExpiresAt(null)
+                  setSepaySecondsLeft(0)
+                  setSepayExpiredNotified(false)
                 }}
               >
                 Hủy
@@ -1416,26 +1522,3 @@ export default function Orders() {
     </div>
   )
 }
-  const printCurrentView = () => {
-    if (typeof window === 'undefined') return
-    window.print()
-  }
-
-  const switchPaymentMethodByShortcut = () => {
-    if (!payingOrder) return
-    if (lockedProvider) return
-    setSelectedMethod((prev) => (prev === 'CASH' ? 'SEPAY' : 'CASH'))
-  }
-
-  const pushCartHistory = (snapshot: Record<string, number>) => {
-    setCartHistory((prev) => [snapshot, ...prev].slice(0, 30))
-  }
-
-  const undoCartChange = () => {
-    setCartHistory((prev) => {
-      if (!prev.length) return prev
-      const [latest, ...rest] = prev
-      setCart(latest)
-      return rest
-    })
-  }

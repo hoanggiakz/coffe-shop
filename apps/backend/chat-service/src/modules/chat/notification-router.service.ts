@@ -86,8 +86,10 @@ export class NotificationRouterService {
     // Legacy compatibility (/chat namespace + current FE listeners)
     if (payload.branchId) {
       this.hub.emitToRooms('/chat', 'staff-notification', [`staff:${payload.branchId}`, 'staff:global'], payload);
+      this.emitPosSpecEvents(payload, [`staff:${payload.branchId}`, 'staff:global']);
     } else {
       this.hub.emitToNamespace('/chat', 'staff-notification', payload);
+      this.emitPosSpecEvents(payload);
     }
 
     await this.chatService.logStaffNotification(payload);
@@ -109,5 +111,30 @@ export class NotificationRouterService {
       CART_UPDATED: 'Giỏ hàng đã cập nhật',
     };
     return map[type] || 'Thông báo';
+  }
+
+  private emitPosSpecEvents(payload: any, rooms?: string[]) {
+    const type = String(payload?.type || '').toUpperCase();
+    const emit = (eventName: string) => {
+      if (rooms && rooms.length > 0) {
+        this.hub.emitToRooms('/chat', eventName, rooms, payload);
+        return;
+      }
+      this.hub.emitToNamespace('/chat', eventName, payload);
+    };
+
+    if (type === 'ORDER_NEW' || type === 'ORDER_CREATED' || type === 'KDS_ITEM_STATUS' || type === 'KDS_ORDER_READY') {
+      emit('order-item-ready');
+    }
+    if (type === 'PAYMENT_SUCCESS') {
+      emit('payment-confirmed');
+      emit('table-status-changed');
+    }
+    if (type === 'MENU_UPDATED') {
+      emit('menu-updated');
+    }
+    if (type === 'TABLE_STATUS_CHANGED' || type === 'TABLE_UPDATED') {
+      emit('table-status-changed');
+    }
   }
 }
