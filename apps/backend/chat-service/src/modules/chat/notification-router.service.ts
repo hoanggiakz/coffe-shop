@@ -48,6 +48,7 @@ export class NotificationRouterService {
       case 'ORDER_CREATED':
       case 'ORDER_NEW':
         this.hub.emitToRooms('/kds', 'new-order', branchRooms, payload);
+        this.hub.emitToRooms('/kds', 'order-confirmed', branchRooms, payload);
         this.hub.emitToRooms('/pos', 'new-order', branchRooms, payload);
         break;
       case 'CALL_WAITER':
@@ -63,6 +64,8 @@ export class NotificationRouterService {
       case 'ITEM_READY':
       case 'KDS_ORDER_READY':
       case 'KDS_ITEM_STATUS':
+        this.hub.emitToRooms('/kds', 'item-updated', branchRooms, payload);
+        this.hub.emitToRooms('/kds', 'order-status-updated', branchRooms, payload);
         this.hub.emitToRooms('/pos', 'item-ready', branchRooms, payload);
         this.hub.emitToRooms('/customer', 'item-ready', tableRooms, payload);
         break;
