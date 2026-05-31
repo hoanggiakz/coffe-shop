@@ -80,26 +80,6 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     return `${this.appBaseUrl}/payment/return`;
   }
 
-  private get vnpayPayUrl() {
-    return String(this.config.get<string>('VNPAY_PAY_URL', '') || '').trim();
-  }
-
-  private get vnpayTerminalCode() {
-    return String(this.config.get<string>('VNPAY_TMN_CODE', '') || '').trim();
-  }
-
-  private get vnpayHashSecret() {
-    return String(this.config.get<string>('VNPAY_HASH_SECRET', '') || '').trim();
-  }
-
-  private get vnpayQueryUrl() {
-    return String(this.config.get<string>('VNPAY_QUERY_URL', '') || '').trim();
-  }
-
-  private get vietQrQueryUrl() {
-    return String(this.config.get<string>('VIETQR_QUERY_URL', '') || '').trim();
-  }
-
   private get sepayQueryUrl() {
     const explicit = String(this.config.get<string>('SEPAY_QUERY_URL', '') || '').trim();
     if (explicit) {
@@ -364,8 +344,8 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
   }
 
   private getOnlineProviderStatusQueryUrl(provider: OnlineProvider) {
-    if (provider === 'SEPAY') return this.sepayQueryUrl || this.vietQrQueryUrl;
-    return this.sepayQueryUrl || this.vietQrQueryUrl;
+    if (provider === 'SEPAY') return this.sepayQueryUrl;
+    return this.sepayQueryUrl;
   }
 
   private getHeaderValue(headers: RequestHeaders | undefined, key: string) {
@@ -787,10 +767,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private buildFrontendReturnUrl(
-    provider: 'VIETQR' | 'SEPAY' | 'VNPAY',
-    payload: { orderId: string; transactionId: string; resultCode?: string; message?: string },
-  ) {
+  private buildFrontendReturnUrl(provider: 'SEPAY', payload: { orderId: string; transactionId: string; resultCode?: string; message?: string }) {
     const url = new URL(this.paymentReturnBaseUrl);
     url.searchParams.set('provider', provider);
     url.searchParams.set('orderId', payload.orderId);
@@ -802,74 +779,6 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     if (payload.message) {
       url.searchParams.set('message', payload.message);
     }
-
-    return url.toString();
-  }
-
-  private formatVnpayDate(value: Date) {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return (
-      `${value.getFullYear()}` +
-      `${pad(value.getMonth() + 1)}` +
-      `${pad(value.getDate())}` +
-      `${pad(value.getHours())}` +
-      `${pad(value.getMinutes())}` +
-      `${pad(value.getSeconds())}`
-    );
-  }
-
-  private encodeVnpayQueryComponent(input: string) {
-    return encodeURIComponent(input).replace(/%20/g, '+');
-  }
-
-  private buildVnpaySignData(params: Record<string, string>) {
-    return Object.keys(params)
-      .sort()
-      .map((key) => `${this.encodeVnpayQueryComponent(key)}=${this.encodeVnpayQueryComponent(params[key])}`)
-      .join('&');
-  }
-
-  private buildVnpayPaymentUrl(orderId: string, amount: number, transactionId: string) {
-    if (!this.vnpayPayUrl || !this.vnpayTerminalCode || !this.vnpayHashSecret) {
-      return this.buildFrontendReturnUrl('VNPAY', {
-        orderId,
-        transactionId,
-        resultCode: 'PENDING_SETUP',
-        message: 'VNPAY config missing (payUrl/tmnCode/hashSecret)',
-      });
-    }
-
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + this.onlinePaymentTimeoutMinutes * 60 * 1000);
-    const returnUrl = this.buildFrontendReturnUrl('VNPAY', { orderId, transactionId });
-
-    const params: Record<string, string> = {
-      vnp_Amount: String(Math.max(0, Math.round(amount)) * 100),
-      vnp_Command: 'pay',
-      vnp_CreateDate: this.formatVnpayDate(now),
-      vnp_CurrCode: 'VND',
-      vnp_ExpireDate: this.formatVnpayDate(expiresAt),
-      vnp_IpAddr: '127.0.0.1',
-      vnp_Locale: 'vn',
-      vnp_OrderInfo: `Thanh toan don ${orderId}`,
-      vnp_OrderType: 'other',
-      vnp_ReturnUrl: returnUrl,
-      vnp_TmnCode: this.vnpayTerminalCode,
-      vnp_TxnRef: orderId,
-      vnp_Version: '2.1.0',
-    };
-
-    const signData = this.buildVnpaySignData(params);
-    const secureHash = createHmac('sha512', this.vnpayHashSecret).update(signData, 'utf8').digest('hex');
-
-    const url = new URL(this.vnpayPayUrl);
-    Object.keys(params)
-      .sort()
-      .forEach((key) => {
-        url.searchParams.set(key, params[key]);
-      });
-    url.searchParams.set('vnp_SecureHashType', 'HMACSHA512');
-    url.searchParams.set('vnp_SecureHash', secureHash);
 
     return url.toString();
   }
@@ -894,7 +803,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     }
 
     return {
-      provider: 'VIETQR',
+      provider: 'SEPAY',
       qrImageUrl,
       htmlTag: `<img src='${qrImageUrl}'/>`,
       accountName: this.onlineQrAccountName,
@@ -1145,7 +1054,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     const p = String(provider || '').toUpperCase();
     if (p === 'CASH') return 'CASH';
     if (p === 'SEPAY') return 'SEPAY';
-    return 'BANK_TRANSFER';
+    return 'SEPAY';
   }
 
   private escapePdfText(value: string) {
