@@ -6,6 +6,7 @@ import Input from '@/components/ui/Input'
 import api from '@/utils/api'
 import { useAuthStore } from '@/stores/authStore'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
+import { phuongThucThanhToan } from '@/utils/display'
 
 interface InvoiceItem {
   id: string
@@ -37,22 +38,27 @@ export default function Invoices() {
   const [endDate, setEndDate] = useState('')
   const [loading, setLoading] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [meta, setMeta] = useState<InvoiceListResponse['meta']>({ total: 0, page: 1, limit: 50, totalPages: 1 })
+  const [page, setPage] = useState(1)
+  const [keyword, setKeyword] = useState('')
+  const [regenerateOrderId, setRegenerateOrderId] = useState('')
 
   const branchId = String(selectedBranchId || user?.branchId || '').trim()
   const role = String(user?.role || '').toUpperCase()
 
   const canVoid = role === 'ADMIN' || role === 'MANAGER'
-  const canViewInvoices = ['ADMIN', 'MANAGER', 'WAITER', 'STAFF'].includes(role)
+  const canRegenerate = role === 'ADMIN'
+  const canViewInvoices = ['ADMIN', 'MANAGER', 'WAITER'].includes(role)
 
   const params = useMemo(
     () => ({
       status,
       ...(startDate ? { start_date: startDate } : {}),
       ...(endDate ? { end_date: endDate } : {}),
-      page: 1,
+      page,
       limit: 50,
     }),
-    [status, startDate, endDate],
+    [status, startDate, endDate, page],
   )
 
   const load = async () => {
@@ -66,6 +72,7 @@ export default function Invoices() {
       const { data } = await api.get<InvoiceListResponse>(`/branches/${branchId}/invoices`, { params })
       const list = Array.isArray(data?.data) ? data.data : []
       setRows(list)
+      setMeta(data?.meta || { total: 0, page, limit: 50, totalPages: 1 })
       if (selected?.id) {
         const still = list.find((x) => x.id === selected.id)
         if (!still) setSelected(null)
@@ -116,21 +123,104 @@ export default function Invoices() {
     }
   }
 
+  const exportCsv = () => {
+    const header = ['invoiceNumber', 'issueDate', 'customerName', 'paymentMethod', 'status', 'subtotal', 'discount', 'taxRate', 'taxAmount', 'totalAmount']
+    const lines = rows.map((row) =>
+      [
+        row.invoiceNumber,
+        new Date(row.issueDate).toISOString(),
+        row.customerName || '',
+        row.paymentMethod,
+        row.status,
+        Number(row.subtotal || 0),
+        Number(row.discount || 0),
+        Number(row.taxRate || 0),
+        Number(row.taxAmount || 0),
+        Number(row.totalAmount || 0),
+      ]
+        .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+        .join(','),
+    )
+    const csv = [header.join(','), ...lines].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `invoices_${branchId || 'branch'}_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const regenerateInvoice = async () => {
+    if (!canRegenerate) return
+    const orderId = regenerateOrderId.trim()
+    if (!orderId) {
+      toast.error('Nhập orderId để regenerate hóa đơn')
+      return
+    }
+    try {
+      await api.post(`/orders/${orderId}/invoice/regenerate`)
+      toast.success('Regenerate hóa đơn thành công')
+      setRegenerateOrderId('')
+      await load()
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Regenerate hóa đơn thất bại')
+    }
+  }
+
+  const filteredRows = useMemo(() => {
+    const kw = keyword.trim().toLowerCase()
+    if (!kw) return rows
+    return rows.filter((row) =>
+      `${row.invoiceNumber} ${row.customerName || ''}`.toLowerCase().includes(kw),
+    )
+  }, [rows, keyword])
+
+  const summaryRevenue = useMemo(
+    () => filteredRows.reduce((sum, row) => sum + Number(row.totalAmount || 0), 0),
+    [filteredRows],
+  )
+
   useEffect(() => {
     void load()
-  }, [branchId, status, startDate, endDate])
+  }, [branchId, status, startDate, endDate, page])
+
+  useEffect(() => {
+    setPage(1)
+  }, [status, startDate, endDate, branchId])
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Quản lý hóa đơn</h1>
-        <Button onClick={load} loading={loading}>Làm mới</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={exportCsv} disabled={!rows.length}>Xuất CSV</Button>
+          <Button onClick={load} loading={loading}>Làm mới</Button>
+        </div>
       </div>
 
       <Card>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-amber-100 p-3">
+            <p className="text-xs text-slate-500">Tổng hóa đơn (trang hiện tại)</p>
+            <p className="text-xl font-bold text-slate-900">{filteredRows.length}</p>
+          </div>
+          <div className="rounded-xl border border-amber-100 p-3">
+            <p className="text-xs text-slate-500">Tổng doanh thu (trang hiện tại)</p>
+            <p className="text-xl font-bold text-emerald-700">{summaryRevenue.toLocaleString('vi-VN')}đ</p>
+          </div>
+          <div className="rounded-xl border border-amber-100 p-3">
+            <p className="text-xs text-slate-500">Tổng bản ghi (server)</p>
+            <p className="text-xl font-bold text-slate-900">{meta.total}</p>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
           <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <Input placeholder="Tìm theo số HĐ / khách hàng" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value as any)}
@@ -141,6 +231,17 @@ export default function Invoices() {
             <option value="VOIDED">Đã hủy</option>
           </select>
         </div>
+        {canRegenerate && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Input
+              className="w-full md:w-80"
+              placeholder="Order ID để regenerate invoice"
+              value={regenerateOrderId}
+              onChange={(e) => setRegenerateOrderId(e.target.value)}
+            />
+            <Button onClick={regenerateInvoice}>Regenerate</Button>
+          </div>
+        )}
       </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -162,7 +263,7 @@ export default function Invoices() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {filteredRows.map((row) => (
                   <tr
                     key={row.id}
                     className="cursor-pointer border-b border-amber-50 hover:bg-amber-50/50"
@@ -178,6 +279,17 @@ export default function Invoices() {
               </tbody>
             </table>
           </div>
+          <div className="mt-3 flex items-center justify-between text-sm">
+            <span>Trang {meta.page}/{Math.max(1, meta.totalPages)}</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((prev) => Math.max(1, prev - 1))}>
+                Trang trước
+              </Button>
+              <Button size="sm" variant="secondary" disabled={page >= Math.max(1, meta.totalPages)} onClick={() => setPage((prev) => prev + 1)}>
+                Trang sau
+              </Button>
+            </div>
+          </div>
         </Card>
 
         <Card>
@@ -189,7 +301,7 @@ export default function Invoices() {
               <p>Đơn hàng: {selected.orderId}</p>
               <p>Khách: {selected.customerName || 'Khách vãng lai'}</p>
               <p>Tổng cộng: {Number(selected.totalAmount).toLocaleString('vi-VN')}đ</p>
-              <p>Thanh toán: {selected.paymentMethod}</p>
+              <p>Thanh toán: {phuongThucThanhToan(selected.paymentMethod)}</p>
               <p>Trạng thái: {selected.status}</p>
               <div className="flex flex-wrap gap-2 pt-2">
                 <Button size="sm" variant="secondary" onClick={openPdf}>

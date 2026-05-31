@@ -1160,7 +1160,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     query: { start_date?: string; end_date?: string; status?: string; page?: number; limit?: number },
     actor: ActorContext,
   ) {
-    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER']);
     this.enforceBranchAccess(actor, branchId);
     const status = this.normalizeInvoiceListStatus(query.status);
     const page = Number.isFinite(query.page) ? Math.max(1, Math.floor(Number(query.page))) : 1;
@@ -1210,7 +1210,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getInvoiceDetail(invoiceId: string, actor: ActorContext) {
-    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER']);
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) throw new NotFoundException('Invoice not found');
     this.enforceBranchAccess(actor, invoice.branchId);
