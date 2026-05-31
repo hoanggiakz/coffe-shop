@@ -1064,17 +1064,65 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       .replace(/\)/g, '\\)');
   }
 
+  private formatVnd(amount: number) {
+    return `${Number(amount || 0).toLocaleString('vi-VN')}d`;
+  }
+
+  private padRight(value: string, width: number) {
+    const raw = String(value || '');
+    if (raw.length >= width) return raw.slice(0, width);
+    return `${raw}${' '.repeat(width - raw.length)}`;
+  }
+
+  private padLeft(value: string, width: number) {
+    const raw = String(value || '');
+    if (raw.length >= width) return raw.slice(0, width);
+    return `${' '.repeat(width - raw.length)}${raw}`;
+  }
+
+  private buildInvoiceItemLines(items: Array<{ name?: string; quantity?: number; unitPrice?: number; totalPrice?: number }>) {
+    const lines: string[] = [];
+    const normalized = Array.isArray(items) ? items : [];
+    const header = `${this.padRight('Item', 22)} ${this.padLeft('Qty', 4)} ${this.padLeft('Price', 10)} ${this.padLeft('Total', 12)}`;
+    lines.push(header);
+    lines.push('-'.repeat(52));
+
+    for (const item of normalized.slice(0, 20)) {
+      const name = String(item?.name || 'Unknown item');
+      const qty = Number(item?.quantity || 0);
+      const unitPrice = Number(item?.unitPrice || 0);
+      const totalPrice = Number(item?.totalPrice || unitPrice * qty);
+      lines.push(
+        `${this.padRight(name, 22)} ${this.padLeft(String(qty), 4)} ${this.padLeft(this.formatVnd(unitPrice), 10)} ${this.padLeft(this.formatVnd(totalPrice), 12)}`,
+      );
+    }
+    if (normalized.length > 20) {
+      lines.push(`... ${normalized.length - 20} items more`);
+    }
+    return lines;
+  }
+
   private buildMinimalInvoicePdf(invoice: any) {
+    const itemLines = this.buildInvoiceItemLines(Array.isArray(invoice?.items) ? invoice.items : []);
     const lines = [
       'COFFEE SHOP - HOA DON',
       `So hoa don: ${invoice.invoiceNumber}`,
       `Ngay: ${new Date(invoice.issueDate).toLocaleString('vi-VN')}`,
       `Khach: ${invoice.customerName || 'Khach vang lai'}`,
-      `Tam tinh: ${Number(invoice.subtotal).toLocaleString('vi-VN')}d`,
-      `Giam gia: ${Number(invoice.discount).toLocaleString('vi-VN')}d`,
-      `Thue (${Number(invoice.taxRate)}%): ${Number(invoice.taxAmount).toLocaleString('vi-VN')}d`,
-      `Tong cong: ${Number(invoice.totalAmount).toLocaleString('vi-VN')}d`,
+      `SDT: ${invoice.customerPhone || '-'}`,
+      '',
+      ...itemLines,
+      '',
+      `Tam tinh: ${this.formatVnd(Number(invoice.subtotal || 0))}`,
+      `Giam gia: ${this.formatVnd(Number(invoice.discount || 0))}`,
+      `Thue (${Number(invoice.taxRate)}%): ${this.formatVnd(Number(invoice.taxAmount || 0))}`,
+      `Tong cong: ${this.formatVnd(Number(invoice.totalAmount || 0))}`,
       `Thanh toan: ${invoice.paymentMethod}`,
+      `Trang thai: ${invoice.status || 'ISSUED'}`,
+      ...(invoice?.sepay?.transferContent ? [`Noi dung CK: ${invoice.sepay.transferContent}`] : []),
+      ...(invoice?.sepay?.qrImageUrl ? [`QR URL: ${invoice.sepay.qrImageUrl}`] : []),
+      '',
+      'Cam on quy khach!',
     ];
 
     const contentStream = [
@@ -1109,6 +1157,23 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     }
     pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
     return Buffer.from(pdf, 'utf8');
+  }
+
+  private async getPaymentSnapshot(paymentId?: string | null) {
+    const id = String(paymentId || '').trim();
+    if (!id) return null;
+    const payment = await this.prisma.payment.findUnique({ where: { id } });
+    if (!payment) return null;
+    const metadata =
+      payment.metadata && typeof payment.metadata === 'object' && !Array.isArray(payment.metadata)
+        ? (payment.metadata as Record<string, any>)
+        : {};
+    const vietQr = metadata?.vietQr && typeof metadata.vietQr === 'object' ? (metadata.vietQr as Record<string, any>) : null;
+    return {
+      provider: String(payment.provider || '').toUpperCase(),
+      transferContent: String((vietQr?.transferContent || payment.transferContent || '') ?? '').trim() || null,
+      qrImageUrl: String((vietQr?.qrImageUrl || '') ?? '').trim() || null,
+    };
   }
 
   async ensureInvoiceForPayment(payment: any, createdBy?: string) {
@@ -1215,6 +1280,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     if (!invoice) throw new NotFoundException('Invoice not found');
     this.enforceBranchAccess(actor, invoice.branchId);
     const order = await this.fetchOrderForInvoice(invoice.orderId);
+    const payment = await this.getPaymentSnapshot(invoice.paymentTransactionId);
     return {
       id: invoice.id,
       branchId: invoice.branchId,
@@ -1236,6 +1302,14 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       taxAmount: Number(invoice.taxAmount),
       totalAmount: Number(invoice.totalAmount),
       paymentMethod: invoice.paymentMethod,
+      ...(payment?.provider === 'SEPAY'
+        ? {
+            sepay: {
+              transferContent: payment.transferContent,
+              qrImageUrl: payment.qrImageUrl,
+            },
+          }
+        : {}),
       status: invoice.status,
       pdfUrl: invoice.pdfUrl,
       voidReason: invoice.voidReason,
@@ -1264,6 +1338,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) throw new NotFoundException('Invoice not found');
     const order = await this.fetchOrderForInvoice(invoice.orderId);
+    const payment = await this.getPaymentSnapshot(invoice.paymentTransactionId);
     return {
       id: invoice.id,
       branchId: invoice.branchId,
@@ -1284,6 +1359,14 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       taxAmount: Number(invoice.taxAmount),
       totalAmount: Number(invoice.totalAmount),
       paymentMethod: invoice.paymentMethod,
+      ...(payment?.provider === 'SEPAY'
+        ? {
+            sepay: {
+              transferContent: payment.transferContent,
+              qrImageUrl: payment.qrImageUrl,
+            },
+          }
+        : {}),
       status: invoice.status,
       pdfUrl: invoice.pdfUrl,
       voidReason: invoice.voidReason,
