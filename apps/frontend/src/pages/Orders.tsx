@@ -251,13 +251,98 @@ export default function Orders() {
   const [sepayExpiresAt, setSepayExpiresAt] = useState<string | null>(null)
   const [sepaySecondsLeft, setSepaySecondsLeft] = useState(0)
   const [sepayExpiredNotified, setSepayExpiredNotified] = useState(false)
+  const [autoPrintInvoiceAfterPaid, setAutoPrintInvoiceAfterPaid] = useState(true)
   const notifSyncKey = useMemo(() => `notif_last_received_at_${String(user?.id || 'guest')}`, [user?.id])
   const normalizedRole = String(user?.role || '').toUpperCase()
   const canManagePosAdvanced = normalizedRole === 'ADMIN' || normalizedRole === 'MANAGER'
+  const lastPrintedPaymentRef = useRef<string | null>(null)
 
   const printCurrentView = () => {
     if (typeof window === 'undefined') return
     window.print()
+  }
+
+  const escapeHtml = (value?: string | null) =>
+    String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+
+  const openPrintWindow = (title: string, body: string) => {
+    if (typeof window === 'undefined') return
+    const popup = window.open('', '_blank', 'width=760,height=900')
+    if (!popup) {
+      toast.error('Không mở được cửa sổ in. Hãy kiểm tra popup blocker.')
+      return
+    }
+    popup.document.write(`<!doctype html><html><head><meta charset="utf-8" />
+      <title>${escapeHtml(title)}</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 16px; color: #111; }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        .meta { font-size: 12px; color: #444; margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 12px; }
+        th { background: #f5f5f5; text-align: left; }
+        .right { text-align: right; }
+        .total { font-weight: bold; font-size: 14px; }
+      </style></head><body>${body}</body></html>`)
+    popup.document.close()
+    popup.focus()
+    popup.print()
+  }
+
+  const printOrderSlip = (order: OrderApi) => {
+    const rows = (order.orderItems || [])
+      .map((item) => {
+        const lineTotal = Number(item.quantity || 0) * Number(item.price || 0)
+        return `<tr>
+          <td>${escapeHtml(orderItemLabel(item))}</td>
+          <td class="right">${Number(item.quantity || 0)}</td>
+          <td class="right">${Number(item.price || 0).toLocaleString('vi-VN')}đ</td>
+          <td class="right">${lineTotal.toLocaleString('vi-VN')}đ</td>
+        </tr>`
+      })
+      .join('')
+    const html = `
+      <h1>PHIẾU ORDER - ${escapeHtml(maDonHangNgan(order.id))}</h1>
+      <div class="meta">Bàn: ${escapeHtml(orderTableLabel(order))} | Thời gian: ${escapeHtml(formatDateTimeFull(order.createdAt))}</div>
+      <table>
+        <thead><tr><th>Món</th><th class="right">SL</th><th class="right">Đơn giá</th><th class="right">Thành tiền</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="total right">TỔNG: ${Number(order.totalAmount || 0).toLocaleString('vi-VN')}đ</p>
+    `
+    openPrintWindow(`Order-${maDonHangNgan(order.id)}`, html)
+  }
+
+  const printInvoice = (order: OrderApi, payment?: PaymentApi | null) => {
+    const rows = (order.orderItems || [])
+      .map((item) => {
+        const lineTotal = Number(item.quantity || 0) * Number(item.price || 0)
+        return `<tr>
+          <td>${escapeHtml(orderItemLabel(item))}</td>
+          <td class="right">${Number(item.quantity || 0)}</td>
+          <td class="right">${Number(item.price || 0).toLocaleString('vi-VN')}đ</td>
+          <td class="right">${lineTotal.toLocaleString('vi-VN')}đ</td>
+        </tr>`
+      })
+      .join('')
+    const status = payment ? trangThaiThanhToan(payment.status) : 'Chưa thanh toán'
+    const method = payment ? phuongThucThanhToan(payment.provider) : phuongThucThanhToan(selectedMethod)
+    const html = `
+      <h1>HÓA ĐƠN TẠM - ${escapeHtml(maDonHangNgan(order.id))}</h1>
+      <div class="meta">Bàn: ${escapeHtml(orderTableLabel(order))} | Trạng thái TT: ${escapeHtml(status)} | Phương thức: ${escapeHtml(method)}</div>
+      <table>
+        <thead><tr><th>Món</th><th class="right">SL</th><th class="right">Đơn giá</th><th class="right">Thành tiền</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="right">Giảm giá: ${Number(order.discountAmount || 0).toLocaleString('vi-VN')}đ</p>
+      <p class="total right">TỔNG: ${Number(order.totalAmount || 0).toLocaleString('vi-VN')}đ</p>
+    `
+    openPrintWindow(`Invoice-${maDonHangNgan(order.id)}`, html)
   }
 
   const switchPaymentMethodByShortcut = () => {
@@ -397,12 +482,14 @@ export default function Orders() {
         setPayingOrder(openOrder)
         setSelectedMethod('CASH')
         setCashReceived(String(openOrder.totalAmount))
+        setAutoPrintInvoiceAfterPaid(true)
       }
       if (event.key === 'Escape') {
         event.preventDefault()
         setDetailOrder(null)
         setEditingOrder(null)
         setPayingOrder(null)
+        lastPrintedPaymentRef.current = null
         setSepayExpiresAt(null)
         setSepaySecondsLeft(0)
         setSepayExpiredNotified(false)
@@ -919,6 +1006,7 @@ export default function Orders() {
           toast.success(tv(`Tiền thừa: ${changeDue.toLocaleString()}đ`, `Change due: ${changeDue.toLocaleString()}đ`))
         }
         setPayingOrder(null)
+        lastPrintedPaymentRef.current = null
         setSepayExpiresAt(null)
         setSepaySecondsLeft(0)
         setSepayExpiredNotified(false)
@@ -1017,10 +1105,16 @@ export default function Orders() {
     if (createdPayment.orderId !== payingOrder.id) return
     if (createdPayment.status !== 'PAID') return
 
+    if (autoPrintInvoiceAfterPaid && lastPrintedPaymentRef.current !== createdPayment.paymentId) {
+      printInvoice(payingOrder, createdPayment)
+      lastPrintedPaymentRef.current = createdPayment.paymentId
+    }
+
     toast.success(tv('Thanh toán thành công', 'Payment completed'))
     const timeoutId = window.setTimeout(() => {
       setPayingOrder(null)
       setCreatedPayment(null)
+      lastPrintedPaymentRef.current = null
       setSepayExpiresAt(null)
       setSepaySecondsLeft(0)
       setSepayExpiredNotified(false)
@@ -1028,7 +1122,7 @@ export default function Orders() {
     }, 1200)
 
     return () => window.clearTimeout(timeoutId)
-  }, [createdPayment?.orderId, createdPayment?.status, payingOrder?.id, tv])
+  }, [createdPayment?.orderId, createdPayment?.status, createdPayment?.paymentId, payingOrder?.id, tv, autoPrintInvoiceAfterPaid])
 
   const toggleHistoryRow = async (payment: PaymentApi) => {
     const key = payment.paymentId
@@ -1368,6 +1462,7 @@ export default function Orders() {
                         setPayingOrder(order)
                         setSelectedMethod('CASH')
                         setCashReceived(String(order.totalAmount))
+                        setAutoPrintInvoiceAfterPaid(true)
                       }}
                     >
                       Thanh toán
@@ -1532,6 +1627,33 @@ export default function Orders() {
               </div>
             )}
 
+            <div className="mt-3 space-y-2">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={autoPrintInvoiceAfterPaid}
+                  onChange={(e) => setAutoPrintInvoiceAfterPaid(e.target.checked)}
+                />
+                In hóa đơn sau khi thanh toán thành công
+              </label>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => printOrderSlip(payingOrder)}
+                >
+                  In order
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => printInvoice(payingOrder, createdPayment)}
+                >
+                  In trước
+                </Button>
+              </div>
+            </div>
+
             <div className="mt-4 flex gap-2">
               <Button
                 variant="secondary"
@@ -1539,6 +1661,7 @@ export default function Orders() {
                 onClick={() => {
                   setPayingOrder(null)
                   setCreatedPayment(null)
+                  lastPrintedPaymentRef.current = null
                   setSepayExpiresAt(null)
                   setSepaySecondsLeft(0)
                   setSepayExpiredNotified(false)
