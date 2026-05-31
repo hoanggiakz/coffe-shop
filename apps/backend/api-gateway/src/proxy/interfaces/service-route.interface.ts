@@ -8,6 +8,8 @@ export interface ServiceRoute {
 export const SERVICE_ROUTES: ServiceRoute[] = [
   // User Service (Spring Boot) – login/register are public
   { path: '/api/users', public: true },
+  { path: '/api/auth', public: true },
+  { path: '/api/customer', public: true },
   // Branch API alias mapped to user-service
   { path: '/api/branches', public: true },
   // HR staff API alias mapped to user-service

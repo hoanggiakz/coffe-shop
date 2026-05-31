@@ -52,7 +52,42 @@ const getStaffToken = (): string | null => {
   return getTokenFromPersistedStorage()
 }
 
+const normalizeRequestPath = (url?: string): string => {
+  const raw = String(url || '').trim()
+  if (!raw) return ''
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    try {
+      return new URL(raw).pathname
+    } catch {
+      return raw
+    }
+  }
+  return raw.startsWith('/') ? raw : `/${raw}`
+}
+
+const hasNonEmptyTableId = (params: any): boolean => {
+  if (!params) return false
+  if (typeof URLSearchParams !== 'undefined' && params instanceof URLSearchParams) {
+    return String(params.get('tableId') || '').trim().length > 0
+  }
+  if (typeof params === 'object') {
+    const value = (params as any).tableId
+    if (Array.isArray(value)) {
+      return value.some((entry) => String(entry || '').trim().length > 0)
+    }
+    return String(value || '').trim().length > 0
+  }
+  return false
+}
+
 api.interceptors.request.use((config) => {
+  const method = String(config.method || 'get').toUpperCase()
+  const requestPath = normalizeRequestPath(config.url)
+  const isOrdersListRequest = requestPath === '/orders' || requestPath === '/api/orders'
+  if (isPublicCustomerRoute() && method === 'GET' && isOrdersListRequest && !hasNonEmptyTableId(config.params)) {
+    return Promise.reject(new Error('Customer orders request requires tableId'))
+  }
+
   const token = getStaffToken()
   const explicitAuthHeader = (config.headers as any)?.Authorization ?? (config.headers as any)?.authorization
   const hasAuthorizationHeader = typeof explicitAuthHeader === 'string' && explicitAuthHeader.trim().length > 0

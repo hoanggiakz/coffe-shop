@@ -59,5 +59,20 @@ public class SchemaMigrationRunner {
         jdbcTemplate.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_branches_name_lower ON branches (LOWER(name))");
         jdbcTemplate.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_branches_code_lower ON branches (LOWER(code))");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_branches_manager_id ON branches(manager_id)");
+
+        jdbcTemplate.execute(
+                "CREATE TABLE IF NOT EXISTS loyalty_transaction (" +
+                        "id VARCHAR(255) PRIMARY KEY, " +
+                        "customer_id VARCHAR(255) NOT NULL, " +
+                        "order_id VARCHAR(255), " +
+                        "branch_id VARCHAR(255), " +
+                        "type VARCHAR(20) NOT NULL, " +
+                        "points INTEGER NOT NULL, " +
+                        "balance_after INTEGER NOT NULL, " +
+                        "description TEXT, " +
+                        "created_at TIMESTAMP DEFAULT NOW()" +
+                        ")"
+        );
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_loyalty_tx_customer_created ON loyalty_transaction(customer_id, created_at DESC)");
     }
 }

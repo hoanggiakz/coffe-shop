@@ -116,9 +116,20 @@ interface AiInsightState {
   forecasts: AiRevenueForecast[]
   anomalies: Array<{ id: string; severity: string; description: string; isResolved: boolean }>
   sentiment: { positive: number; neutral: number; negative: number } | null
+  sentimentTopIssues: Array<{ issue: string; count: number }>
   forecastSource?: string
   sentimentSource?: string
   fallbackReason?: string
+}
+
+interface ReportChatResponse {
+  answer: string
+  sql?: string | null
+  executionTimeMs: number
+  intent: string
+  isSuccessful: boolean
+  rowCount: number
+  sampleRows?: Array<Record<string, unknown>>
 }
 
 function formatMoney(value: number): string {
@@ -168,12 +179,18 @@ export default function Reports() {
     forecasts: [],
     anomalies: [],
     sentiment: null,
+    sentimentTopIssues: [],
   })
   const [rebuildingForecast, setRebuildingForecast] = useState(false)
+  const [testingAnomaly, setTestingAnomaly] = useState(false)
+  const [reportChatQuestion, setReportChatQuestion] = useState('')
+  const [reportChatLoading, setReportChatLoading] = useState(false)
+  const [reportChatResult, setReportChatResult] = useState<ReportChatResponse | null>(null)
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
   const effectiveAiBranchId = selectedBranchId || currentUserBranchId || 'branch-e2e'
+  const currentUserRole = String(useAuthStore((state) => state.user?.role || '')).toUpperCase()
 
   const requestAiWithRetry = async (path: string, params: Record<string, any>) => {
     try {
@@ -215,17 +232,19 @@ export default function Reports() {
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
 
       try {
-        const [forecastResult, anomalyResult, sentimentResult] = await Promise.allSettled([
+        const [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult] = await Promise.allSettled([
           requestAiWithRetry('/ai/forecast/revenue', { branchId: effectiveAiBranchId, days: 7 }),
           requestAiWithRetry('/ai/anomalies', { branchId: effectiveAiBranchId }),
           requestAiWithRetry('/ai/sentiment/summary', { branchId: effectiveAiBranchId }),
+          requestAiWithRetry('/ai/sentiment/issues-top', { branchId: effectiveAiBranchId, days: 7, limit: 3 }),
         ])
 
         const forecastData = forecastResult.status === 'fulfilled' ? forecastResult.value.data : null
         const anomalyData = anomalyResult.status === 'fulfilled' ? anomalyResult.value.data : null
         const sentimentData = sentimentResult.status === 'fulfilled' ? sentimentResult.value.data : null
-        const aiAvailable = Boolean(forecastData || anomalyData || sentimentData)
-        const reasons = [forecastResult, anomalyResult, sentimentResult]
+        const sentimentIssuesData = sentimentIssuesResult.status === 'fulfilled' ? sentimentIssuesResult.value.data : null
+        const aiAvailable = Boolean(forecastData || anomalyData || sentimentData || sentimentIssuesData)
+        const reasons = [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult]
           .filter((item): item is PromiseRejectedResult => item.status === 'rejected')
           .map((item) => item.reason?.response?.data?.message || item.reason?.message || 'request_failed')
 
@@ -242,6 +261,14 @@ export default function Reports() {
                 negative: Number(sentimentData.negative || 0),
               }
             : null,
+          sentimentTopIssues: Array.isArray(sentimentIssuesData?.issues)
+            ? sentimentIssuesData.issues
+                .map((item: any) => ({
+                  issue: String(item?.issue || '').trim(),
+                  count: Number(item?.count || 0),
+                }))
+                .filter((item: { issue: string; count: number }) => item.issue)
+            : [],
           fallbackReason: reasons.length ? reasons.join('; ') : undefined,
         })
       } catch (aiError: any) {
@@ -250,6 +277,7 @@ export default function Reports() {
           forecasts: [],
           anomalies: [],
           sentiment: null,
+          sentimentTopIssues: [],
           forecastSource: '',
           sentimentSource: '',
           fallbackReason: aiError?.response?.data?.message || 'AI service unavailable',
@@ -377,6 +405,53 @@ export default function Reports() {
     }
   }
 
+  const handleTestAnomaly = async () => {
+    if (!effectiveAiBranchId) {
+      toast.error('Thiếu branchId để test anomaly')
+      return
+    }
+    setTestingAnomaly(true)
+    try {
+      await api.post('/ai/anomalies/detect', {
+        branchId: effectiveAiBranchId,
+        type: 'ORDER_QTY',
+        value: 120,
+        baselineMean: 20,
+        baselineStd: 10,
+        referenceType: 'ORDER',
+        referenceId: `test-${Date.now()}`,
+      })
+      toast.success('Đã tạo anomaly test, đang tải lại AI insights')
+      await loadReports()
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Tạo anomaly test thất bại')
+    } finally {
+      setTestingAnomaly(false)
+    }
+  }
+
+  const handleReportChatSubmit = async () => {
+    const question = reportChatQuestion.trim()
+    if (!question) {
+      toast.error('Vui lòng nhập câu hỏi báo cáo')
+      return
+    }
+    setReportChatLoading(true)
+    try {
+      const { data } = await api.post('/ai/report-chat', {
+        branchId: effectiveAiBranchId,
+        userId: String(useAuthStore.getState().user?.id || ''),
+        role: currentUserRole || 'MANAGER',
+        question,
+      })
+      setReportChatResult((data || null) as ReportChatResponse | null)
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Không truy vấn được Report Chat')
+    } finally {
+      setReportChatLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-amber-100 bg-white/85 p-3 backdrop-blur sm:p-4">
@@ -447,9 +522,14 @@ export default function Reports() {
             {aiInsight.forecastSource ? ` · Forecast source: ${aiInsight.forecastSource}` : ''}
             {aiInsight.sentimentSource ? ` · Sentiment source: ${aiInsight.sentimentSource}` : ''}
           </p>
-          <Button size="sm" variant="secondary" onClick={() => void handleRebuildForecast()} loading={rebuildingForecast}>
-            Rebuild forecast
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => void handleRebuildForecast()} loading={rebuildingForecast}>
+              Rebuild forecast
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => void handleTestAnomaly()} loading={testingAnomaly}>
+              Test anomaly
+            </Button>
+          </div>
         </div>
         {!aiInsight.available && (
           <p className="text-sm text-amber-700">
@@ -457,7 +537,7 @@ export default function Reports() {
           </p>
         )}
         {aiInsight.available && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <div className="rounded-xl border border-sky-100 bg-sky-50/70 p-3">
               <p className="text-xs text-slate-600">Dự báo 7 ngày</p>
               <p className="text-lg font-semibold text-slate-900">
@@ -475,6 +555,19 @@ export default function Reports() {
               <p className="text-lg font-semibold text-slate-900">
                 {aiInsight.sentiment ? `${Math.round(aiInsight.sentiment.positive * 100)}%` : '-'}
               </p>
+            </div>
+            <div className="rounded-xl border border-rose-100 bg-rose-50/70 p-3">
+              <p className="text-xs text-slate-600">Top vấn đề tiêu cực</p>
+              {aiInsight.sentimentTopIssues.length === 0 && <p className="text-sm font-medium text-slate-700">Chưa có dữ liệu</p>}
+              {aiInsight.sentimentTopIssues.length > 0 && (
+                <div className="space-y-1">
+                  {aiInsight.sentimentTopIssues.map((issue) => (
+                    <p key={issue.issue} className="text-xs text-slate-800">
+                      {issue.issue}: <span className="font-semibold">{issue.count}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -636,6 +729,39 @@ export default function Reports() {
               ))}
             </tbody>
           </table>
+        </div>
+      </Card>
+
+      <Card title="Report Chat (AI)" subtitle="Hỏi đáp dữ liệu báo cáo bằng ngôn ngữ tự nhiên">
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Input
+              value={reportChatQuestion}
+              onChange={(e) => setReportChatQuestion(e.target.value)}
+              className="min-w-[260px] flex-1"
+              placeholder="Ví dụ: Doanh thu hôm nay là bao nhiêu?"
+            />
+            <Button onClick={() => void handleReportChatSubmit()} loading={reportChatLoading}>
+              Gửi câu hỏi
+            </Button>
+          </div>
+          <p className="text-xs text-slate-500">
+            Branch scope: <span className="font-medium text-slate-700">{effectiveAiBranchId}</span>
+          </p>
+          {!reportChatResult && <p className="text-sm text-slate-500">Chưa có kết quả truy vấn.</p>}
+          {reportChatResult && (
+            <div className="space-y-2 rounded-xl border border-amber-100 bg-white/90 p-3 text-sm">
+              <p><span className="font-semibold">Intent:</span> {reportChatResult.intent}</p>
+              <p><span className="font-semibold">Thời gian xử lý:</span> {reportChatResult.executionTimeMs} ms</p>
+              <p><span className="font-semibold">Số dòng dữ liệu:</span> {reportChatResult.rowCount}</p>
+              <p><span className="font-semibold">Trả lời:</span> {reportChatResult.answer}</p>
+              {reportChatResult.sql && (
+                <p className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                  <span className="font-semibold">SQL (ADMIN):</span> {reportChatResult.sql}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </Card>
 

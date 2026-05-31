@@ -5,14 +5,14 @@ import { SERVICE_ROUTES } from './interfaces/service-route.interface';
 import { Request, Response } from 'express';
 import { createProxyMiddleware, RequestHandler } from 'http-proxy-middleware';
 
-type StaffRole = 'ADMIN' | 'MANAGER' | 'WAITER' | 'BARISTA' | 'STAFF';
+type StaffRole = 'ADMIN' | 'MANAGER' | 'WAITER' | 'BARISTA' | 'STAFF' | 'CUSTOMER';
 
 @Controller()
 export class ProxyController {
   private logger = new Logger('ProxyController');
   private proxies = new Map<string, RequestHandler>();
   private inventoryCompatProxy: RequestHandler;
-  private readonly staffRoles = new Set<StaffRole>(['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
+  private readonly staffRoles = new Set<StaffRole>(['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF', 'CUSTOMER']);
   private readonly jwtSecretKey: Buffer;
 
   constructor(
@@ -131,6 +131,22 @@ export class ProxyController {
       path === '/api/users/login' ||
       path.startsWith('/api/users/customer/')
     ) {
+      return;
+    }
+    if (
+      path === '/api/auth/login' ||
+      path === '/api/auth/register' ||
+      path === '/api/auth/refresh' ||
+      path === '/api/auth/forgot-password' ||
+      path === '/api/auth/reset-password' ||
+      path === '/api/auth/otp/request' ||
+      path === '/api/auth/otp/verify' ||
+      path.startsWith('/api/auth/google/')
+    ) {
+      return;
+    }
+    if (path.startsWith('/api/customer/')) {
+      this.requireRoles(req, ['CUSTOMER']);
       return;
     }
 
@@ -454,6 +470,8 @@ export class ProxyController {
   private resolveRouteTarget(path: string): string {
     switch (path) {
       case '/api/users':
+      case '/api/auth':
+      case '/api/customer':
       case '/api/branches':
       case '/api/staff':
       case '/api/attendance':

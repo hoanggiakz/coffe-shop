@@ -278,6 +278,29 @@ function normalizeSelections(selections: CartSelections): CartSelections {
   }, {})
 }
 
+function sanitizeSelectionsForMenuItem(menuItem: MenuItem | undefined, selections: CartSelections): CartSelections {
+  if (!menuItem) return normalizeSelections(selections || {})
+  const next: CartSelections = {}
+  ;(menuItem.customizations || []).forEach((group) => {
+    const raw = selections?.[group.id]
+    if (group.type === 'single') {
+      const allowed = new Set((group.options || []).map((opt) => String(opt.value || '')))
+      const selected = String(raw || '').trim()
+      const fallback = String(group.options?.[0]?.value || '')
+      next[group.id] = allowed.has(selected) ? selected : fallback
+      return
+    }
+    if (group.type === 'multi') {
+      const allowed = new Set((group.options || []).map((opt) => String(opt.value || '')))
+      const selectedValues = Array.isArray(raw) ? raw.map((entry) => String(entry || '').trim()) : []
+      next[group.id] = selectedValues.filter((entry) => allowed.has(entry))
+      return
+    }
+    next[group.id] = String(raw || '')
+  })
+  return normalizeSelections(next)
+}
+
 function buildCartLineKey(menuItemId: string, selections: CartSelections, note?: string): string {
   return JSON.stringify({
     menuItemId: String(menuItemId || '').trim(),
@@ -578,7 +601,7 @@ export default function CustomerMenu() {
       rows.map((item: any) => ({
         ...item,
         id: item.menu_item_id || item.id,
-        branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || item.id,
+        branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || undefined,
         name: normalizeVietnameseText(item.name),
         description: normalizeVietnameseText(item.description),
         image: item.image || item.image_url || null,
@@ -596,7 +619,7 @@ export default function CustomerMenu() {
         (Array.isArray(category.items) ? category.items : []).map((item: any) => ({
           ...item,
           id: item.id || item.menu_item_id,
-          branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || item.id,
+          branchMenuItemId: item.branchMenuItemId || item.branch_menu_item_id || undefined,
           name: normalizeVietnameseText(item.name),
           description: normalizeVietnameseText(item.description),
           image: item.image || item.imageUrl || item.image_url || null,
@@ -909,12 +932,8 @@ export default function CustomerMenu() {
     }
     setRequestingOtp(true)
     try {
-      const { data } = await api.post('/users/customer/request-otp', { phone })
-      if (data?.otp) {
-        toast.success(`OTP sandbox: ${data.otp}`)
-      } else {
-        toast.success('OTP da duoc gui')
-      }
+      await api.post('/auth/otp/request', { phone, purpose: customerAuthTab })
+      toast.success('OTP da duoc gui (hieu luc 5 phut)')
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Khong gui duoc OTP')
     } finally {
@@ -928,8 +947,17 @@ export default function CustomerMenu() {
     try {
       let data: CustomerAuthResponse
       if (customerAuthMode === 'EMAIL') {
+        const passwordPattern = /^(?=.*[A-Z])(?=.*\d).{8,}$/
         if (customerAuthTab === 'REGISTER') {
-          const res = await api.post('/users/customer/register-email', {
+          if (!authName.trim()) {
+            toast.error('Vui long nhap ho ten')
+            return
+          }
+          if (!passwordPattern.test(authPassword)) {
+            toast.error('Mật khẩu tối thiểu 8 ký tự, có ít nhất 1 chữ hoa và 1 số')
+            return
+          }
+          const res = await api.post('/auth/register', {
             name: authName.trim(),
             email: authEmail.trim(),
             password: authPassword,
@@ -937,28 +965,21 @@ export default function CustomerMenu() {
           })
           data = res.data as CustomerAuthResponse
         } else {
-          const res = await api.post('/users/customer/login-email', {
+          const res = await api.post('/auth/login', {
             email: authEmail.trim(),
             password: authPassword,
           })
           data = res.data as CustomerAuthResponse
         }
       } else {
-        if (customerAuthTab === 'REGISTER') {
-          const res = await api.post('/users/customer/register-otp', {
-            name: authName.trim(),
-            phone: authPhone.trim(),
-            otp: authOtp.trim(),
-            email: authEmail.trim() || undefined,
-          })
-          data = res.data as CustomerAuthResponse
-        } else {
-          const res = await api.post('/users/customer/login-otp', {
-            phone: authPhone.trim(),
-            otp: authOtp.trim(),
-          })
-          data = res.data as CustomerAuthResponse
-        }
+        const res = await api.post('/auth/otp/verify', {
+          name: customerAuthTab === 'REGISTER' ? authName.trim() : undefined,
+          phone: authPhone.trim(),
+          otp: authOtp.trim(),
+          email: authEmail.trim() || undefined,
+          purpose: customerAuthTab,
+        })
+        data = res.data as CustomerAuthResponse
       }
 
       saveCustomerSession(data.accessToken, data.user)
@@ -968,7 +989,12 @@ export default function CustomerMenu() {
       toast.success('Đăng nhập thành công')
       await loadCustomerData(data.accessToken, data.user)
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Đăng nhập hoặc đăng ký thất bại')
+      const message = String(error.response?.data?.message || '')
+      if (message.includes('WEAK_PASSWORD')) {
+        toast.error('Mật khẩu yếu: tối thiểu 8 ký tự, gồm chữ hoa và số')
+      } else {
+        toast.error(message || 'Đăng nhập hoặc đăng ký thất bại')
+      }
     } finally {
       setAuthSubmitting(false)
     }
@@ -1157,10 +1183,36 @@ export default function CustomerMenu() {
     if (!cartLoaded) return
     if (!menuMap.size) return
     setCart((prev) => {
-      const next = Object.fromEntries(
-        Object.entries(prev).filter(([, line]) => menuMap.has(String(line?.menuItemId || ''))),
-      )
-      return Object.keys(next).length === Object.keys(prev).length ? prev : next
+      const rebuilt: Record<string, CartItem> = {}
+      Object.values(prev).forEach((line) => {
+        const menuItemId = String(line?.menuItemId || '').trim()
+        const menuItem = menuMap.get(menuItemId)
+        if (!menuItem) return
+        const sanitizedSelections = sanitizeSelectionsForMenuItem(menuItem, line.selections || {})
+        const normalizedNote = String(line.note || '')
+        const lineKey = buildCartLineKey(menuItemId, sanitizedSelections, normalizedNote)
+        const existing = rebuilt[lineKey]
+        rebuilt[lineKey] = {
+          branchMenuItemId: String(menuItem.branchMenuItemId || line.branchMenuItemId || ''),
+          menuItemId,
+          quantity: Number(existing?.quantity || 0) + Math.max(0, Number(line.quantity || 0)),
+          note: normalizedNote,
+          selections: sanitizedSelections,
+        }
+      })
+      return JSON.stringify(rebuilt) === JSON.stringify(prev) ? prev : rebuilt
+    })
+    setCartDrafts((prev) => {
+      const next: Record<string, CartDraft> = {}
+      Object.entries(prev).forEach(([menuItemId, draft]) => {
+        const menuItem = menuMap.get(String(menuItemId || '').trim())
+        if (!menuItem) return
+        next[menuItemId] = {
+          note: String(draft?.note || ''),
+          selections: sanitizeSelectionsForMenuItem(menuItem, draft?.selections || {}),
+        }
+      })
+      return JSON.stringify(next) === JSON.stringify(prev) ? prev : next
     })
   }, [cartLoaded, menuMap])
   const recommendationItems = useMemo(
@@ -1194,11 +1246,12 @@ export default function CustomerMenu() {
     menuItemId: string,
     sourceDrafts: Record<string, CartDraft> = cartDrafts,
   ): CartDraft => {
+    const menuItem = menuMap.get(menuItemId)
     const existing = sourceDrafts[menuItemId]
     if (existing) {
       return {
         note: String(existing.note || ''),
-        selections: normalizeSelections(existing.selections || {}),
+        selections: sanitizeSelectionsForMenuItem(menuItem, existing.selections || {}),
       }
     }
 
@@ -2832,16 +2885,21 @@ export default function CustomerMenu() {
                 onClick={() => setCustomerAuthMode('EMAIL')}
                 className={`rounded-xl px-3 py-1.5 text-xs ${customerAuthMode === 'EMAIL' ? 'bg-sky-100 text-sky-700' : 'border border-sky-200'}`}
               >
-                Email
+                Email + Mật khẩu
               </button>
               <button
                 type="button"
                 onClick={() => setCustomerAuthMode('OTP')}
                 className={`rounded-xl px-3 py-1.5 text-xs ${customerAuthMode === 'OTP' ? 'bg-sky-100 text-sky-700' : 'border border-sky-200'}`}
               >
-                So dien thoai OTP
+                SĐT + OTP
               </button>
             </div>
+            <p className="mt-2 text-xs text-slate-500">
+              {customerAuthMode === 'EMAIL'
+                ? 'Chế độ Email không cần OTP. Nếu muốn đăng ký bằng OTP, chọn "SĐT + OTP".'
+                : 'Chế độ OTP yêu cầu nhập số điện thoại, lấy OTP và nhập mã OTP 6 số.'}
+            </p>
 
             <form onSubmit={submitCustomerAuth} className="mt-4 space-y-2">
               {customerAuthTab === 'REGISTER' && (
@@ -2849,7 +2907,7 @@ export default function CustomerMenu() {
                   value={authName}
                   onChange={(e) => setAuthName(e.target.value)}
                   className={fieldClass}
-                  placeholder="Ho ten"
+                  placeholder="Họ và tên (ví dụ: Nguyễn Văn A)"
                   required
                 />
               )}
@@ -2860,7 +2918,7 @@ export default function CustomerMenu() {
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
                     className={fieldClass}
-                    placeholder="Email"
+                    placeholder="Email đăng ký (ví dụ: tenban@gmail.com)"
                     type="email"
                     required
                   />
@@ -2869,7 +2927,7 @@ export default function CustomerMenu() {
                       value={authPassword}
                       onChange={(e) => setAuthPassword(e.target.value)}
                       className={fieldClass}
-                      placeholder="Mat khau"
+                      placeholder="Mật khẩu: >=8 ký tự, có chữ hoa và số"
                       type="password"
                       required
                     />
@@ -2879,7 +2937,7 @@ export default function CustomerMenu() {
                       value={authPhone}
                       onChange={(e) => setAuthPhone(e.target.value)}
                       className={fieldClass}
-                      placeholder="So dien thoai (tuy chon)"
+                      placeholder="Số điện thoại (tùy chọn, ví dụ: 09xxxxxxxx)"
                     />
                   )}
                 </>
@@ -2890,7 +2948,7 @@ export default function CustomerMenu() {
                       value={authPhone}
                       onChange={(e) => setAuthPhone(e.target.value)}
                       className={`${fieldClass} flex-1`}
-                      placeholder="So dien thoai"
+                      placeholder="Số điện thoại nhận OTP (ví dụ: 09xxxxxxxx)"
                       required
                     />
                     <button
@@ -2906,7 +2964,7 @@ export default function CustomerMenu() {
                     value={authOtp}
                     onChange={(e) => setAuthOtp(e.target.value)}
                     className={fieldClass}
-                    placeholder="Ma OTP"
+                    placeholder="Mã OTP 6 số"
                     required
                   />
                   {customerAuthTab === 'REGISTER' && (
@@ -2914,7 +2972,7 @@ export default function CustomerMenu() {
                       value={authEmail}
                       onChange={(e) => setAuthEmail(e.target.value)}
                       className={fieldClass}
-                      placeholder="Email (tuy chon)"
+                      placeholder="Email liên kết (tùy chọn)"
                       type="email"
                     />
                   )}

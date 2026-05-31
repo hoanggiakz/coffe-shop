@@ -11,17 +11,28 @@ import com.coffeeshop.userservice.dto.BranchResponse;
 import com.coffeeshop.userservice.dto.BranchUpdateRequest;
 import com.coffeeshop.userservice.dto.CustomerEmailLoginRequest;
 import com.coffeeshop.userservice.dto.CustomerEmailRegisterRequest;
+import com.coffeeshop.userservice.dto.CustomerAuthResponse;
 import com.coffeeshop.userservice.dto.CustomerOffersResponse;
 import com.coffeeshop.userservice.dto.CustomerOtpLoginRequest;
 import com.coffeeshop.userservice.dto.CustomerOtpRegisterRequest;
+import com.coffeeshop.userservice.dto.CustomerProfileResponse;
+import com.coffeeshop.userservice.dto.ForgotPasswordRequest;
 import com.coffeeshop.userservice.dto.LoginRequest;
+import com.coffeeshop.userservice.dto.LoyaltyRedeemRequest;
+import com.coffeeshop.userservice.dto.LoyaltyRedeemResponse;
+import com.coffeeshop.userservice.dto.LoyaltyTransactionItemResponse;
+import com.coffeeshop.userservice.dto.LoyaltyTransactionListResponse;
 import com.coffeeshop.userservice.dto.OtpRequest;
 import com.coffeeshop.userservice.dto.OtpResponse;
+import com.coffeeshop.userservice.dto.OtpVerifyRequest;
 import com.coffeeshop.userservice.dto.PayrollItemResponse;
 import com.coffeeshop.userservice.dto.PayrollSummaryResponse;
 import com.coffeeshop.userservice.dto.PointsAccrualRequest;
 import com.coffeeshop.userservice.dto.PointsAccrualResponse;
+import com.coffeeshop.userservice.dto.RefreshTokenRequest;
+import com.coffeeshop.userservice.dto.RefreshTokenResponse;
 import com.coffeeshop.userservice.dto.RegisterRequest;
+import com.coffeeshop.userservice.dto.ResetPasswordRequest;
 import com.coffeeshop.userservice.dto.ShiftCoworkerResponse;
 import com.coffeeshop.userservice.dto.ShiftOverviewResponse;
 import com.coffeeshop.userservice.dto.StaffCreateRequest;
@@ -35,11 +46,13 @@ import com.coffeeshop.userservice.dto.WeekScheduleResponse;
 import com.coffeeshop.userservice.dto.ChangePasswordRequest;
 import com.coffeeshop.userservice.entity.AttendanceRecord;
 import com.coffeeshop.userservice.entity.Branch;
+import com.coffeeshop.userservice.entity.LoyaltyTransaction;
 import com.coffeeshop.userservice.entity.ShiftType;
 import com.coffeeshop.userservice.entity.StaffShift;
 import com.coffeeshop.userservice.entity.User;
 import com.coffeeshop.userservice.repository.AttendanceRecordRepository;
 import com.coffeeshop.userservice.repository.BranchRepository;
+import com.coffeeshop.userservice.repository.LoyaltyTransactionRepository;
 import com.coffeeshop.userservice.repository.StaffShiftRepository;
 import com.coffeeshop.userservice.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -72,12 +85,16 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+import org.springframework.data.domain.PageRequest;
 
 @Service
 @RequiredArgsConstructor
 public class UserService {
 
     private static final long OTP_EXPIRES_SECONDS = 300L;
+    private static final long ACCESS_TOKEN_EXPIRES_SECONDS = 900L;
+    private static final long REFRESH_TOKEN_EXPIRES_MILLIS = 7L * 24L * 60L * 60L * 1000L;
+    private static final long RESET_TOKEN_EXPIRES_MILLIS = 15L * 60L * 1000L;
     private static final Set<User.Role> MANAGER_ROLES = Set.of(User.Role.ADMIN, User.Role.MANAGER);
     private static final Set<User.Role> BRANCH_MANAGER_ROLES = Set.of(User.Role.ADMIN, User.Role.MANAGER);
     private static final List<User.Role> STAFF_ROLES = List.of(
@@ -95,6 +112,7 @@ public class UserService {
     private final BranchRepository branchRepository;
     private final StaffShiftRepository staffShiftRepository;
     private final AttendanceRecordRepository attendanceRecordRepository;
+    private final LoyaltyTransactionRepository loyaltyTransactionRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final HttpClient httpClient = HttpClient.newHttpClient();
@@ -111,7 +129,16 @@ public class UserService {
 
     @Value("${app.internal-service-token:dev-internal-token}")
     private String internalServiceToken;
+    @Value("${app.google-oauth-client-id:}")
+    private String googleOauthClientId;
+    @Value("${app.google-oauth-client-secret:}")
+    private String googleOauthClientSecret;
+    @Value("${app.google-oauth-callback-url:https://app.httpscoffee-demo.buzz/api/auth/google/callback}")
+    private String googleOauthCallbackUrl;
     private final Map<String, OtpEntry> otpStore = new ConcurrentHashMap<>();
+    private final Map<String, RefreshEntry> refreshTokenStore = new ConcurrentHashMap<>();
+    private final Map<String, ResetPasswordEntry> resetPasswordStore = new ConcurrentHashMap<>();
+    private final Map<String, GoogleOauthStateEntry> googleOauthStateStore = new ConcurrentHashMap<>();
 
     public StaffResponse register(String token, RegisterRequest req) {
         User actor = requireManagerOrAdmin(token);
@@ -216,11 +243,44 @@ public class UserService {
         String otp = String.format("%06d", ThreadLocalRandom.current().nextInt(0, 1_000_000));
         long expiresAt = System.currentTimeMillis() + (OTP_EXPIRES_SECONDS * 1000);
         otpStore.put(phone, new OtpEntry(otp, expiresAt));
-        return new OtpResponse("OTP generated (sandbox)", otp, OTP_EXPIRES_SECONDS);
+        String maskedPhone = phone.length() >= 7
+                ? phone.substring(0, 3) + "****" + phone.substring(phone.length() - 3)
+                : phone;
+        return new OtpResponse("OTP da duoc gui", maskedPhone, OTP_EXPIRES_SECONDS);
+    }
+
+    public CustomerAuthResponse verifyCustomerOtp(OtpVerifyRequest req) {
+        String phone = normalizeRequiredPhone(req.getPhone());
+        verifyAndConsumeOtp(phone, req.getOtp());
+        User user = userRepository.findByPhoneAndRole(phone, User.Role.CUSTOMER).orElse(null);
+        boolean isNewUser = false;
+        if (user == null) {
+            String email = resolveOtpCustomerEmail(phone, req.getEmail());
+            if (userRepository.existsByEmail(email)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Email da ton tai");
+            }
+            user = User.builder()
+                    .email(email)
+                    .password(passwordEncoder.encode("otp-" + UUID.randomUUID()))
+                    .name(normalizeNullableText(req.getName()) != null ? req.getName().trim() : "Khach hang")
+                    .phone(phone)
+                    .role(User.Role.CUSTOMER)
+                    .memberTier(User.MemberTier.STANDARD)
+                    .loyaltyPoints(0)
+                    .totalSpent(0L)
+                    .isActive(true)
+                    .build();
+            user = userRepository.save(user);
+            isNewUser = true;
+        }
+        String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
+        String refreshToken = issueRefreshToken(user.getId());
+        return new CustomerAuthResponse(accessToken, refreshToken, ACCESS_TOKEN_EXPIRES_SECONDS, UserProfile.from(user), isNewUser);
     }
 
     public AuthResponse registerCustomerByEmail(CustomerEmailRegisterRequest req) {
         String email = normalizeEmail(req.getEmail());
+        validateStrongPassword(req.getPassword());
         if (userRepository.existsByEmail(email)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email da ton tai");
         }
@@ -243,7 +303,7 @@ public class UserService {
 
         user = userRepository.save(user);
         String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
-        return new AuthResponse(token, UserProfile.from(user));
+        return new AuthResponse(token, issueRefreshToken(user.getId()), ACCESS_TOKEN_EXPIRES_SECONDS, UserProfile.from(user));
     }
 
     public AuthResponse loginCustomerByEmail(CustomerEmailLoginRequest req) {
@@ -256,7 +316,7 @@ public class UserService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Tai khoan da bi vo hieu hoa");
         }
         String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
-        return new AuthResponse(token, UserProfile.from(user));
+        return new AuthResponse(token, issueRefreshToken(user.getId()), ACCESS_TOKEN_EXPIRES_SECONDS, UserProfile.from(user));
     }
 
     public AuthResponse registerCustomerByOtp(CustomerOtpRegisterRequest req) {
@@ -284,7 +344,7 @@ public class UserService {
 
         user = userRepository.save(user);
         String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
-        return new AuthResponse(token, UserProfile.from(user));
+        return new AuthResponse(token, issueRefreshToken(user.getId()), ACCESS_TOKEN_EXPIRES_SECONDS, UserProfile.from(user));
     }
 
     public AuthResponse loginCustomerByOtp(CustomerOtpLoginRequest req) {
@@ -296,12 +356,30 @@ public class UserService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Tai khoan da bi vo hieu hoa");
         }
         String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
-        return new AuthResponse(token, UserProfile.from(user));
+        return new AuthResponse(token, issueRefreshToken(user.getId()), ACCESS_TOKEN_EXPIRES_SECONDS, UserProfile.from(user));
     }
 
     public UserProfile getCustomerProfile(String token) {
         User user = requireCustomerFromToken(token);
         return UserProfile.from(user);
+    }
+
+    public CustomerProfileResponse getCustomerProfileV2(String token) {
+        User user = requireCustomerFromToken(token);
+        return CustomerProfileResponse.from(user);
+    }
+
+    public CustomerProfileResponse updateCustomerProfileV2(String token, UpdateProfileRequest req) {
+        User customer = requireCustomerFromToken(token);
+        UserProfile updated = updateProfile(customer.getId(), req);
+        User reloaded = userRepository.findById(updated.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));
+        return CustomerProfileResponse.from(reloaded);
+    }
+
+    public void changeCustomerPassword(String token, ChangePasswordRequest req) {
+        User customer = requireCustomerFromToken(token);
+        changePassword(customer.getId(), req);
     }
 
     public CustomerOffersResponse getCustomerOffers(String token) {
@@ -340,7 +418,231 @@ public class UserService {
         user.setLoyaltyPoints(newTotalPoints);
         user.setMemberTier(resolveTier(newTotalSpent, newTotalPoints));
         user = userRepository.save(user);
+        loyaltyTransactionRepository.save(LoyaltyTransaction.builder()
+                .customerId(user.getId())
+                .orderId(req.getOrderId())
+                .type(LoyaltyTransaction.Type.EARN)
+                .points(pointsEarned)
+                .balanceAfter(user.getLoyaltyPoints())
+                .description("Cong diem tu don " + req.getOrderId())
+                .build());
         return new PointsAccrualResponse(user.getId(), req.getOrderId(), pointsEarned, user.getLoyaltyPoints(), user.getMemberTier().name());
+    }
+
+    public RefreshTokenResponse refreshCustomerToken(RefreshTokenRequest req) {
+        String token = String.valueOf(req.getRefreshToken() == null ? "" : req.getRefreshToken()).trim();
+        RefreshEntry entry = refreshTokenStore.get(token);
+        if (entry == null || System.currentTimeMillis() > entry.expiresAtMillis()) {
+            refreshTokenStore.remove(token);
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token khong hop le hoac het han");
+        }
+        User user = userRepository.findById(entry.userId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Nguoi dung khong ton tai"));
+        if (user.getRole() != User.Role.CUSTOMER) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chi danh cho tai khoan khach hang");
+        }
+        refreshTokenStore.remove(token);
+        String newRefreshToken = issueRefreshToken(user.getId());
+        String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
+        return new RefreshTokenResponse(accessToken, newRefreshToken, ACCESS_TOKEN_EXPIRES_SECONDS);
+    }
+
+    public Map<String, Object> forgotPassword(ForgotPasswordRequest req) {
+        String email = normalizeEmail(req.getEmail());
+        User user = userRepository.findByEmailAndRole(email, User.Role.CUSTOMER).orElse(null);
+        if (user != null) {
+            String token = UUID.randomUUID().toString();
+            resetPasswordStore.put(token, new ResetPasswordEntry(user.getId(), System.currentTimeMillis() + RESET_TOKEN_EXPIRES_MILLIS));
+        }
+        return Map.of("message", "Link dat lai mat khau da gui ve email (sandbox)");
+    }
+
+    public Map<String, Object> resetPassword(ResetPasswordRequest req) {
+        String token = String.valueOf(req.getToken() == null ? "" : req.getToken()).trim();
+        ResetPasswordEntry entry = resetPasswordStore.get(token);
+        if (entry == null || System.currentTimeMillis() > entry.expiresAtMillis()) {
+            resetPasswordStore.remove(token);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token dat lai mat khau khong hop le hoac het han");
+        }
+        User user = userRepository.findById(entry.userId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));
+        validateStrongPassword(req.getNewPassword());
+        user.setPassword(passwordEncoder.encode(req.getNewPassword()));
+        userRepository.save(user);
+        resetPasswordStore.remove(token);
+        return Map.of("success", true, "message", "Mat khau da duoc cap nhat");
+    }
+
+    public Map<String, Object> getCustomerOrders(String token, Integer page, Integer limit, String status, String branchId) {
+        User user = requireCustomerFromToken(token);
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeLimit = limit == null || limit < 1 ? 20 : Math.min(limit, 100);
+        StringBuilder url = new StringBuilder(orderServiceUrl + "/api/orders/history?customerId=" + encode(user.getId()) + "&limit=" + safeLimit);
+        JsonNode ordersNode = callExternalJson(url.toString());
+        List<Map<String, Object>> all = new ArrayList<>();
+        if (ordersNode.isArray()) {
+            for (JsonNode node : ordersNode) {
+                String nodeStatus = String.valueOf(node.path("status").asText(""));
+                String nodeBranchId = String.valueOf(node.path("branchId").asText(""));
+                if (status != null && !status.isBlank() && !status.equalsIgnoreCase("ALL") && !nodeStatus.equalsIgnoreCase(status)) {
+                    continue;
+                }
+                if (branchId != null && !branchId.isBlank() && !Objects.equals(branchId.trim(), nodeBranchId)) {
+                    continue;
+                }
+                all.add(objectMapper.convertValue(node, Map.class));
+            }
+        }
+        int fromIndex = Math.min((safePage - 1) * safeLimit, all.size());
+        int toIndex = Math.min(fromIndex + safeLimit, all.size());
+        List<Map<String, Object>> pageData = all.subList(fromIndex, toIndex);
+        return Map.of(
+                "data", pageData,
+                "meta", Map.of(
+                        "total", all.size(),
+                        "page", safePage,
+                        "limit", safeLimit,
+                        "totalPages", Math.max(1, (int) Math.ceil(all.size() / (double) safeLimit))
+                )
+        );
+    }
+
+    public LoyaltyTransactionListResponse getLoyaltyTransactions(String token, Integer page, Integer limit) {
+        User user = requireCustomerFromToken(token);
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeLimit = limit == null || limit < 1 ? 20 : Math.min(limit, 100);
+        var resultPage = loyaltyTransactionRepository.findByCustomerIdOrderByCreatedAtDesc(
+                user.getId(),
+                PageRequest.of(safePage - 1, safeLimit)
+        );
+        List<LoyaltyTransactionItemResponse> data = resultPage.getContent().stream()
+                .map(LoyaltyTransactionItemResponse::from)
+                .toList();
+        return new LoyaltyTransactionListResponse(
+                user.getLoyaltyPoints() == null ? 0 : user.getLoyaltyPoints(),
+                data,
+                Map.of(
+                        "total", resultPage.getTotalElements(),
+                        "page", safePage,
+                        "limit", safeLimit,
+                        "totalPages", resultPage.getTotalPages()
+                )
+        );
+    }
+
+    public LoyaltyRedeemResponse redeemLoyaltyPoints(String token, LoyaltyRedeemRequest req) {
+        User user = requireCustomerFromToken(token);
+        int points = req.getPointsToRedeem() == null ? 0 : req.getPointsToRedeem();
+        if (points <= 0 || points % 100 != 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pointsToRedeem phai la boi so cua 100");
+        }
+        int currentPoints = user.getLoyaltyPoints() == null ? 0 : user.getLoyaltyPoints();
+        if (points > currentPoints) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Khong du diem de doi");
+        }
+        int remaining = currentPoints - points;
+        user.setLoyaltyPoints(remaining);
+        userRepository.save(user);
+        loyaltyTransactionRepository.save(LoyaltyTransaction.builder()
+                .customerId(user.getId())
+                .orderId(req.getOrderId())
+                .type(LoyaltyTransaction.Type.REDEEM)
+                .points(-points)
+                .balanceAfter(remaining)
+                .description("Doi diem cho don " + req.getOrderId())
+                .build());
+        long discountAmount = points * 100L;
+        return new LoyaltyRedeemResponse(true, discountAmount, points, remaining, "Da ap dung giam gia tu loyalty points");
+    }
+
+    public Map<String, Object> startGoogleOauth(String redirectUri) {
+        ensureGoogleOauthConfigured();
+        String state = UUID.randomUUID().toString();
+        String callback = normalizeNullableText(redirectUri);
+        googleOauthStateStore.put(state, new GoogleOauthStateEntry(callback, System.currentTimeMillis() + (10L * 60L * 1000L)));
+        String authUrl = "https://accounts.google.com/o/oauth2/v2/auth"
+                + "?client_id=" + encode(googleOauthClientId)
+                + "&redirect_uri=" + encode(googleOauthCallbackUrl)
+                + "&response_type=code"
+                + "&scope=" + encode("openid email profile")
+                + "&access_type=offline"
+                + "&prompt=consent"
+                + "&state=" + encode(state);
+        return Map.of(
+                "authUrl", authUrl,
+                "state", state,
+                "callbackUrl", googleOauthCallbackUrl
+        );
+    }
+
+    public CustomerAuthResponse handleGoogleOauthCallback(String code, String state) {
+        ensureGoogleOauthConfigured();
+        String normalizedCode = String.valueOf(code == null ? "" : code).trim();
+        String normalizedState = String.valueOf(state == null ? "" : state).trim();
+        if (normalizedCode.isBlank() || normalizedState.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Thieu code hoac state");
+        }
+        GoogleOauthStateEntry stateEntry = googleOauthStateStore.get(normalizedState);
+        if (stateEntry == null || System.currentTimeMillis() > stateEntry.expiresAtMillis()) {
+            googleOauthStateStore.remove(normalizedState);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "State khong hop le hoac het han");
+        }
+        googleOauthStateStore.remove(normalizedState);
+
+        JsonNode tokenPayload = exchangeGoogleCodeForToken(normalizedCode);
+        String accessToken = String.valueOf(tokenPayload.path("access_token").asText("")).trim();
+        if (accessToken.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong lay duoc access token tu Google");
+        }
+
+        JsonNode userInfo = fetchGoogleUserInfo(accessToken);
+        String email = normalizeEmail(userInfo.path("email").asText(""));
+        if (email == null || email.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Google khong tra ve email hop le");
+        }
+
+        User existingAny = userRepository.findByEmail(email).orElse(null);
+        if (existingAny != null && existingAny.getRole() != User.Role.CUSTOMER) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email da duoc su dung boi tai khoan nhan vien");
+        }
+
+        boolean isNewUser = false;
+        User user = existingAny;
+        if (user == null) {
+            user = User.builder()
+                    .email(email)
+                    .password(passwordEncoder.encode("google-" + UUID.randomUUID()))
+                    .name(normalizeNullableText(userInfo.path("name").asText("")) != null ? userInfo.path("name").asText("").trim() : "Khach hang")
+                    .phone(null)
+                    .role(User.Role.CUSTOMER)
+                    .memberTier(User.MemberTier.STANDARD)
+                    .loyaltyPoints(0)
+                    .totalSpent(0L)
+                    .isActive(true)
+                    .avatarUrl(normalizeNullableText(userInfo.path("picture").asText("")))
+                    .build();
+            user = userRepository.save(user);
+            isNewUser = true;
+        } else {
+            boolean changed = false;
+            String picture = normalizeNullableText(userInfo.path("picture").asText(""));
+            String name = normalizeNullableText(userInfo.path("name").asText(""));
+            if ((user.getAvatarUrl() == null || user.getAvatarUrl().isBlank()) && picture != null) {
+                user.setAvatarUrl(picture);
+                changed = true;
+            }
+            if ((user.getName() == null || user.getName().isBlank()) && name != null) {
+                user.setName(name);
+                changed = true;
+            }
+            if (changed) {
+                user = userRepository.save(user);
+            }
+        }
+
+        String appAccessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
+        String appRefreshToken = issueRefreshToken(user.getId());
+        return new CustomerAuthResponse(appAccessToken, appRefreshToken, ACCESS_TOKEN_EXPIRES_SECONDS, UserProfile.from(user), isNewUser);
     }
 
     // M-24/M-25: Quan ly chi nhanh
@@ -1470,5 +1772,96 @@ public class UserService {
         otpStore.remove(phone);
     }
 
+    private String issueRefreshToken(String userId) {
+        String token = UUID.randomUUID().toString() + "." + UUID.randomUUID();
+        refreshTokenStore.put(token, new RefreshEntry(userId, System.currentTimeMillis() + REFRESH_TOKEN_EXPIRES_MILLIS));
+        return token;
+    }
+
+    private void validateStrongPassword(String password) {
+        String value = String.valueOf(password == null ? "" : password);
+        boolean valid = value.length() >= 8
+                && value.chars().anyMatch(Character::isUpperCase)
+                && value.chars().anyMatch(Character::isDigit);
+        if (!valid) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "WEAK_PASSWORD");
+        }
+    }
+
+    private JsonNode callExternalJson(String url) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + internalServiceToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong lay duoc du lieu tu service lien quan");
+            }
+            return objectMapper.readTree(response.body());
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong ket noi duoc service lien quan");
+        }
+    }
+
+    private JsonNode exchangeGoogleCodeForToken(String code) {
+        try {
+            String body = "code=" + encode(code)
+                    + "&client_id=" + encode(googleOauthClientId)
+                    + "&client_secret=" + encode(googleOauthClientSecret)
+                    + "&redirect_uri=" + encode(googleOauthCallbackUrl)
+                    + "&grant_type=authorization_code";
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://oauth2.googleapis.com/token"))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Google token exchange that bai");
+            }
+            return objectMapper.readTree(response.body());
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong ket noi duoc Google token endpoint");
+        }
+    }
+
+    private JsonNode fetchGoogleUserInfo(String googleAccessToken) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://www.googleapis.com/oauth2/v3/userinfo"))
+                    .header("Authorization", "Bearer " + googleAccessToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Google userinfo that bai");
+            }
+            return objectMapper.readTree(response.body());
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong ket noi duoc Google userinfo endpoint");
+        }
+    }
+
+    private void ensureGoogleOauthConfigured() {
+        if (normalizeNullableText(googleOauthClientId) == null || normalizeNullableText(googleOauthClientSecret) == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Google OAuth chua duoc cau hinh");
+        }
+    }
+
+    private String encode(String value) {
+        return URLEncoder.encode(String.valueOf(value == null ? "" : value), StandardCharsets.UTF_8);
+    }
+
     private record OtpEntry(String otp, long expiresAtMillis) {}
+    private record RefreshEntry(String userId, long expiresAtMillis) {}
+    private record ResetPasswordEntry(String userId, long expiresAtMillis) {}
+    private record GoogleOauthStateEntry(String redirectUri, long expiresAtMillis) {}
 }
