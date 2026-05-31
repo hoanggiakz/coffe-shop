@@ -569,14 +569,30 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     return Array.from(matches);
   }
 
+  private normalizeTransferMatchText(raw: string) {
+    return String(raw || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+  }
+
+  private matchesTransferContent(rawText: string, transferContent?: string | null) {
+    const transfer = String(transferContent || '').trim();
+    if (!transfer) return false;
+    const normalizedText = this.normalizeTransferMatchText(rawText);
+    const normalizedTransfer = this.normalizeTransferMatchText(transfer);
+    return normalizedTransfer.length > 0 && normalizedText.includes(normalizedTransfer);
+  }
+
   private async resolvePaymentFromSepayPayload(payload: Record<string, any>) {
     const code = String(payload.code || payload.payment_code || '').trim();
     const content = String(payload.content || '').trim();
+    const description = String(payload.description || '').trim();
     const transactionId = String(payload.id || payload.transaction_id || '').trim();
+    const mergedText = [code, content, description].filter(Boolean).join(' ');
 
     const orderHints = new Set<string>();
     if (code) orderHints.add(code);
-    for (const hint of this.extractOrderHintsFromText(content)) {
+    for (const hint of this.extractOrderHintsFromText(mergedText)) {
       orderHints.add(hint);
     }
 
@@ -599,7 +615,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         status: { in: [PaymentStatus.WAITING_TRANSFER, PaymentStatus.PENDING] },
       },
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      take: 300,
     });
 
     const normalizedContent = content.toLowerCase();
@@ -607,8 +623,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       const transfer = String(item.transferContent || '').trim().toLowerCase();
       return transfer && normalizedContent.includes(transfer);
     });
+    if (byTransferContent) return byTransferContent;
 
-    return byTransferContent || null;
+    const byFuzzyTransferContent = recentPending.find((item) => this.matchesTransferContent(mergedText, item.transferContent));
+    return byFuzzyTransferContent || null;
   }
 
   private normalizeSepayWebhookStatus(payload: Record<string, any>) {
