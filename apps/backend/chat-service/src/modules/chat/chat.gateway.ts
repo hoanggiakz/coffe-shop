@@ -83,6 +83,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       client.emit('error', { message: 'Missing or invalid staff token' });
       return;
     }
+    if (!['ADMIN', 'MANAGER', 'WAITER'].includes(String(staffIdentity.role || '').toUpperCase())) {
+      client.emit('error', { message: 'Forbidden' });
+      return;
+    }
     client.join('staff:global');
     const branchId = staffIdentity.branchId;
     if (branchId) {

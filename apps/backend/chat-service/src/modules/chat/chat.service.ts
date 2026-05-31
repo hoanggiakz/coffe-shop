@@ -46,6 +46,13 @@ export class ChatService {
     }
   }
 
+  private enforceStaffChatRole(actor: ActorContext) {
+    const actorRole = String(actor.role || '').toUpperCase();
+    if (!['ADMIN', 'MANAGER', 'WAITER'].includes(actorRole)) {
+      throw new ForbiddenException('Không có quyền truy cập module chat');
+    }
+  }
+
   async getOrCreateOpenSession(dto: CreateSessionDto) {
     let session = await this.prisma.chatSession.findFirst({
       where: {
@@ -84,6 +91,7 @@ export class ChatService {
   }
 
   async listSessions(branchId: string, status?: string, page = 1, limit = 20, actor: ActorContext = {}) {
+    this.enforceStaffChatRole(actor);
     this.enforceBranchAccess(actor, branchId);
     const where = {
       branchId,
@@ -131,6 +139,7 @@ export class ChatService {
       throw new NotFoundException('Không tìm thấy phiên chat');
     }
 
+    this.enforceStaffChatRole(actor);
     this.enforceBranchAccess(actor, session.branchId);
 
     const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
@@ -178,6 +187,7 @@ export class ChatService {
       throw new NotFoundException('Không tìm thấy phiên chat');
     }
 
+    this.enforceStaffChatRole(actor);
     this.enforceBranchAccess(actor, session.branchId);
 
     const result = await this.prisma.chatMessage.updateMany({
@@ -198,6 +208,7 @@ export class ChatService {
       throw new NotFoundException('Không tìm thấy phiên chat');
     }
 
+    this.enforceStaffChatRole(actor);
     this.enforceBranchAccess(actor, session.branchId);
 
     const closed = await this.prisma.chatSession.update({
@@ -226,7 +237,7 @@ export class ChatService {
     const actorUserId = String(actor.userId || '').trim();
     const branchId = String(requestedBranchId || '').trim() || actorBranchId;
 
-    if (!['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF'].includes(role)) {
+    if (!['ADMIN', 'MANAGER', 'WAITER', 'STAFF'].includes(role)) {
       throw new ForbiddenException('Insufficient permissions');
     }
 
@@ -312,7 +323,7 @@ export class ChatService {
       ...(hasReadFilter ? { isRead } : {}),
     };
 
-    if ((scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') && scope.userId) {
+    if ((scope.role === 'WAITER' || scope.role === 'STAFF') && scope.userId) {
       where.OR = [{ userId: scope.userId }, { userId: null }];
     }
 
@@ -356,7 +367,7 @@ export class ChatService {
     }
     const scope = this.resolveNotificationScope(actor, existing.branchId);
 
-    if ((scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') && existing.userId && existing.userId !== scope.userId) {
+    if ((scope.role === 'WAITER' || scope.role === 'STAFF') && existing.userId && existing.userId !== scope.userId) {
       throw new ForbiddenException('Khong co quyen cap nhat thong bao nay');
     }
 
@@ -374,7 +385,7 @@ export class ChatService {
       isRead: false,
     };
 
-    if (scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') {
+    if (scope.role === 'WAITER' || scope.role === 'STAFF') {
       where.OR = [{ userId: scope.userId || '__none__' }, { userId: null }];
     }
 
@@ -396,7 +407,7 @@ export class ChatService {
       ...(createdAfter && !Number.isNaN(createdAfter.getTime()) ? { createdAt: { gt: createdAfter } } : {}),
     };
 
-    if ((scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') && scope.userId) {
+    if ((scope.role === 'WAITER' || scope.role === 'STAFF') && scope.userId) {
       where.OR = [{ userId: scope.userId }, { userId: null }];
     }
 
