@@ -139,6 +139,12 @@ class ReportChatPayload(BaseModel):
     question: str
 
 
+class RetentionRunPayload(BaseModel):
+    salesForecastDays: int = 180
+    anomalyDays: int = 365
+    chatbotLogDays: int = 90
+
+
 ANOMALIES: list[dict[str, Any]] = [
     {
         "id": "anomaly-seed-1",
@@ -780,6 +786,98 @@ def load_anomalies_from_db(branch_id: str, severity: str | None) -> list[dict[st
         return []
 
 
+def run_data_quality_checks(branch_id: str | None = None) -> dict[str, Any]:
+    if not REPORT_DATABASE_URL:
+        return {
+            "status": "degraded",
+            "source": "fallback",
+            "checks": [
+                {"name": "database_configured", "ok": False, "detail": "REPORT_DATABASE_URL is not configured"},
+            ],
+        }
+
+    checks: list[dict[str, Any]] = []
+    scoped_branch = str(branch_id or "").strip()
+    where_branch = 'WHERE "branchId" = %s' if scoped_branch else ""
+    params = [scoped_branch] if scoped_branch else []
+
+    try:
+        total_forecast = execute_sql(
+            f'SELECT COUNT(*)::int AS count FROM sales_forecast {where_branch}',
+            params,
+        )[0]["count"]
+        checks.append({"name": "sales_forecast_has_rows", "ok": int(total_forecast) > 0, "detail": {"count": int(total_forecast)}})
+
+        negative_rows = execute_sql(
+            f'SELECT COUNT(*)::int AS count FROM sales_forecast {where_branch} {"AND" if where_branch else "WHERE"} "predictedRevenue" < 0',
+            params,
+        )[0]["count"]
+        checks.append({"name": "sales_forecast_no_negative", "ok": int(negative_rows) == 0, "detail": {"negativeCount": int(negative_rows)}})
+
+        recent_days = execute_sql(
+            f"""
+            SELECT COUNT(DISTINCT DATE("forecastDate"))::int AS days
+            FROM sales_forecast
+            {where_branch}
+              {"AND" if where_branch else "WHERE"} "forecastDate" >= (CURRENT_DATE - INTERVAL '7 days')
+            """,
+            params,
+        )[0]["days"]
+        checks.append({"name": "sales_forecast_recent_coverage", "ok": int(recent_days) >= 3, "detail": {"distinctDays": int(recent_days)}})
+
+        sentiment_total = execute_sql(
+            f'SELECT COUNT(*)::int AS count FROM sentiment_analysis {where_branch}',
+            params,
+        )[0]["count"]
+        checks.append({"name": "sentiment_has_rows", "ok": int(sentiment_total) > 0, "detail": {"count": int(sentiment_total)}})
+
+        anomaly_open = execute_sql(
+            f'SELECT COUNT(*)::int AS count FROM anomaly_alert {where_branch} {"AND" if where_branch else "WHERE"} COALESCE("isResolved", false) = false',
+            params,
+        )[0]["count"]
+        checks.append({"name": "anomaly_open_count_observed", "ok": True, "detail": {"openCount": int(anomaly_open)}})
+    except Exception as error:
+        checks.append({"name": "query_execution", "ok": False, "detail": str(error)})
+
+    overall_ok = all(bool(item.get("ok")) for item in checks if item.get("name") != "anomaly_open_count_observed")
+    return {"status": "ok" if overall_ok else "degraded", "source": "db", "checks": checks}
+
+
+def run_retention_cleanup(payload: RetentionRunPayload) -> dict[str, Any]:
+    if not REPORT_DATABASE_URL:
+        return {"success": False, "reason": "REPORT_DATABASE_URL is not configured", "deleted": {}}
+
+    forecast_days = max(30, min(payload.salesForecastDays, 720))
+    anomaly_days = max(30, min(payload.anomalyDays, 1460))
+    chatbot_days = max(30, min(payload.chatbotLogDays, 365))
+
+    deleted = {"salesForecast": 0, "anomalyAlert": 0, "chatbotQueryLog": 0}
+    try:
+        with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'DELETE FROM sales_forecast WHERE "generatedAt" < (NOW() - (%s::int || \' days\')::interval)',
+                    (forecast_days,),
+                )
+                deleted["salesForecast"] = int(cur.rowcount or 0)
+
+                cur.execute(
+                    'DELETE FROM anomaly_alert WHERE "detectedAt" < (NOW() - (%s::int || \' days\')::interval)',
+                    (anomaly_days,),
+                )
+                deleted["anomalyAlert"] = int(cur.rowcount or 0)
+
+                cur.execute(
+                    'DELETE FROM chatbot_query_log WHERE "createdAt" < (NOW() - (%s::int || \' days\')::interval)',
+                    (chatbot_days,),
+                )
+                deleted["chatbotQueryLog"] = int(cur.rowcount or 0)
+    except Exception as error:
+        return {"success": False, "reason": str(error), "deleted": deleted}
+
+    return {"success": True, "deleted": deleted, "retentionDays": {"salesForecast": forecast_days, "anomalyAlert": anomaly_days, "chatbotQueryLog": chatbot_days}}
+
+
 def calculate_anomaly_severity(z_score: float) -> str:
     abs_score = abs(z_score)
     if abs_score >= 4:
@@ -863,6 +961,28 @@ def ready() -> dict[str, Any]:
             "knowledgeBase": {"ok": kb_ok, "itemCount": int(KB_STATE.get("itemCount", len(DEFAULT_MENU_KB)))},
             "rbac": {"enforce": AI_ENFORCE_RBAC, "allowLegacyNoAuth": AI_ALLOW_LEGACY_NO_AUTH},
         },
+    }
+
+
+@app.get("/api/ai/ops/data-quality")
+def ai_ops_data_quality(request: Request, branchId: str | None = None) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
+    result = run_data_quality_checks(branchId)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "branchId": branchId,
+        **result,
+    }
+
+
+@app.post("/api/ai/ops/retention/run")
+def ai_ops_retention_run(payload: RetentionRunPayload, request: Request) -> dict[str, Any]:
+    authorize_request(request, None, {"ADMIN"})
+    enforce_rate_limit(request, "retention_run", max(1, AI_RATE_LIMIT_PER_MINUTE // 6))
+    result = run_retention_cleanup(payload)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **result,
     }
 
 
