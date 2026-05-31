@@ -2885,16 +2885,21 @@ export default function CustomerMenu() {
                 onClick={() => setCustomerAuthMode('EMAIL')}
                 className={`rounded-xl px-3 py-1.5 text-xs ${customerAuthMode === 'EMAIL' ? 'bg-sky-100 text-sky-700' : 'border border-sky-200'}`}
               >
-                Email
+                Email + Mật khẩu
               </button>
               <button
                 type="button"
                 onClick={() => setCustomerAuthMode('OTP')}
                 className={`rounded-xl px-3 py-1.5 text-xs ${customerAuthMode === 'OTP' ? 'bg-sky-100 text-sky-700' : 'border border-sky-200'}`}
               >
-                So dien thoai OTP
+                SĐT + OTP
               </button>
             </div>
+            <p className="mt-2 text-xs text-slate-500">
+              {customerAuthMode === 'EMAIL'
+                ? 'Chế độ Email không cần OTP. Nếu muốn đăng ký bằng OTP, chọn "SĐT + OTP".'
+                : 'Chế độ OTP yêu cầu nhập số điện thoại, lấy OTP và nhập mã OTP 6 số.'}
+            </p>
 
             <form onSubmit={submitCustomerAuth} className="mt-4 space-y-2">
               {customerAuthTab === 'REGISTER' && (
