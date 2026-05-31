@@ -78,6 +78,21 @@ public class CustomerAccountController {
         return ResponseEntity.ok(userService.resetPassword(request));
     }
 
+    @GetMapping("/api/auth/google/start")
+    public ResponseEntity<Map<String, Object>> startGoogleOauth(
+            @RequestParam(value = "redirectUri", required = false) String redirectUri
+    ) {
+        return ResponseEntity.ok(userService.startGoogleOauth(redirectUri));
+    }
+
+    @GetMapping("/api/auth/google/callback")
+    public ResponseEntity<CustomerAuthResponse> googleOauthCallback(
+            @RequestParam("code") String code,
+            @RequestParam("state") String state
+    ) {
+        return ResponseEntity.ok(userService.handleGoogleOauthCallback(code, state));
+    }
+
     @GetMapping("/api/customer/profile")
     public ResponseEntity<CustomerProfileResponse> getProfile(@RequestHeader("Authorization") String authHeader) {
         return ResponseEntity.ok(userService.getCustomerProfileV2(extractToken(authHeader)));
@@ -135,4 +150,3 @@ public class CustomerAccountController {
         return authHeader.replace("Bearer ", "").trim();
     }
 }
-

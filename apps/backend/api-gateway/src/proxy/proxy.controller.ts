@@ -140,7 +140,8 @@ export class ProxyController {
       path === '/api/auth/forgot-password' ||
       path === '/api/auth/reset-password' ||
       path === '/api/auth/otp/request' ||
-      path === '/api/auth/otp/verify'
+      path === '/api/auth/otp/verify' ||
+      path.startsWith('/api/auth/google/')
     ) {
       return;
     }

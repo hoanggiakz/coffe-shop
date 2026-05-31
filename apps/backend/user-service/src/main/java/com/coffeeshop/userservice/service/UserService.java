@@ -129,9 +129,16 @@ public class UserService {
 
     @Value("${app.internal-service-token:dev-internal-token}")
     private String internalServiceToken;
+    @Value("${app.google-oauth-client-id:}")
+    private String googleOauthClientId;
+    @Value("${app.google-oauth-client-secret:}")
+    private String googleOauthClientSecret;
+    @Value("${app.google-oauth-callback-url:https://app.httpscoffee-demo.buzz/api/auth/google/callback}")
+    private String googleOauthCallbackUrl;
     private final Map<String, OtpEntry> otpStore = new ConcurrentHashMap<>();
     private final Map<String, RefreshEntry> refreshTokenStore = new ConcurrentHashMap<>();
     private final Map<String, ResetPasswordEntry> resetPasswordStore = new ConcurrentHashMap<>();
+    private final Map<String, GoogleOauthStateEntry> googleOauthStateStore = new ConcurrentHashMap<>();
 
     public StaffResponse register(String token, RegisterRequest req) {
         User actor = requireManagerOrAdmin(token);
@@ -546,6 +553,96 @@ public class UserService {
                 .build());
         long discountAmount = points * 100L;
         return new LoyaltyRedeemResponse(true, discountAmount, points, remaining, "Da ap dung giam gia tu loyalty points");
+    }
+
+    public Map<String, Object> startGoogleOauth(String redirectUri) {
+        ensureGoogleOauthConfigured();
+        String state = UUID.randomUUID().toString();
+        String callback = normalizeNullableText(redirectUri);
+        googleOauthStateStore.put(state, new GoogleOauthStateEntry(callback, System.currentTimeMillis() + (10L * 60L * 1000L)));
+        String authUrl = "https://accounts.google.com/o/oauth2/v2/auth"
+                + "?client_id=" + encode(googleOauthClientId)
+                + "&redirect_uri=" + encode(googleOauthCallbackUrl)
+                + "&response_type=code"
+                + "&scope=" + encode("openid email profile")
+                + "&access_type=offline"
+                + "&prompt=consent"
+                + "&state=" + encode(state);
+        return Map.of(
+                "authUrl", authUrl,
+                "state", state,
+                "callbackUrl", googleOauthCallbackUrl
+        );
+    }
+
+    public CustomerAuthResponse handleGoogleOauthCallback(String code, String state) {
+        ensureGoogleOauthConfigured();
+        String normalizedCode = String.valueOf(code == null ? "" : code).trim();
+        String normalizedState = String.valueOf(state == null ? "" : state).trim();
+        if (normalizedCode.isBlank() || normalizedState.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Thieu code hoac state");
+        }
+        GoogleOauthStateEntry stateEntry = googleOauthStateStore.get(normalizedState);
+        if (stateEntry == null || System.currentTimeMillis() > stateEntry.expiresAtMillis()) {
+            googleOauthStateStore.remove(normalizedState);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "State khong hop le hoac het han");
+        }
+        googleOauthStateStore.remove(normalizedState);
+
+        JsonNode tokenPayload = exchangeGoogleCodeForToken(normalizedCode);
+        String accessToken = String.valueOf(tokenPayload.path("access_token").asText("")).trim();
+        if (accessToken.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong lay duoc access token tu Google");
+        }
+
+        JsonNode userInfo = fetchGoogleUserInfo(accessToken);
+        String email = normalizeEmail(userInfo.path("email").asText(""));
+        if (email == null || email.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Google khong tra ve email hop le");
+        }
+
+        User existingAny = userRepository.findByEmail(email).orElse(null);
+        if (existingAny != null && existingAny.getRole() != User.Role.CUSTOMER) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email da duoc su dung boi tai khoan nhan vien");
+        }
+
+        boolean isNewUser = false;
+        User user = existingAny;
+        if (user == null) {
+            user = User.builder()
+                    .email(email)
+                    .password(passwordEncoder.encode("google-" + UUID.randomUUID()))
+                    .name(normalizeNullableText(userInfo.path("name").asText("")) != null ? userInfo.path("name").asText("").trim() : "Khach hang")
+                    .phone(null)
+                    .role(User.Role.CUSTOMER)
+                    .memberTier(User.MemberTier.STANDARD)
+                    .loyaltyPoints(0)
+                    .totalSpent(0L)
+                    .isActive(true)
+                    .avatarUrl(normalizeNullableText(userInfo.path("picture").asText("")))
+                    .build();
+            user = userRepository.save(user);
+            isNewUser = true;
+        } else {
+            boolean changed = false;
+            String picture = normalizeNullableText(userInfo.path("picture").asText(""));
+            String name = normalizeNullableText(userInfo.path("name").asText(""));
+            if ((user.getAvatarUrl() == null || user.getAvatarUrl().isBlank()) && picture != null) {
+                user.setAvatarUrl(picture);
+                changed = true;
+            }
+            if ((user.getName() == null || user.getName().isBlank()) && name != null) {
+                user.setName(name);
+                changed = true;
+            }
+            if (changed) {
+                user = userRepository.save(user);
+            }
+        }
+
+        String appAccessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
+        String appRefreshToken = issueRefreshToken(user.getId());
+        return new CustomerAuthResponse(appAccessToken, appRefreshToken, ACCESS_TOKEN_EXPIRES_SECONDS, UserProfile.from(user), isNewUser);
     }
 
     // M-24/M-25: Quan ly chi nhanh
@@ -1710,6 +1807,55 @@ public class UserService {
         }
     }
 
+    private JsonNode exchangeGoogleCodeForToken(String code) {
+        try {
+            String body = "code=" + encode(code)
+                    + "&client_id=" + encode(googleOauthClientId)
+                    + "&client_secret=" + encode(googleOauthClientSecret)
+                    + "&redirect_uri=" + encode(googleOauthCallbackUrl)
+                    + "&grant_type=authorization_code";
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://oauth2.googleapis.com/token"))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Google token exchange that bai");
+            }
+            return objectMapper.readTree(response.body());
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong ket noi duoc Google token endpoint");
+        }
+    }
+
+    private JsonNode fetchGoogleUserInfo(String googleAccessToken) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://www.googleapis.com/oauth2/v3/userinfo"))
+                    .header("Authorization", "Bearer " + googleAccessToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Google userinfo that bai");
+            }
+            return objectMapper.readTree(response.body());
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Khong ket noi duoc Google userinfo endpoint");
+        }
+    }
+
+    private void ensureGoogleOauthConfigured() {
+        if (normalizeNullableText(googleOauthClientId) == null || normalizeNullableText(googleOauthClientSecret) == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Google OAuth chua duoc cau hinh");
+        }
+    }
+
     private String encode(String value) {
         return URLEncoder.encode(String.valueOf(value == null ? "" : value), StandardCharsets.UTF_8);
     }
@@ -1717,4 +1863,5 @@ public class UserService {
     private record OtpEntry(String otp, long expiresAtMillis) {}
     private record RefreshEntry(String userId, long expiresAtMillis) {}
     private record ResetPasswordEntry(String userId, long expiresAtMillis) {}
+    private record GoogleOauthStateEntry(String redirectUri, long expiresAtMillis) {}
 }
