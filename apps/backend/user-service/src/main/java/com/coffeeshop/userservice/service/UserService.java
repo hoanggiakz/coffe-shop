@@ -1635,7 +1635,7 @@ public class UserService {
         if (actor.getRole() == User.Role.ADMIN) {
             return;
         }
-        if (role == User.Role.ADMIN || role == User.Role.MANAGER) {
+        if (role == User.Role.ADMIN || role == User.Role.MANAGER || role == User.Role.STAFF) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "MANAGER chi duoc cap tai khoan cho nhan vien van hanh");
         }
     }

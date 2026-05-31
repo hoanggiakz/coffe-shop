@@ -517,6 +517,7 @@ export default function StaffManagement() {
     const email = staffForm.email.trim()
     const employeeCode = staffForm.employeeCode.trim()
     const branchId = (staffForm.branchId || activeBranchId || '').trim()
+    const shouldCheckCode = !!employeeCode && !!branchId
     if (!email && !employeeCode) {
       setEmailExists(null)
       setEmployeeCodeExists(null)
@@ -529,12 +530,12 @@ export default function StaffManagement() {
         const { data } = await api.get('/staff/check-exists', {
           params: {
             email: email || undefined,
-            employeeCode: employeeCode || undefined,
-            branchId: branchId || undefined,
+            employeeCode: shouldCheckCode ? employeeCode : undefined,
+            branchId: shouldCheckCode ? branchId : undefined,
           },
         })
         setEmailExists(Boolean(data?.email?.exists))
-        setEmployeeCodeExists(Boolean(data?.employeeCode?.exists))
+        setEmployeeCodeExists(shouldCheckCode ? Boolean(data?.employeeCode?.exists) : null)
       } catch {
         setEmailExists(null)
         setEmployeeCodeExists(null)
@@ -943,10 +944,21 @@ export default function StaffManagement() {
   const canManageTargetRole = (role: StaffRole) => {
     if (!canManageAccounts) return false
     if (canManagePrivilegedAccounts) return true
-    return role !== 'ADMIN' && role !== 'MANAGER'
+    return role === 'WAITER' || role === 'BARISTA'
   }
 
   const canManageTargetStaff = (staff: StaffItem) => canManageTargetRole(staff.role)
+  const assignableRoles = useMemo<StaffRole[]>(
+    () => (canManagePrivilegedAccounts
+      ? ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']
+      : ['WAITER', 'BARISTA']),
+    [canManagePrivilegedAccounts],
+  )
+
+  useEffect(() => {
+    if (assignableRoles.includes(staffForm.role)) return
+    setStaffForm((prev) => ({ ...prev, role: assignableRoles[0] }))
+  }, [assignableRoles, staffForm.role])
 
   const printStaffCard = (staff: StaffItem) => {
     const qrImage = staffQrImages[staff.id]
@@ -1094,11 +1106,11 @@ export default function StaffManagement() {
               onChange={(e) => setStaffForm((prev) => ({ ...prev, role: e.target.value as StaffRole }))}
               disabled={Boolean(editingStaffId) && currentRole === 'MANAGER'}
             >
-              {canManagePrivilegedAccounts && <option value="ADMIN">Quản trị hệ thống</option>}
-              {canManagePrivilegedAccounts && <option value="MANAGER">Quản lý</option>}
-              <option value="WAITER">Phục vụ</option>
-              <option value="BARISTA">Pha chế</option>
-              <option value="STAFF">Nhân viên</option>
+              {assignableRoles.includes('ADMIN') && <option value="ADMIN">Quản trị hệ thống</option>}
+              {assignableRoles.includes('MANAGER') && <option value="MANAGER">Quản lý</option>}
+              {assignableRoles.includes('WAITER') && <option value="WAITER">Phục vụ</option>}
+              {assignableRoles.includes('BARISTA') && <option value="BARISTA">Pha chế</option>}
+              {assignableRoles.includes('STAFF') && <option value="STAFF">Nhân viên</option>}
             </select>
             <select
               className={selectClass}

@@ -175,18 +175,14 @@ public class HrManagementService {
 
         String normalizedCode = normalizeText(employeeCode);
         if (normalizedCode != null) {
-            String code = normalizedCode.replaceAll("\\s+", "").trim().toUpperCase(Locale.ROOT);
-            if (normalizedBranchId != null) {
-                User conflict = userRepository.findByEmployeeCodeAndBranchId(code, normalizedBranchId).orElse(null);
-                result.put("employeeCode", conflict == null
-                        ? Map.of("exists", false)
-                        : Map.of("exists", true, "conflictWith", conflict.getEmployeeCode()));
-            } else {
-                boolean exists = userRepository.existsByEmployeeCode(code);
-                result.put("employeeCode", exists
-                        ? Map.of("exists", true, "conflictWith", code)
-                        : Map.of("exists", false));
+            if (normalizedBranchId == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "branchId bat buoc khi kiem tra employeeCode");
             }
+            String code = normalizedCode.replaceAll("\\s+", "").trim().toUpperCase(Locale.ROOT);
+            User conflict = userRepository.findByEmployeeCodeAndBranchId(code, normalizedBranchId).orElse(null);
+            result.put("employeeCode", conflict == null
+                    ? Map.of("exists", false)
+                    : Map.of("exists", true, "conflictWith", conflict.getEmployeeCode()));
         } else {
             result.put("employeeCode", Map.of("exists", false));
         }
