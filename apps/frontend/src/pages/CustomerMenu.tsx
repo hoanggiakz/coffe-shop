@@ -3051,7 +3051,7 @@ export default function CustomerMenu() {
       )}
 
       {chatOpen && (
-        <div className="fixed inset-x-3 bottom-24 z-40 rounded-2xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-x-auto sm:right-4 sm:w-[calc(100vw-2rem)] sm:max-w-sm">
+        <div className="fixed inset-x-3 bottom-32 z-40 rounded-2xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-x-auto sm:right-4 sm:bottom-24 sm:w-[calc(100vw-2rem)] sm:max-w-sm lg:bottom-6">
           <div className="flex items-center justify-between">
             <p className="font-semibold text-slate-900">Chat hỗ trợ - {tableName}</p>
             <div className="flex items-center gap-1">
@@ -3136,7 +3136,7 @@ export default function CustomerMenu() {
       <button
         type="button"
         onClick={toggleChatWidget}
-        className="fixed bottom-6 right-4 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-sky-700 text-white shadow-lg"
+        className="fixed bottom-24 right-4 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-sky-700 text-white shadow-lg lg:bottom-6"
         aria-label="Mở chat hỗ trợ"
       >
         <ChatBubbleLeftRightIcon className="h-6 w-6" />
