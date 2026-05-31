@@ -1116,8 +1116,14 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async buildMinimalInvoicePdf(invoice: any): Promise<Buffer> {
-    const doc = new PDFDocument({ size: 'A4', margin: 36 });
+  private async buildMinimalInvoicePdf(invoice: any, format: 'a4' | 'thermal' = 'a4'): Promise<Buffer> {
+    const isThermal = format === 'thermal';
+    const thermalWidth = 226.77; // ~80mm
+    const thermalHeight = 1200;
+    const doc = new PDFDocument({
+      size: isThermal ? [thermalWidth, thermalHeight] : 'A4',
+      margin: isThermal ? 12 : 36,
+    });
     const chunks: Buffer[] = [];
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
     const done = new Promise<Buffer>((resolve) => {
@@ -1125,11 +1131,11 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     });
 
     const issueDate = new Date(invoice.issueDate).toLocaleString('vi-VN');
-    doc.fontSize(20).text('COFFEE SHOP', { align: 'center' });
-    doc.fontSize(14).text('HOA DON BAN HANG', { align: 'center' });
+    doc.fontSize(isThermal ? 12 : 20).text('COFFEE SHOP', { align: 'center' });
+    doc.fontSize(isThermal ? 10 : 14).text('HOA DON BAN HANG', { align: 'center' });
     doc.moveDown(0.8);
 
-    doc.fontSize(11);
+    doc.fontSize(isThermal ? 8 : 11);
     doc.text(`So hoa don: ${invoice.invoiceNumber}`);
     doc.text(`Ngay: ${issueDate}`);
     doc.text(`Khach: ${invoice.customerName || 'Khach vang lai'}`);
@@ -1138,21 +1144,25 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     doc.text(`Trang thai: ${invoice.status || 'ISSUED'}`);
     doc.moveDown(0.8);
 
-    doc.fontSize(11).text('Chi tiet mon:', { underline: true });
+    doc.fontSize(isThermal ? 8 : 11).text('Chi tiet mon:', { underline: true });
     doc.moveDown(0.3);
-    doc.fontSize(10);
-    doc.text(this.padRight('Item', 26) + this.padLeft('Qty', 5) + this.padLeft('Price', 12) + this.padLeft('Total', 14));
-    doc.text('-'.repeat(70));
+    doc.fontSize(isThermal ? 7 : 10);
+    const nameW = isThermal ? 14 : 26;
+    const qtyW = isThermal ? 4 : 5;
+    const priceW = isThermal ? 8 : 12;
+    const totalW = isThermal ? 10 : 14;
+    doc.text(this.padRight('Item', nameW) + this.padLeft('Qty', qtyW) + this.padLeft('Price', priceW) + this.padLeft('Total', totalW));
+    doc.text('-'.repeat(isThermal ? 42 : 70));
     for (const item of Array.isArray(invoice?.items) ? invoice.items.slice(0, 60) : []) {
-      const name = this.padRight(String(item?.name || 'Unknown'), 26);
-      const qty = this.padLeft(String(Number(item?.quantity || 0)), 5);
-      const price = this.padLeft(this.formatVnd(Number(item?.unitPrice || 0)), 12);
-      const total = this.padLeft(this.formatVnd(Number(item?.totalPrice || 0)), 14);
+      const name = this.padRight(String(item?.name || 'Unknown'), nameW);
+      const qty = this.padLeft(String(Number(item?.quantity || 0)), qtyW);
+      const price = this.padLeft(this.formatVnd(Number(item?.unitPrice || 0)), priceW);
+      const total = this.padLeft(this.formatVnd(Number(item?.totalPrice || 0)), totalW);
       doc.text(`${name}${qty}${price}${total}`);
     }
     doc.moveDown(0.8);
 
-    doc.fontSize(11);
+    doc.fontSize(isThermal ? 8 : 11);
     doc.text(`Tam tinh: ${this.formatVnd(Number(invoice.subtotal || 0))}`, { align: 'right' });
     doc.text(`Giam gia: ${this.formatVnd(Number(invoice.discount || 0))}`, { align: 'right' });
     doc.text(`Thue (${Number(invoice.taxRate || 0)}%): ${this.formatVnd(Number(invoice.taxAmount || 0))}`, { align: 'right' });
@@ -1161,25 +1171,46 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
 
     if (invoice?.sepay?.transferContent || invoice?.sepay?.qrImageUrl) {
       doc.moveDown(0.8);
-      doc.fontSize(11).text('Thong tin SePay:', { underline: true });
+      doc.fontSize(isThermal ? 8 : 11).text('Thong tin SePay:', { underline: true });
       if (invoice?.sepay?.transferContent) {
-        doc.fontSize(10).text(`Noi dung CK: ${invoice.sepay.transferContent}`);
+        doc.fontSize(isThermal ? 7 : 10).text(`Noi dung CK: ${invoice.sepay.transferContent}`);
       }
       const qrImageBuffer = await this.downloadImageBuffer(String(invoice?.sepay?.qrImageUrl || ''));
       if (qrImageBuffer) {
         try {
           doc.moveDown(0.3);
-          doc.image(qrImageBuffer, { fit: [140, 140] });
+          const qrSize = isThermal ? 95 : 140;
+          doc.image(qrImageBuffer, { fit: [qrSize, qrSize], align: 'center' });
         } catch {
-          doc.fontSize(10).text(`QR URL: ${invoice.sepay.qrImageUrl || ''}`);
+          doc.fontSize(isThermal ? 7 : 10).text(`QR URL: ${invoice.sepay.qrImageUrl || ''}`);
         }
       } else if (invoice?.sepay?.qrImageUrl) {
-        doc.fontSize(10).text(`QR URL: ${invoice.sepay.qrImageUrl}`);
+        doc.fontSize(isThermal ? 7 : 10).text(`QR URL: ${invoice.sepay.qrImageUrl}`);
       }
     }
 
     doc.moveDown(1.2);
-    doc.fontSize(10).text('Cam on quy khach!', { align: 'center' });
+    doc.fontSize(isThermal ? 8 : 10).text('Cam on quy khach!', { align: 'center' });
+
+    if (String(invoice?.status || '').toUpperCase() === 'VOIDED') {
+      const savedX = doc.x;
+      const savedY = doc.y;
+      doc.rotate(-25, { origin: [doc.page.width / 2, doc.page.height / 2] });
+      doc.fontSize(isThermal ? 28 : 56).fillColor('#d11').opacity(0.15).text('VOIDED', 20, doc.page.height / 2 - 20, {
+        width: doc.page.width - 40,
+        align: 'center',
+      });
+      doc.opacity(1).fillColor('#000');
+      doc.rotate(25, { origin: [doc.page.width / 2, doc.page.height / 2] });
+      doc.x = savedX;
+      doc.y = savedY;
+    }
+
+    if (isThermal) {
+      // Compact layout for thermal printers: trim excessive bottom space.
+      (doc as any).page.height = Math.max(doc.y + 24, 180);
+    }
+
     doc.end();
     return done;
   }
@@ -1399,14 +1430,14 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async getPublicInvoicePdf(invoiceId: string, token: string) {
+  async getPublicInvoicePdf(invoiceId: string, token: string, format: 'a4' | 'thermal' = 'a4') {
     const detail = await this.getPublicInvoiceDetail(invoiceId, token);
-    return await this.buildMinimalInvoicePdf(detail);
+    return await this.buildMinimalInvoicePdf(detail, format);
   }
 
-  async getInvoicePdf(invoiceId: string, actor: ActorContext) {
+  async getInvoicePdf(invoiceId: string, actor: ActorContext, format: 'a4' | 'thermal' = 'a4') {
     const detail = await this.getInvoiceDetail(invoiceId, actor);
-    return await this.buildMinimalInvoicePdf(detail);
+    return await this.buildMinimalInvoicePdf(detail, format);
   }
 
   async voidInvoice(invoiceId: string, reason: string, actor: ActorContext) {
