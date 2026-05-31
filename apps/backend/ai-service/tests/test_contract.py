@@ -13,6 +13,25 @@ def test_health():
     assert payload['status'] == 'ok'
 
 
+def test_live_and_ready():
+    live = client.get('/api/ai/live')
+    assert live.status_code == 200
+    assert live.json().get('status') == 'alive'
+
+    ready = client.get('/api/ai/ready')
+    assert ready.status_code == 200
+    assert ready.json().get('status') in ['ready', 'degraded']
+    assert 'checks' in ready.json()
+
+
+def test_quality_summary_contract():
+    response = client.get('/api/ai/ops/quality-summary')
+    assert response.status_code == 200
+    payload = response.json()
+    assert 'quality' in payload
+    assert 'fallbackRatios' in payload
+
+
 def test_recommend_get_contract():
     response = client.get('/api/ai/recommend', params={'branchId': 'branch-e2e', 'limit': 3})
     assert response.status_code == 200

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import psycopg
 import sqlparse
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, Field
@@ -20,6 +20,7 @@ app = FastAPI(title="coffee-ai-service", version="0.3.0")
 
 REQUEST_COUNT = Counter("ai_requests_total", "Total AI requests", ["endpoint", "status"])
 REQUEST_LATENCY = Histogram("ai_request_latency_seconds", "AI request latency", ["endpoint"])
+RESPONSE_SOURCE_COUNT = Counter("ai_response_source_total", "AI response source counter", ["endpoint", "source"])
 PREDICTION_ERROR_GAUGE = Gauge("ai_prediction_error_mape", "Latest prediction error (MAPE)")
 DATA_FRESHNESS_MINUTES = Gauge("ai_data_freshness_minutes", "Latest data freshness in minutes")
 
@@ -35,6 +36,9 @@ AI_FORECAST_CRON_HOUR_UTC = int(os.getenv("AI_FORECAST_CRON_HOUR_UTC", "19"))  #
 CHAT_SERVICE_API_URL = os.getenv("CHAT_SERVICE_API_URL", "http://chat-service:3007/api/chats").strip().rstrip("/")
 AI_ENFORCE_RBAC = os.getenv("AI_ENFORCE_RBAC", "false").strip().lower() in {"1", "true", "yes"}
 AI_ALLOW_LEGACY_NO_AUTH = os.getenv("AI_ALLOW_LEGACY_NO_AUTH", "true").strip().lower() in {"1", "true", "yes"}
+AI_RATE_LIMIT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_PER_MINUTE", "120"))
+AI_RATE_LIMIT_REPORT_CHAT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_REPORT_CHAT_PER_MINUTE", "30"))
+AI_RATE_LIMIT_CHAT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_CHAT_PER_MINUTE", "60"))
 
 DEFAULT_MENU_KB = [
     {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
@@ -136,6 +140,12 @@ class ReportChatPayload(BaseModel):
     question: str
 
 
+class RetentionRunPayload(BaseModel):
+    salesForecastDays: int = 180
+    anomalyDays: int = 365
+    chatbotLogDays: int = 90
+
+
 ANOMALIES: list[dict[str, Any]] = [
     {
         "id": "anomaly-seed-1",
@@ -153,6 +163,17 @@ KB_STATE: dict[str, Any] = {
     "source": "bootstrap",
 }
 FORECAST_CRON_STATE: dict[str, Any] = {"running": False, "lastRunAt": None}
+RATE_LIMIT_COUNTERS: dict[str, dict[str, int]] = {}
+SOURCE_TRACKING: dict[str, dict[str, int]] = {}
+
+
+@app.middleware("http")
+async def attach_correlation_id(request: Request, call_next):
+    request_id = str(request.headers.get("x-request-id") or request.headers.get("x-correlation-id") or f"ai-{uuid4()}")
+    request.state.correlation_id = request_id
+    response: Response = await call_next(request)
+    response.headers["x-request-id"] = request_id
+    return response
 
 
 def metric_guard(endpoint: str):
@@ -215,6 +236,52 @@ def authorize_request(
         raise HTTPException(status_code=403, detail="Manager cannot access other branch scope")
 
     return {"role": role, "branchId": actor_branch_id, "userId": actor_user_id}
+
+
+def enforce_rate_limit(request: Request, scope: str, max_per_minute: int) -> None:
+    if max_per_minute <= 0:
+        return
+    client_ip = str(getattr(request.client, "host", "") or "unknown")
+    actor_id = str(request.headers.get("x-actor-user-id") or request.headers.get("x-user-id") or "").strip()
+    actor_key = actor_id or client_ip
+    key = f"{scope}:{actor_key}"
+    now = int(time.time())
+    bucket = RATE_LIMIT_COUNTERS.get(key)
+    if not bucket or now >= int(bucket.get("resetAt", 0)):
+        RATE_LIMIT_COUNTERS[key] = {"count": 1, "resetAt": now + 60}
+        return
+    current_count = int(bucket.get("count", 0)) + 1
+    bucket["count"] = current_count
+    if current_count > max_per_minute:
+        raise HTTPException(status_code=429, detail=f"Rate limit exceeded for {scope}")
+
+
+def track_response_source(endpoint: str, source: str) -> None:
+    normalized_endpoint = str(endpoint or "unknown").strip().lower()
+    normalized_source = str(source or "unknown").strip().lower()
+    if not normalized_endpoint:
+        normalized_endpoint = "unknown"
+    if not normalized_source:
+        normalized_source = "unknown"
+    RESPONSE_SOURCE_COUNT.labels(endpoint=normalized_endpoint, source=normalized_source).inc()
+    bucket = SOURCE_TRACKING.get(normalized_endpoint) or {}
+    bucket[normalized_source] = int(bucket.get(normalized_source, 0)) + 1
+    SOURCE_TRACKING[normalized_endpoint] = bucket
+
+
+def build_fallback_ratio_snapshot() -> dict[str, Any]:
+    endpoint_summary: dict[str, Any] = {}
+    for endpoint, sources in SOURCE_TRACKING.items():
+        total = sum(int(value) for value in sources.values())
+        fallback_count = int(sources.get("fallback", 0))
+        ratio = (fallback_count / total) if total > 0 else 0.0
+        endpoint_summary[endpoint] = {
+            "totalResponses": total,
+            "fallbackResponses": fallback_count,
+            "fallbackRatio": round(ratio, 4),
+            "sources": {key: int(value) for key, value in sources.items()},
+        }
+    return endpoint_summary
 
 
 def reload_knowledge_base(source: str = "manual") -> dict[str, Any]:
@@ -653,7 +720,7 @@ async def forecast_cron_loop():
                 if not branch_ids:
                     branch_ids = ["branch-e2e"]
                 for branch_id in branch_ids:
-                    rebuild_revenue_forecast(ForecastRebuildPayload(branchId=branch_id, days=7, granularity="daily"))
+                    rebuild_revenue_forecast_internal(ForecastRebuildPayload(branchId=branch_id, days=7, granularity="daily"))
                 FORECAST_CRON_STATE["lastRunAt"] = datetime.now(timezone.utc).isoformat()
                 await asyncio.sleep(360)
             except Exception:
@@ -749,6 +816,98 @@ def load_anomalies_from_db(branch_id: str, severity: str | None) -> list[dict[st
         return []
 
 
+def run_data_quality_checks(branch_id: str | None = None) -> dict[str, Any]:
+    if not REPORT_DATABASE_URL:
+        return {
+            "status": "degraded",
+            "source": "fallback",
+            "checks": [
+                {"name": "database_configured", "ok": False, "detail": "REPORT_DATABASE_URL is not configured"},
+            ],
+        }
+
+    checks: list[dict[str, Any]] = []
+    scoped_branch = str(branch_id or "").strip()
+    where_branch = 'WHERE "branchId" = %s' if scoped_branch else ""
+    params = [scoped_branch] if scoped_branch else []
+
+    try:
+        total_forecast = execute_sql(
+            f'SELECT COUNT(*)::int AS count FROM sales_forecast {where_branch}',
+            params,
+        )[0]["count"]
+        checks.append({"name": "sales_forecast_has_rows", "ok": int(total_forecast) > 0, "detail": {"count": int(total_forecast)}})
+
+        negative_rows = execute_sql(
+            f'SELECT COUNT(*)::int AS count FROM sales_forecast {where_branch} {"AND" if where_branch else "WHERE"} "predictedRevenue" < 0',
+            params,
+        )[0]["count"]
+        checks.append({"name": "sales_forecast_no_negative", "ok": int(negative_rows) == 0, "detail": {"negativeCount": int(negative_rows)}})
+
+        recent_days = execute_sql(
+            f"""
+            SELECT COUNT(DISTINCT DATE("forecastDate"))::int AS days
+            FROM sales_forecast
+            {where_branch}
+              {"AND" if where_branch else "WHERE"} "forecastDate" >= (CURRENT_DATE - INTERVAL '7 days')
+            """,
+            params,
+        )[0]["days"]
+        checks.append({"name": "sales_forecast_recent_coverage", "ok": int(recent_days) >= 3, "detail": {"distinctDays": int(recent_days)}})
+
+        sentiment_total = execute_sql(
+            f'SELECT COUNT(*)::int AS count FROM sentiment_analysis {where_branch}',
+            params,
+        )[0]["count"]
+        checks.append({"name": "sentiment_has_rows", "ok": int(sentiment_total) > 0, "detail": {"count": int(sentiment_total)}})
+
+        anomaly_open = execute_sql(
+            f'SELECT COUNT(*)::int AS count FROM anomaly_alert {where_branch} {"AND" if where_branch else "WHERE"} COALESCE("isResolved", false) = false',
+            params,
+        )[0]["count"]
+        checks.append({"name": "anomaly_open_count_observed", "ok": True, "detail": {"openCount": int(anomaly_open)}})
+    except Exception as error:
+        checks.append({"name": "query_execution", "ok": False, "detail": str(error)})
+
+    overall_ok = all(bool(item.get("ok")) for item in checks if item.get("name") != "anomaly_open_count_observed")
+    return {"status": "ok" if overall_ok else "degraded", "source": "db", "checks": checks}
+
+
+def run_retention_cleanup(payload: RetentionRunPayload) -> dict[str, Any]:
+    if not REPORT_DATABASE_URL:
+        return {"success": False, "reason": "REPORT_DATABASE_URL is not configured", "deleted": {}}
+
+    forecast_days = max(30, min(payload.salesForecastDays, 720))
+    anomaly_days = max(30, min(payload.anomalyDays, 1460))
+    chatbot_days = max(30, min(payload.chatbotLogDays, 365))
+
+    deleted = {"salesForecast": 0, "anomalyAlert": 0, "chatbotQueryLog": 0}
+    try:
+        with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'DELETE FROM sales_forecast WHERE "generatedAt" < (NOW() - (%s::int || \' days\')::interval)',
+                    (forecast_days,),
+                )
+                deleted["salesForecast"] = int(cur.rowcount or 0)
+
+                cur.execute(
+                    'DELETE FROM anomaly_alert WHERE "detectedAt" < (NOW() - (%s::int || \' days\')::interval)',
+                    (anomaly_days,),
+                )
+                deleted["anomalyAlert"] = int(cur.rowcount or 0)
+
+                cur.execute(
+                    'DELETE FROM chatbot_query_log WHERE "createdAt" < (NOW() - (%s::int || \' days\')::interval)',
+                    (chatbot_days,),
+                )
+                deleted["chatbotQueryLog"] = int(cur.rowcount or 0)
+    except Exception as error:
+        return {"success": False, "reason": str(error), "deleted": deleted}
+
+    return {"success": True, "deleted": deleted, "retentionDays": {"salesForecast": forecast_days, "anomalyAlert": anomaly_days, "chatbotQueryLog": chatbot_days}}
+
+
 def calculate_anomaly_severity(z_score: float) -> str:
     abs_score = abs(z_score)
     if abs_score >= 4:
@@ -801,9 +960,85 @@ def health() -> dict[str, Any]:
     }
 
 
-@app.post("/api/ai/forecast/revenue/rebuild")
-@metric_guard("forecast_revenue_rebuild")
-def rebuild_revenue_forecast(payload: ForecastRebuildPayload) -> dict[str, Any]:
+@app.get("/api/ai/live")
+def live() -> dict[str, Any]:
+    return {"status": "alive", "service": "ai-service", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/ai/ready")
+def ready() -> dict[str, Any]:
+    db_ok = True
+    db_reason = "not-configured"
+    if REPORT_DATABASE_URL:
+        try:
+            with psycopg.connect(REPORT_DATABASE_URL) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SET LOCAL statement_timeout = '1000ms'")
+                    cur.execute("SELECT 1")
+            db_reason = "ok"
+        except Exception as error:
+            db_ok = False
+            db_reason = f"error:{error.__class__.__name__}"
+
+    kb_ok = int(KB_STATE.get("itemCount", len(DEFAULT_MENU_KB))) > 0
+    status = "ready" if db_ok and kb_ok else "degraded"
+    return {
+        "status": status,
+        "service": "ai-service",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": {
+            "database": {"ok": db_ok, "reason": db_reason},
+            "knowledgeBase": {"ok": kb_ok, "itemCount": int(KB_STATE.get("itemCount", len(DEFAULT_MENU_KB)))},
+            "rbac": {"enforce": AI_ENFORCE_RBAC, "allowLegacyNoAuth": AI_ALLOW_LEGACY_NO_AUTH},
+        },
+    }
+
+
+@app.get("/api/ai/ops/data-quality")
+def ai_ops_data_quality(request: Request, branchId: str | None = None) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
+    result = run_data_quality_checks(branchId)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "branchId": branchId,
+        **result,
+    }
+
+
+@app.get("/api/ai/ops/quality-summary")
+def ai_ops_quality_summary(request: Request, branchId: str | None = None) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
+    quality = run_data_quality_checks(branchId)
+    fallback_by_endpoint = build_fallback_ratio_snapshot()
+    critical_ratio = {
+        endpoint: data
+        for endpoint, data in fallback_by_endpoint.items()
+        if data.get("fallbackRatio", 0) >= 0.2
+    }
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "branchId": branchId,
+        "quality": quality,
+        "fallbackRatios": fallback_by_endpoint,
+        "attention": {
+            "highFallbackEndpoints": critical_ratio,
+            "count": len(critical_ratio),
+        },
+    }
+
+
+@app.post("/api/ai/ops/retention/run")
+def ai_ops_retention_run(payload: RetentionRunPayload, request: Request) -> dict[str, Any]:
+    authorize_request(request, None, {"ADMIN"})
+    enforce_rate_limit(request, "retention_run", max(1, AI_RATE_LIMIT_PER_MINUTE // 6))
+    result = run_retention_cleanup(payload)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **result,
+    }
+
+
+def rebuild_revenue_forecast_internal(payload: ForecastRebuildPayload) -> dict[str, Any]:
     payload.branchId = normalize_branch_id(payload.branchId)
     payload.days = max(1, min(payload.days, 30))
     generated, forecast_meta = build_revenue_forecast_from_history(payload.branchId, payload.days)
@@ -863,6 +1098,13 @@ def rebuild_revenue_forecast(payload: ForecastRebuildPayload) -> dict[str, Any]:
     }
 
 
+@app.post("/api/ai/forecast/revenue/rebuild")
+@metric_guard("forecast_revenue_rebuild")
+def rebuild_revenue_forecast(payload: ForecastRebuildPayload, request: Request) -> dict[str, Any]:
+    enforce_rate_limit(request, "forecast_rebuild", AI_RATE_LIMIT_PER_MINUTE)
+    return rebuild_revenue_forecast_internal(payload)
+
+
 @app.post("/api/ai/kb/reload")
 @metric_guard("kb_reload")
 def kb_reload() -> dict[str, Any]:
@@ -890,6 +1132,7 @@ def forecast_revenue(request: Request, branchId: str, days: int = 7, granularity
                 [branchId, granularity, days],
             )
             if rows:
+                track_response_source("/api/ai/forecast/revenue", "db")
                 forecasts = [
                     {
                         "date": str(row.get("forecastDate"))[:10],
@@ -914,6 +1157,7 @@ def forecast_revenue(request: Request, branchId: str, days: int = 7, granularity
             pass
 
     forecasts, forecast_meta = build_revenue_forecast_from_history(branchId, days)
+    track_response_source("/api/ai/forecast/revenue", str(forecast_meta.get("source") or "fallback"))
     log_audit("/api/ai/forecast/revenue", "predict", True, branchId)
     return {
         "branchId": branchId,
@@ -986,6 +1230,7 @@ def recommend(branchId: str, limit: int = 5, customerId: str | None = None) -> d
     popular_items = get_popular_items(branchId, max(safe_limit * 2, safe_limit))
     items = merge_recommendation_candidates(cooccurrence_items, popular_items, cart_seed, safe_limit)
     strategy = "hybrid-cf-popularity" if cooccurrence_items else "popularity"
+    track_response_source("/api/ai/recommend", strategy)
     log_audit("/api/ai/recommend", "recommend", True, branchId, metadata={"limit": safe_limit, "strategy": strategy})
     return {
         "branchId": branchId,
@@ -1006,6 +1251,7 @@ def recommend_post(payload: RecommendationPayload) -> dict[str, Any]:
     popular_items = get_popular_items(payload.branchId, max(safe_limit * 2, safe_limit))
     response_items = merge_recommendation_candidates(cooccurrence_items, popular_items, payload.cartItemIds, safe_limit)
     strategy = "item-based-cf+popularity" if cooccurrence_items else "popularity"
+    track_response_source("/api/ai/recommend_post", strategy)
     log_audit("/api/ai/recommend", "recommend", True, payload.branchId, metadata={"limit": safe_limit, "strategy": strategy})
     return {
         "branchId": payload.branchId,
@@ -1024,6 +1270,7 @@ def recommend_popular(branchId: str, limit: int = 5) -> dict[str, Any]:
     branchId = normalize_branch_id(branchId)
     safe_limit = normalize_limit(limit)
     items = get_popular_items(branchId, safe_limit)
+    track_response_source("/api/ai/recommend/popular", "popularity")
     log_audit("/api/ai/recommend/popular", "recommend", True, branchId, metadata={"limit": safe_limit})
     return {"branchId": branchId, "items": items, "strategy": "popularity"}
 
@@ -1042,11 +1289,13 @@ def anomalies(request: Request, branchId: str, severity: str | None = None) -> d
     branchId = normalize_branch_id(branchId)
     db_items = load_anomalies_from_db(branchId, severity)
     if db_items:
+        track_response_source("/api/ai/anomalies", "db")
         return {"branchId": branchId, "items": db_items, "source": "db", "available": True}
 
     filtered = [a for a in ANOMALIES if a["branchId"] == branchId]
     if severity:
         filtered = [a for a in filtered if a["severity"] == severity.upper()]
+    track_response_source("/api/ai/anomalies", "fallback")
     log_audit("/api/ai/anomalies", "list", True, branchId)
     return {"branchId": branchId, "items": filtered, "source": "fallback", "available": True}
 
@@ -1054,6 +1303,7 @@ def anomalies(request: Request, branchId: str, severity: str | None = None) -> d
 @app.post("/api/ai/anomalies/detect")
 @metric_guard("anomaly_detect")
 def detect_anomaly(payload: AnomalyDetectPayload, request: Request) -> dict[str, Any]:
+    enforce_rate_limit(request, "anomaly_detect", AI_RATE_LIMIT_PER_MINUTE)
     authorize_request(request, payload.branchId, {"ADMIN", "MANAGER"})
     payload.branchId = normalize_branch_id(payload.branchId)
     if payload.baselineStd < 0:
@@ -1212,6 +1462,7 @@ def sentiment_summary(request: Request, branchId: str) -> dict[str, Any]:
             total = sum(int(row.get("count") or 0) for row in rows)
             if total > 0:
                 mapped = {str(row.get("label")).upper(): int(row.get("count") or 0) for row in rows}
+                track_response_source("/api/ai/sentiment/summary", "db")
                 return {
                     "branchId": branchId,
                     "positive": round(mapped.get("POSITIVE", 0) / total, 4),
@@ -1225,6 +1476,7 @@ def sentiment_summary(request: Request, branchId: str) -> dict[str, Any]:
             pass
 
     log_audit("/api/ai/sentiment/summary", "summary", True, branchId)
+    track_response_source("/api/ai/sentiment/summary", "fallback")
     return {"branchId": branchId, "positive": 0.78, "neutral": 0.15, "negative": 0.07, "sampleSize": 120, "modelVersion": AI_ACTIVE_MODEL_VERSION, "source": "fallback"}
 
 
@@ -1264,6 +1516,7 @@ def sentiment_trend(request: Request, branchId: str, days: int = 7) -> dict[str,
                             "negative": round(grouped[d]["NEGATIVE"] / total, 4),
                         }
                     )
+                track_response_source("/api/ai/sentiment/trend", "db")
                 return {"branchId": branchId, "points": points, "source": "db"}
         except Exception:
             pass
@@ -1274,6 +1527,7 @@ def sentiment_trend(request: Request, branchId: str, days: int = 7) -> dict[str,
         d = today - timedelta(days=i)
         points.append({"date": d.isoformat(), "positive": 0.7 + (i % 3) * 0.03, "neutral": 0.2 - (i % 2) * 0.02, "negative": 0.1 - (i % 2) * 0.01})
     log_audit("/api/ai/sentiment/trend", "trend", True, branchId)
+    track_response_source("/api/ai/sentiment/trend", "fallback")
     return {"branchId": branchId, "points": list(reversed(points)), "source": "fallback"}
 
 
@@ -1299,10 +1553,12 @@ def sentiment_issues_top(request: Request, branchId: str, days: int = 7, limit: 
                 [branchId, safe_days],
             )
             issues = top_negative_issues([str(row.get("originalText") or "") for row in rows], safe_limit)
+            track_response_source("/api/ai/sentiment/issues-top", "db")
             return {"branchId": branchId, "days": safe_days, "issues": issues, "source": "db"}
         except Exception:
             pass
     issues = [{"issue": "cho-lau", "count": 5}, {"issue": "het-mon", "count": 4}, {"issue": "thai-do", "count": 3}]
+    track_response_source("/api/ai/sentiment/issues-top", "fallback")
     return {"branchId": branchId, "days": safe_days, "issues": issues[:safe_limit], "source": "fallback"}
 
 
@@ -1356,7 +1612,8 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
 
 @app.post("/api/ai/chat")
 @metric_guard("chat")
-def ai_chat(payload: ChatPayload) -> dict[str, Any]:
+def ai_chat(payload: ChatPayload, request: Request) -> dict[str, Any]:
+    enforce_rate_limit(request, "ai_chat", AI_RATE_LIMIT_CHAT_PER_MINUTE)
     start = time.perf_counter()
     ensure_kb_fresh()
     if payload.branchId is not None:
@@ -1433,6 +1690,7 @@ def ai_chat_suggestions(request: Request) -> dict[str, Any]:
 @app.post("/api/ai/report-chat")
 @metric_guard("report_chat")
 def report_chat(payload: ReportChatPayload, request: Request) -> dict[str, Any]:
+    enforce_rate_limit(request, "report_chat", AI_RATE_LIMIT_REPORT_CHAT_PER_MINUTE)
     start = time.perf_counter()
     question = str(payload.question or "").strip()
     if not question:
