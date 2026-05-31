@@ -932,12 +932,8 @@ export default function CustomerMenu() {
     }
     setRequestingOtp(true)
     try {
-      const { data } = await api.post('/users/customer/request-otp', { phone })
-      if (data?.otp) {
-        toast.success(`OTP sandbox: ${data.otp}`)
-      } else {
-        toast.success('OTP da duoc gui')
-      }
+      await api.post('/auth/otp/request', { phone, purpose: customerAuthTab })
+      toast.success('OTP da duoc gui (hieu luc 5 phut)')
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Khong gui duoc OTP')
     } finally {
@@ -951,8 +947,17 @@ export default function CustomerMenu() {
     try {
       let data: CustomerAuthResponse
       if (customerAuthMode === 'EMAIL') {
+        const passwordPattern = /^(?=.*[A-Z])(?=.*\d).{8,}$/
         if (customerAuthTab === 'REGISTER') {
-          const res = await api.post('/users/customer/register-email', {
+          if (!authName.trim()) {
+            toast.error('Vui long nhap ho ten')
+            return
+          }
+          if (!passwordPattern.test(authPassword)) {
+            toast.error('Mật khẩu tối thiểu 8 ký tự, có ít nhất 1 chữ hoa và 1 số')
+            return
+          }
+          const res = await api.post('/auth/register', {
             name: authName.trim(),
             email: authEmail.trim(),
             password: authPassword,
@@ -960,28 +965,21 @@ export default function CustomerMenu() {
           })
           data = res.data as CustomerAuthResponse
         } else {
-          const res = await api.post('/users/customer/login-email', {
+          const res = await api.post('/auth/login', {
             email: authEmail.trim(),
             password: authPassword,
           })
           data = res.data as CustomerAuthResponse
         }
       } else {
-        if (customerAuthTab === 'REGISTER') {
-          const res = await api.post('/users/customer/register-otp', {
-            name: authName.trim(),
-            phone: authPhone.trim(),
-            otp: authOtp.trim(),
-            email: authEmail.trim() || undefined,
-          })
-          data = res.data as CustomerAuthResponse
-        } else {
-          const res = await api.post('/users/customer/login-otp', {
-            phone: authPhone.trim(),
-            otp: authOtp.trim(),
-          })
-          data = res.data as CustomerAuthResponse
-        }
+        const res = await api.post('/auth/otp/verify', {
+          name: customerAuthTab === 'REGISTER' ? authName.trim() : undefined,
+          phone: authPhone.trim(),
+          otp: authOtp.trim(),
+          email: authEmail.trim() || undefined,
+          purpose: customerAuthTab,
+        })
+        data = res.data as CustomerAuthResponse
       }
 
       saveCustomerSession(data.accessToken, data.user)
@@ -991,7 +989,12 @@ export default function CustomerMenu() {
       toast.success('Đăng nhập thành công')
       await loadCustomerData(data.accessToken, data.user)
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Đăng nhập hoặc đăng ký thất bại')
+      const message = String(error.response?.data?.message || '')
+      if (message.includes('WEAK_PASSWORD')) {
+        toast.error('Mật khẩu yếu: tối thiểu 8 ký tự, gồm chữ hoa và số')
+      } else {
+        toast.error(message || 'Đăng nhập hoặc đăng ký thất bại')
+      }
     } finally {
       setAuthSubmitting(false)
     }
@@ -2899,7 +2902,7 @@ export default function CustomerMenu() {
                   value={authName}
                   onChange={(e) => setAuthName(e.target.value)}
                   className={fieldClass}
-                  placeholder="Ho ten"
+                  placeholder="Họ và tên (ví dụ: Nguyễn Văn A)"
                   required
                 />
               )}
@@ -2910,7 +2913,7 @@ export default function CustomerMenu() {
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
                     className={fieldClass}
-                    placeholder="Email"
+                    placeholder="Email đăng ký (ví dụ: tenban@gmail.com)"
                     type="email"
                     required
                   />
@@ -2919,7 +2922,7 @@ export default function CustomerMenu() {
                       value={authPassword}
                       onChange={(e) => setAuthPassword(e.target.value)}
                       className={fieldClass}
-                      placeholder="Mat khau"
+                      placeholder="Mật khẩu: >=8 ký tự, có chữ hoa và số"
                       type="password"
                       required
                     />
@@ -2929,7 +2932,7 @@ export default function CustomerMenu() {
                       value={authPhone}
                       onChange={(e) => setAuthPhone(e.target.value)}
                       className={fieldClass}
-                      placeholder="So dien thoai (tuy chon)"
+                      placeholder="Số điện thoại (tùy chọn, ví dụ: 09xxxxxxxx)"
                     />
                   )}
                 </>
@@ -2940,7 +2943,7 @@ export default function CustomerMenu() {
                       value={authPhone}
                       onChange={(e) => setAuthPhone(e.target.value)}
                       className={`${fieldClass} flex-1`}
-                      placeholder="So dien thoai"
+                      placeholder="Số điện thoại nhận OTP (ví dụ: 09xxxxxxxx)"
                       required
                     />
                     <button
@@ -2956,7 +2959,7 @@ export default function CustomerMenu() {
                     value={authOtp}
                     onChange={(e) => setAuthOtp(e.target.value)}
                     className={fieldClass}
-                    placeholder="Ma OTP"
+                    placeholder="Mã OTP 6 số"
                     required
                   />
                   {customerAuthTab === 'REGISTER' && (
@@ -2964,7 +2967,7 @@ export default function CustomerMenu() {
                       value={authEmail}
                       onChange={(e) => setAuthEmail(e.target.value)}
                       className={fieldClass}
-                      placeholder="Email (tuy chon)"
+                      placeholder="Email liên kết (tùy chọn)"
                       type="email"
                     />
                   )}
