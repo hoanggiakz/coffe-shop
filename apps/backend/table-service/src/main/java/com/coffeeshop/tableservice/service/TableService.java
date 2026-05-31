@@ -261,7 +261,10 @@ public class TableService {
     }
 
     private String getOrCreateOpenChat(CoffeeTable table, String senderName) {
-        String queryUrl = chatServiceUrl + "?tableId=" + URLEncoder.encode(table.getId(), StandardCharsets.UTF_8);
+        String branchId = table.getBranchId() == null ? "" : table.getBranchId().trim();
+        String queryUrl = chatServiceUrl
+                + "?tableId=" + URLEncoder.encode(table.getId(), StandardCharsets.UTF_8)
+                + (branchId.isEmpty() ? "" : "&branchId=" + URLEncoder.encode(branchId, StandardCharsets.UTF_8));
         ResponseEntity<List> response = executeWithRetry(
                 () -> restTemplate.getForEntity(queryUrl, List.class),
                 "lay danh sach chat dang mo"
@@ -283,6 +286,9 @@ public class TableService {
         Map<String, Object> createPayload = new HashMap<>();
         createPayload.put("tableId", table.getId());
         createPayload.put("customerName", senderName);
+        if (!branchId.isEmpty()) {
+            createPayload.put("branchId", branchId);
+        }
 
         ResponseEntity<Map> created = executeWithRetry(
                 () -> restTemplate.postForEntity(chatServiceUrl, createPayload, Map.class),
