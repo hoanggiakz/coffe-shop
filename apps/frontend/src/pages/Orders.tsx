@@ -25,6 +25,10 @@ interface MenuItemApi {
   name: string
   price: number
   available: boolean
+  options?: unknown
+  customOptions?: unknown
+  custom_options?: unknown
+  customizations?: unknown
 }
 
 interface OrderItemApi {
@@ -143,6 +147,66 @@ const fallbackOrderItemName = (menuItemId?: string | null) => {
     .join(' ')
 }
 
+function normalizeCustomizations(raw: unknown): CustomizationGroup[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((entry: any) => ({
+      id: String(entry?.id || ''),
+      label: String(entry?.label || ''),
+      type: entry?.type === 'multi' ? 'multi' : 'single',
+      options: Array.isArray(entry?.options)
+        ? entry.options.map((opt: any) => ({
+            value: String(opt?.value || ''),
+            label: String(opt?.label || ''),
+            priceDelta: Number(opt?.priceDelta || 0),
+          }))
+        : [],
+    }))
+    .filter((entry) => entry.id && entry.label)
+}
+
+function normalizeSpecOptionsToCustomizations(raw: unknown): CustomizationGroup[] {
+  const options = raw && typeof raw === 'object' ? (raw as Record<string, any>) : {}
+  const sizes = Array.isArray(options.sizes) ? options.sizes : []
+  const toppings = Array.isArray(options.toppings) ? options.toppings : []
+  const groups: CustomizationGroup[] = []
+
+  if (sizes.length > 0) {
+    groups.push({
+      id: 'size',
+      label: 'Size',
+      type: 'single',
+      options: sizes.map((size: any) => ({
+        value: String(size?.name || ''),
+        label: String(size?.name || ''),
+        priceDelta: Number(size?.priceModifier || 0),
+      })),
+    })
+  }
+
+  if (toppings.length > 0) {
+    groups.push({
+      id: 'toppings',
+      label: 'Topping',
+      type: 'multi',
+      options: toppings.map((topping: any) => ({
+        value: String(topping?.name || ''),
+        label: String(topping?.name || ''),
+        priceDelta: Number(topping?.priceModifier || 0),
+      })),
+    })
+  }
+
+  return groups
+}
+
+function extractCustomizations(menuItem: MenuItemApi): CustomizationGroup[] {
+  const fromCustomizations = normalizeCustomizations(menuItem.customizations)
+  if (fromCustomizations.length > 0) return fromCustomizations
+  const options = menuItem.customOptions ?? menuItem.custom_options ?? menuItem.options
+  return normalizeSpecOptionsToCustomizations(options)
+}
+
 export default function Orders() {
   const navigate = useNavigate()
   const { tv } = useI18n()
@@ -179,6 +243,11 @@ export default function Orders() {
   const [syncingOfflineQueue, setSyncingOfflineQueue] = useState(false)
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
   const [cartHistory, setCartHistory] = useState<Record<string, number>[]>([])
+  const [customCartLines, setCustomCartLines] = useState<CustomCartLine[]>([])
+  const [customizingItem, setCustomizingItem] = useState<MenuItemApi | null>(null)
+  const [customSize, setCustomSize] = useState('')
+  const [customToppings, setCustomToppings] = useState<string[]>([])
+  const [customNote, setCustomNote] = useState('')
   const [sepayExpiresAt, setSepayExpiresAt] = useState<string | null>(null)
   const [sepaySecondsLeft, setSepaySecondsLeft] = useState(0)
   const [sepayExpiredNotified, setSepayExpiredNotified] = useState(false)
@@ -506,6 +575,17 @@ export default function Orders() {
   }, [selectedBranchId])
 
   const increase = (menuItemId: string) => {
+    const item = menuItems.find((entry) => entry.id === menuItemId)
+    if (!item) return
+    const customGroups = extractCustomizations(item)
+    if (customGroups.length > 0) {
+      const sizeGroup = customGroups.find((group) => group.type === 'single')
+      setCustomizingItem(item)
+      setCustomSize(String(sizeGroup?.options?.[0]?.value || ''))
+      setCustomToppings([])
+      setCustomNote('')
+      return
+    }
     pushCartHistory({ ...cart })
     setCart((prev) => ({ ...prev, [menuItemId]: (prev[menuItemId] || 0) + 1 }))
   }
@@ -533,16 +613,82 @@ export default function Orders() {
     [cart, menuItems],
   )
 
+  const customCartTotal = useMemo(
+    () =>
+      customCartLines.reduce((sum, line) => {
+        const basePrice = Number(menuItems.find((entry) => entry.id === line.menuItemId)?.price || 0)
+        const sizeExtra = Number(line.selectedOptions.size?.priceModifier || 0)
+        const toppingsExtra = Array.isArray(line.selectedOptions.toppings)
+          ? line.selectedOptions.toppings.reduce((acc, item) => acc + Number(item.priceModifier || 0), 0)
+          : 0
+        return sum + (basePrice + sizeExtra + toppingsExtra) * line.quantity
+      }, 0),
+    [customCartLines, menuItems],
+  )
+
+  const applyCustomization = () => {
+    if (!customizingItem) return
+    const groups = extractCustomizations(customizingItem)
+    const sizeGroup = groups.find((group) => group.type === 'single')
+    const toppingGroup = groups.find((group) => group.type === 'multi')
+    const size = sizeGroup?.options?.find((option) => option.value === customSize)
+    const toppings = (toppingGroup?.options || []).filter((option) => customToppings.includes(option.value))
+    const selectedOptions: StaffSelectedOptions = {
+      ...(size ? { size: { name: size.label, priceModifier: Number(size.priceDelta || 0) } } : {}),
+      ...(toppings.length
+        ? {
+            toppings: toppings.map((item) => ({
+              name: item.label,
+              priceModifier: Number(item.priceDelta || 0),
+            })),
+          }
+        : {}),
+      ...(customNote.trim() ? { note: customNote.trim() } : {}),
+    }
+
+    const key = JSON.stringify({ menuItemId: customizingItem.id, selectedOptions })
+    setCustomCartLines((prev) => {
+      const existingIndex = prev.findIndex(
+        (line) =>
+          JSON.stringify({
+            menuItemId: line.menuItemId,
+            selectedOptions: line.selectedOptions,
+          }) === key,
+      )
+      if (existingIndex >= 0) {
+        return prev.map((line, index) => (index === existingIndex ? { ...line, quantity: line.quantity + 1 } : line))
+      }
+      return [
+        ...prev,
+        {
+          localId: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          menuItemId: customizingItem.id,
+          menuItemName: customizingItem.name,
+          quantity: 1,
+          selectedOptions,
+        },
+      ]
+    })
+    setCustomizingItem(null)
+  }
+
   const createOrder = async (e: FormEvent) => {
     e.preventDefault()
     if (!selectedTableId) {
       toast.error(tv('Chưa chọn bàn', 'No table selected'))
       return
     }
-    const items = Object.entries(cart).map(([menuItemId, quantity]) => ({
+    const baseItems = Object.entries(cart).map(([menuItemId, quantity]) => ({
       menuItemId,
       quantity,
     }))
+    const customItems = customCartLines.map((line) => ({
+      menuItemId: line.menuItemId,
+      quantity: line.quantity,
+      note: line.selectedOptions.note,
+      selectedOptions: line.selectedOptions,
+    }))
+    const items = [...baseItems, ...customItems]
     if (items.length === 0) {
       toast.error(tv('Chưa có món trong giỏ', 'Cart is empty'))
       return
@@ -556,6 +702,7 @@ export default function Orders() {
         items,
       })
       setCart({})
+      setCustomCartLines([])
       toast.success(tv('Tạo đơn thành công', 'Order created successfully'))
       await loadData()
     } catch (error: any) {
@@ -575,6 +722,7 @@ export default function Orders() {
         await writePosOfflineQueue(selectedBranchId || undefined, nextQueue)
         setOfflineQueue(nextQueue)
         setCart({})
+        setCustomCartLines([])
         toast.success('Mất mạng: đã đưa đơn vào offline queue, sẽ tự đồng bộ khi có mạng')
       } else {
         toast.error(error.response?.data?.message || tv('Tạo đơn thất bại', 'Failed to create order'))
@@ -1113,8 +1261,37 @@ export default function Orders() {
 
             <div className="flex items-center justify-between border-t pt-2">
               <span className="font-semibold">{tv('Tổng', 'Total')}</span>
-              <span className="font-bold text-amber-700">{cartTotal.toLocaleString()}đ</span>
+              <span className="font-bold text-amber-700">{(cartTotal + customCartTotal).toLocaleString()}đ</span>
             </div>
+
+            {customCartLines.length > 0 && (
+              <div className="rounded-xl border border-amber-100 p-2 text-xs">
+                <p className="mb-1 font-semibold">Món đã tùy chỉnh</p>
+                <div className="space-y-1">
+                  {customCartLines.map((line) => (
+                    <div key={line.localId} className="flex items-start justify-between gap-2">
+                      <div>
+                        <p>{line.quantity}x {line.menuItemName}</p>
+                        <p className="text-slate-500">
+                          {line.selectedOptions.size?.name ? `Size ${line.selectedOptions.size.name}. ` : ''}
+                          {Array.isArray(line.selectedOptions.toppings) && line.selectedOptions.toppings.length > 0
+                            ? `Topping: ${line.selectedOptions.toppings.map((item) => item.name).join(', ')}. `
+                            : ''}
+                          {line.selectedOptions.note ? `Ghi chú: ${line.selectedOptions.note}` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded border border-amber-200 px-2 py-1"
+                        onClick={() => setCustomCartLines((prev) => prev.filter((entry) => entry.localId !== line.localId))}
+                      >
+                        Xóa
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <Button type="submit" className="w-full" loading={creating}>
               {tv('Tạo đơn cho bàn', 'Create order')}
@@ -1421,6 +1598,60 @@ export default function Orders() {
             <div className="mt-4 flex justify-end">
               <Button variant="secondary" onClick={() => setDetailOrder(null)}>
                 Đóng
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {customizingItem && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 dark:bg-slate-900">
+            <p className="text-lg font-bold">Tùy chỉnh món: {customizingItem.name}</p>
+            {extractCustomizations(customizingItem).map((group) => (
+              <div key={group.id} className="mt-3">
+                <p className="mb-1 text-sm font-semibold">{group.label}</p>
+                {group.type === 'single' ? (
+                  <select className={selectClass} value={customSize} onChange={(e) => setCustomSize(e.target.value)}>
+                    {(group.options || []).map((option) => (
+                      <option key={`${group.id}-${option.value}`} value={option.value}>
+                        {option.label}{option.priceDelta ? ` (+${Number(option.priceDelta).toLocaleString()}đ)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="space-y-1 text-sm">
+                    {(group.options || []).map((option) => (
+                      <label key={`${group.id}-${option.value}`} className="flex items-center justify-between rounded border border-amber-100 px-2 py-1">
+                        <span>{option.label}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">{option.priceDelta ? `+${Number(option.priceDelta).toLocaleString()}đ` : ''}</span>
+                          <input
+                            type="checkbox"
+                            checked={customToppings.includes(option.value)}
+                            onChange={(e) =>
+                              setCustomToppings((prev) =>
+                                e.target.checked ? [...prev, option.value] : prev.filter((item) => item !== option.value),
+                              )
+                            }
+                          />
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            <div className="mt-3">
+              <p className="mb-1 text-sm font-semibold">Ghi chú</p>
+              <input className={selectClass} value={customNote} onChange={(e) => setCustomNote(e.target.value)} placeholder="Ít đá, ít ngọt..." />
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => setCustomizingItem(null)}>
+                Hủy
+              </Button>
+              <Button className="flex-1" onClick={applyCustomization}>
+                Thêm vào giỏ
               </Button>
             </div>
           </div>
