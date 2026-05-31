@@ -10,6 +10,7 @@ import { useI18n } from '@/utils/i18n'
 import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import { clearPosMenuCache, readPosMenuCache, writePosMenuCache } from '@/utils/posMenuCache'
+import { readPosOfflineQueue, writePosOfflineQueue } from '@/utils/posOfflineQueue'
 import { disconnectSocket, getSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { useAuthStore } from '@/stores/authStore'
@@ -97,6 +98,7 @@ interface StaffNotificationPayload {
 interface OfflineOrderQueueItem {
   localId: string
   createdAt: string
+  syncStatus: 'PENDING_SYNC'
   branchId?: string
   tableId: string
   customerName: string
@@ -110,28 +112,6 @@ const paymentMethods: PaymentMethod[] = ['CASH', 'SEPAY']
 const orderStatuses: Array<OrderApi['status']> = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
 const selectClass =
   'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
-const offlineQueueStorageKey = (branchId?: string | null) => `pos_offline_order_queue_${branchId || 'all'}`
-
-const readOfflineQueue = (branchId?: string | null): OfflineOrderQueueItem[] => {
-  try {
-    const raw = localStorage.getItem(offlineQueueStorageKey(branchId))
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((item) => item && item.localId && item.tableId && Array.isArray(item.items))
-  } catch {
-    return []
-  }
-}
-
-const writeOfflineQueue = (branchId: string | null | undefined, queue: OfflineOrderQueueItem[]) => {
-  try {
-    localStorage.setItem(offlineQueueStorageKey(branchId), JSON.stringify(queue))
-  } catch {
-    // ignore localStorage write errors
-  }
-}
-
 const formatDateTimeFull = (value?: string | null) => {
   if (!value) return '-'
   const date = new Date(value)
@@ -200,8 +180,9 @@ export default function Orders() {
   const [cartHistory, setCartHistory] = useState<Record<string, number>[]>([])
   const notifSyncKey = useMemo(() => `notif_last_received_at_${String(user?.id || 'guest')}`, [user?.id])
 
-  const refreshOfflineQueue = () => {
-    setOfflineQueue(readOfflineQueue(selectedBranchId || undefined))
+  const refreshOfflineQueue = async () => {
+    const queue = await readPosOfflineQueue<OfflineOrderQueueItem>(selectedBranchId || undefined)
+    setOfflineQueue(queue)
   }
 
   const loadData = async () => {
@@ -253,7 +234,7 @@ export default function Orders() {
   }, [selectedStatus, filterTableId, dateFrom, dateTo, selectedBranchId])
 
   useEffect(() => {
-    refreshOfflineQueue()
+    void refreshOfflineQueue()
   }, [selectedBranchId])
 
   const loadPaymentHistory = async () => {
@@ -406,7 +387,7 @@ export default function Orders() {
   }, [dateFrom, dateTo, filterTableId, notifSyncKey, selectedBranchId, selectedStatus, user?.branchId, user?.id, user?.name])
 
   const syncOfflineQueue = async () => {
-    const currentQueue = readOfflineQueue(selectedBranchId || undefined)
+    const currentQueue = await readPosOfflineQueue<OfflineOrderQueueItem>(selectedBranchId || undefined)
     if (!currentQueue.length) return
 
     setSyncingOfflineQueue(true)
@@ -421,7 +402,7 @@ export default function Orders() {
           items: item.items,
         })
         nextQueue = nextQueue.filter((queued) => queued.localId !== item.localId)
-        writeOfflineQueue(selectedBranchId || undefined, nextQueue)
+        await writePosOfflineQueue(selectedBranchId || undefined, nextQueue)
         successCount += 1
       } catch (error: any) {
         const message = String(error?.response?.data?.message || '')
@@ -433,7 +414,7 @@ export default function Orders() {
           toast.error(`Queue #${item.localId.slice(-6)} lỗi: ${message}`)
         }
         nextQueue = nextQueue.filter((queued) => queued.localId !== item.localId)
-        writeOfflineQueue(selectedBranchId || undefined, nextQueue)
+        await writePosOfflineQueue(selectedBranchId || undefined, nextQueue)
       }
     }
 
@@ -520,13 +501,15 @@ export default function Orders() {
         const queuedItem: OfflineOrderQueueItem = {
           localId: `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           createdAt: new Date().toISOString(),
+          syncStatus: 'PENDING_SYNC',
           branchId: selectedBranchId || undefined,
           tableId: selectedTableId,
           customerName: 'Khách tại quầy',
           items,
         }
-        const nextQueue = [...readOfflineQueue(selectedBranchId || undefined), queuedItem]
-        writeOfflineQueue(selectedBranchId || undefined, nextQueue)
+        const existingQueue = await readPosOfflineQueue<OfflineOrderQueueItem>(selectedBranchId || undefined)
+        const nextQueue = [...existingQueue, queuedItem]
+        await writePosOfflineQueue(selectedBranchId || undefined, nextQueue)
         setOfflineQueue(nextQueue)
         setCart({})
         toast.success('Mất mạng: đã đưa đơn vào offline queue, sẽ tự đồng bộ khi có mạng')
@@ -958,7 +941,7 @@ export default function Orders() {
             size="sm"
             variant="secondary"
             onClick={() => {
-              writeOfflineQueue(selectedBranchId || undefined, [])
+              void writePosOfflineQueue(selectedBranchId || undefined, [])
               setOfflineQueue([])
               toast.success('Đã xóa offline queue')
             }}
@@ -975,7 +958,7 @@ export default function Orders() {
               return (
                 <div key={item.localId} className="rounded-lg bg-white/80 p-2 dark:bg-slate-900/40">
                   <p className="font-semibold">#{item.localId.slice(-6)} · Bàn {table?.number ?? item.tableId}</p>
-                  <p>{quantity} món · {formatDateTimeFull(item.createdAt)}</p>
+                  <p>{quantity} món · {formatDateTimeFull(item.createdAt)} · {item.syncStatus}</p>
                 </div>
               )
             })}
