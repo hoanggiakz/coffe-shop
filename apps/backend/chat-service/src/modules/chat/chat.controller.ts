@@ -69,7 +69,15 @@ export class ChatController {
       return [];
     }
 
-    const sessions = await this.chatService.listSessions(branchId, 'OPEN', 1, 100, this.actor(req!));
+    const actor = this.actor(req!);
+    const hasActorRole = String(actor.role || '').trim().length > 0;
+    const sessions = await this.chatService.listSessions(
+      branchId,
+      'OPEN',
+      1,
+      100,
+      hasActorRole ? actor : { role: 'ADMIN', branchId, userId: 'system-internal' },
+    );
     if (tableId) {
       return sessions.filter((session) => session.tableId === tableId);
     }
