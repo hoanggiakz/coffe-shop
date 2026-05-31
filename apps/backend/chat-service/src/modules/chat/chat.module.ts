@@ -12,6 +12,7 @@ import { PosGateway } from './pos.gateway';
 import { KdsGateway } from './kds.gateway';
 import { StaffChatGateway } from './staff-chat.gateway';
 import { CustomerGateway } from './customer.gateway';
+import { KdsOrderSyncService } from './kds-order-sync.service';
 
 @Module({
   imports: [PrismaModule, KafkaModule],
@@ -21,6 +22,7 @@ import { CustomerGateway } from './customer.gateway';
     NotificationHubService,
     SocketAuthService,
     NotificationRouterService,
+    KdsOrderSyncService,
     ChatGateway,
     PosGateway,
     KdsGateway,

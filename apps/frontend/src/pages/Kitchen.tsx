@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
@@ -133,6 +133,7 @@ export default function Kitchen() {
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const effectiveBranchId = String(selectedBranchId || currentUser?.branchId || '').trim()
   const wsBaseUrl = resolveWebsocketBaseUrl()
+  const kdsSocketRef = useRef<Socket | null>(null)
 
   const loadData = async () => {
     try {
@@ -187,6 +188,7 @@ export default function Kitchen() {
       auth: token ? { token } : undefined,
     })
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+    kdsSocketRef.current = socket
 
     const onConnect = () => {
       setSocketConnected(true)
@@ -245,6 +247,9 @@ export default function Kitchen() {
       socket.off('order-status-updated', onRealtimeEvent)
       if (heartbeatTimer) clearInterval(heartbeatTimer)
       socket.disconnect()
+      if (kdsSocketRef.current === socket) {
+        kdsSocketRef.current = null
+      }
     }
   }, [soundEnabled, currentUser?.id, effectiveBranchId, wsBaseUrl])
 
@@ -255,11 +260,15 @@ export default function Kitchen() {
   ) => {
     setUpdatingId(itemId)
     try {
-      await api.patch(`/orders/${orderId}/items/${itemId}/status`, { status })
+      const socket = kdsSocketRef.current
+      if (!socket?.connected) {
+        throw new Error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      }
+      socket.emit(status === 'PREPARING' ? 'start-item' : 'complete-item', { orderId, itemId })
       await loadData()
       toast.success(tv(`Cập nhật món -> ${status}`, `Item updated -> ${status}`))
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Cập nhật món thất bại')
+      toast.error(error?.message || error.response?.data?.message || 'Cập nhật món thất bại')
     } finally {
       setUpdatingId(null)
     }
@@ -274,11 +283,32 @@ export default function Kitchen() {
 
     setUpdatingId(`order:${order.id}`)
     try {
-      await api.patch(`/orders/${order.id}/status`, { status: 'COMPLETED' })
+      const socket = kdsSocketRef.current
+      if (!socket?.connected) {
+        throw new Error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      }
+      socket.emit('complete-order', { orderId: order.id })
       await loadData()
-      toast.success(tv(`Đã hoàn thành đơn ${maDonHangNgan(order.id)}`, `Order ${maDonHangNgan(order.id)} completed`))
+      toast.success(tv(`Đã cập nhật đơn ${maDonHangNgan(order.id)}`, `Order ${maDonHangNgan(order.id)} updated`))
     } catch (error: any) {
-      toast.error(error.response?.data?.message || tv('Không thể hoàn thành đơn', 'Unable to complete order'))
+      toast.error(error?.message || error.response?.data?.message || tv('Không thể hoàn thành đơn', 'Unable to complete order'))
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  const startOrder = async (order: OrderApi) => {
+    setUpdatingId(`order:start:${order.id}`)
+    try {
+      const socket = kdsSocketRef.current
+      if (!socket?.connected) {
+        throw new Error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      }
+      socket.emit('start-order', { orderId: order.id })
+      await loadData()
+      toast.success(tv(`Đã bắt đầu đơn ${maDonHangNgan(order.id)}`, `Order ${maDonHangNgan(order.id)} started`))
+    } catch (error: any) {
+      toast.error(error?.message || error.response?.data?.message || tv('Không thể bắt đầu đơn', 'Unable to start order'))
     } finally {
       setUpdatingId(null)
     }
@@ -294,31 +324,16 @@ export default function Kitchen() {
   )
 
   const remindStaff = (order: OrderApi) => {
-    const raw = typeof window !== 'undefined' ? sessionStorage.getItem('auth-storage') : ''
-    let token = ''
-    try {
-      const parsed = raw ? JSON.parse(raw) : null
-      token = String(parsed?.state?.token || '').trim()
-    } catch {
-      token = ''
+    const socket = kdsSocketRef.current
+    if (!socket?.connected) {
+      toast.error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      return
     }
-    const socket: Socket = io(`${wsBaseUrl}/kds`, {
-      transports: ['polling', 'websocket'],
-      auth: token ? { token } : undefined,
+    socket.emit('remind-staff', {
+      orderId: order.id,
+      tableNumber: Number(tableNumberById.get(order.tableId) || 0),
     })
-    socket.on('connect', () => {
-      socket.emit('join-kds', {
-        branchId: effectiveBranchId || undefined,
-        stationCode: 'ALL',
-        stationId: `${currentUser?.id || 'kds'}-all`,
-      })
-      socket.emit('remind-staff', {
-        orderId: order.id,
-        tableNumber: Number(tableNumberById.get(order.tableId) || 0),
-      })
-      socket.disconnect()
-      toast.success(tv('Đã gửi nhắc nhân viên phục vụ', 'Staff reminder sent'))
-    })
+    toast.success(tv('Đã gửi nhắc nhân viên phục vụ', 'Staff reminder sent'))
   }
 
   const itemLabel = (menuItemId: string) => menuItems.find((m) => m.id === menuItemId)?.name || menuItemId
@@ -465,6 +480,16 @@ export default function Kitchen() {
                       Món chưa xong: <strong>{order.orderItems.filter((item) => item.status !== 'READY').length}</strong>
                     </span>
                     <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+                      {orderKdsStage(order) === 'WAITING' && (
+                        <Button
+                          size="sm"
+                          className="w-full sm:w-auto"
+                          onClick={() => startOrder(order)}
+                          loading={updatingId === `order:start:${order.id}`}
+                        >
+                          {tv('Bắt đầu tất cả', 'Start all')}
+                        </Button>
+                      )}
                       {order.status === 'READY' && (
                         <Button
                           size="sm"
