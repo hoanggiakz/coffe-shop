@@ -12,6 +12,7 @@ public class CustomerProfileResponse {
     private String email;
     private String phone;
     private String avatarUrl;
+    private String dateOfBirth;
     private Integer loyaltyPoints;
     private Long totalSpent;
     private String membershipTier;
@@ -21,16 +22,18 @@ public class CustomerProfileResponse {
 
     public static CustomerProfileResponse from(User user) {
         long totalSpent = user.getTotalSpent() == null ? 0L : user.getTotalSpent();
-        String tier = user.getMemberTier() == null ? "STANDARD" : user.getMemberTier().name();
+        String tier = user.getMemberTier() == null ? "BRONZE" : user.getMemberTier().name();
         String nextTier = switch (tier) {
-            case "STANDARD" -> "SILVER";
+            case "BRONZE", "STANDARD" -> "SILVER";
             case "SILVER" -> "GOLD";
-            default -> "GOLD";
+            case "GOLD" -> "PLATINUM";
+            default -> "PLATINUM";
         };
         long nextMilestone = switch (tier) {
-            case "STANDARD" -> 3_000_000L;
+            case "BRONZE", "STANDARD" -> 3_000_000L;
             case "SILVER" -> 10_000_000L;
-            default -> 10_000_000L;
+            case "GOLD" -> 30_000_000L;
+            default -> 30_000_000L;
         };
         return new CustomerProfileResponse(
                 user.getId(),
@@ -38,6 +41,7 @@ public class CustomerProfileResponse {
                 user.getEmail(),
                 user.getPhone(),
                 user.getAvatarUrl(),
+                user.getDateOfBirth() == null ? null : user.getDateOfBirth().toString(),
                 user.getLoyaltyPoints() == null ? 0 : user.getLoyaltyPoints(),
                 totalSpent,
                 tier,
@@ -47,4 +51,3 @@ public class CustomerProfileResponse {
         );
     }
 }
-

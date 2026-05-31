@@ -43,7 +43,7 @@ public class User {
     @Enumerated(EnumType.STRING)
     @Column(name = "member_tier", nullable = false)
     @Builder.Default
-    private MemberTier memberTier = MemberTier.STANDARD;
+    private MemberTier memberTier = MemberTier.BRONZE;
 
     @Column(name = "loyalty_points", nullable = false)
     @Builder.Default
@@ -60,6 +60,12 @@ public class User {
 
     @Column(name = "avatar_url", columnDefinition = "TEXT")
     private String avatarUrl;
+
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
+
+    @Column(name = "google_id", unique = true)
+    private String googleId;
 
     @Column(name = "employee_code", unique = true)
     private String employeeCode;
@@ -94,7 +100,7 @@ public class User {
     }
 
     public enum MemberTier {
-        STANDARD, SILVER, GOLD
+        BRONZE, STANDARD, SILVER, GOLD, PLATINUM
     }
 
     public enum SalaryType {

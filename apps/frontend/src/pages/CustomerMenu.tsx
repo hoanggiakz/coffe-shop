@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '@/utils/api'
 import { getSocket, disconnectSocket } from '@/utils/socket'
@@ -171,7 +171,7 @@ interface CustomerSession {
   role: string
   phone?: string | null
   loyaltyPoints: number
-  memberTier: 'STANDARD' | 'SILVER' | 'GOLD'
+  memberTier: 'BRONZE' | 'STANDARD' | 'SILVER' | 'GOLD' | 'PLATINUM'
   totalSpent: number
 }
 
@@ -806,7 +806,7 @@ export default function CustomerMenu() {
       ...user,
       loyaltyPoints: Number(user.loyaltyPoints || 0),
       totalSpent: Number(user.totalSpent || 0),
-      memberTier: (user.memberTier || 'STANDARD') as CustomerSession['memberTier'],
+      memberTier: (user.memberTier || 'BRONZE') as CustomerSession['memberTier'],
     }
     setCustomerToken(token)
     setCustomerSession(normalizedUser)
@@ -2271,6 +2271,14 @@ export default function CustomerMenu() {
                     <p className="text-gray-500">Chi tieu</p>
                     <p className="font-semibold text-emerald-700">{formatVnd(customerSession.totalSpent)}</p>
                   </div>
+                </div>
+                <div>
+                  <Link
+                    to="/menu/account"
+                    className="inline-flex rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700"
+                  >
+                    Mở trang tài khoản & rewards
+                  </Link>
                 </div>
                 {loadingCustomerData && <p className="text-xs text-gray-500">Dang tai du lieu thanh vien...</p>}
                 {!loadingCustomerData && customerOffers.length > 0 && (

@@ -17,6 +17,8 @@ const isPublicCustomerRoute = () => {
   return (
     path === '/menu' ||
     path.startsWith('/menu/') ||
+    path === '/menu/account' ||
+    path.startsWith('/menu/account') ||
     path === '/payment/return' ||
     path.startsWith('/payment/return/') ||
     path === '/invoice/public' ||

@@ -15,6 +15,7 @@ public class UserProfile {
     private String branchId;
     private String employeeCode;
     private String avatarUrl;
+    private String dateOfBirth;
     private Integer loyaltyPoints;
     private String memberTier;
     private Long totalSpent;
@@ -29,8 +30,9 @@ public class UserProfile {
             user.getBranchId(),
             user.getEmployeeCode(),
             user.getAvatarUrl(),
+            user.getDateOfBirth() == null ? null : user.getDateOfBirth().toString(),
             user.getLoyaltyPoints(),
-            user.getMemberTier().name(),
+            user.getMemberTier() == null ? "BRONZE" : user.getMemberTier().name(),
             user.getTotalSpent()
         );
     }

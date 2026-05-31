@@ -46,12 +46,14 @@ import com.coffeeshop.userservice.dto.WeekScheduleResponse;
 import com.coffeeshop.userservice.dto.ChangePasswordRequest;
 import com.coffeeshop.userservice.entity.AttendanceRecord;
 import com.coffeeshop.userservice.entity.Branch;
+import com.coffeeshop.userservice.entity.CustomerPasswordResetToken;
 import com.coffeeshop.userservice.entity.LoyaltyTransaction;
 import com.coffeeshop.userservice.entity.ShiftType;
 import com.coffeeshop.userservice.entity.StaffShift;
 import com.coffeeshop.userservice.entity.User;
 import com.coffeeshop.userservice.repository.AttendanceRecordRepository;
 import com.coffeeshop.userservice.repository.BranchRepository;
+import com.coffeeshop.userservice.repository.CustomerPasswordResetTokenRepository;
 import com.coffeeshop.userservice.repository.LoyaltyTransactionRepository;
 import com.coffeeshop.userservice.repository.StaffShiftRepository;
 import com.coffeeshop.userservice.repository.UserRepository;
@@ -113,6 +115,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final BranchRepository branchRepository;
+    private final CustomerPasswordResetTokenRepository customerPasswordResetTokenRepository;
     private final StaffShiftRepository staffShiftRepository;
     private final AttendanceRecordRepository attendanceRecordRepository;
     private final LoyaltyTransactionRepository loyaltyTransactionRepository;
@@ -141,7 +144,6 @@ public class UserService {
     private final Map<String, OtpEntry> otpStore = new ConcurrentHashMap<>();
     private final Map<String, List<Long>> otpRequestRateStore = new ConcurrentHashMap<>();
     private final Map<String, RefreshEntry> refreshTokenStore = new ConcurrentHashMap<>();
-    private final Map<String, ResetPasswordEntry> resetPasswordStore = new ConcurrentHashMap<>();
     private final Map<String, GoogleOauthStateEntry> googleOauthStateStore = new ConcurrentHashMap<>();
 
     public StaffResponse register(String token, RegisterRequest req) {
@@ -195,12 +197,42 @@ public class UserService {
         }
 
         if (req.getPhone() != null) {
-            user.setPhone(normalizePhone(req.getPhone()));
+            String normalizedPhone = normalizePhone(req.getPhone());
+            String currentPhone = user.getPhone() == null ? "" : user.getPhone().trim();
+            if (normalizedPhone != null && !normalizedPhone.equals(currentPhone) && userRepository.existsByPhone(normalizedPhone)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "PHONE_EXISTS");
+            }
+            user.setPhone(normalizedPhone);
+        }
+
+        if (req.getEmail() != null) {
+            String normalizedEmail = normalizeEmail(req.getEmail());
+            if (normalizedEmail == null || normalizedEmail.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email khong hop le");
+            }
+            String currentEmail = user.getEmail() == null ? "" : user.getEmail().trim();
+            if (!normalizedEmail.equalsIgnoreCase(currentEmail) && userRepository.existsByEmail(normalizedEmail)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "EMAIL_EXISTS");
+            }
+            user.setEmail(normalizedEmail);
         }
 
         if (req.getAvatarUrl() != null) {
             String avatarUrl = req.getAvatarUrl().trim();
             user.setAvatarUrl(avatarUrl.isBlank() ? null : avatarUrl);
+        }
+
+        if (req.getDateOfBirth() != null) {
+            String rawDob = String.valueOf(req.getDateOfBirth()).trim();
+            if (rawDob.isBlank()) {
+                user.setDateOfBirth(null);
+            } else {
+                try {
+                    user.setDateOfBirth(LocalDate.parse(rawDob));
+                } catch (Exception ex) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ngay sinh khong hop le (yyyy-MM-dd)");
+                }
+            }
         }
 
         return UserProfile.from(userRepository.save(user));
@@ -272,7 +304,7 @@ public class UserService {
                     .name(normalizeNullableText(req.getName()) != null ? req.getName().trim() : "Khach hang")
                     .phone(phone)
                     .role(User.Role.CUSTOMER)
-                    .memberTier(User.MemberTier.STANDARD)
+                    .memberTier(User.MemberTier.BRONZE)
                     .loyaltyPoints(0)
                     .totalSpent(0L)
                     .isActive(true)
@@ -302,7 +334,7 @@ public class UserService {
                 .name(req.getName())
                 .phone(normalizedPhone)
                 .role(User.Role.CUSTOMER)
-                .memberTier(User.MemberTier.STANDARD)
+                .memberTier(User.MemberTier.BRONZE)
                 .loyaltyPoints(0)
                 .totalSpent(0L)
                 .isActive(true)
@@ -343,7 +375,7 @@ public class UserService {
                 .name(req.getName())
                 .phone(phone)
                 .role(User.Role.CUSTOMER)
-                .memberTier(User.MemberTier.STANDARD)
+                .memberTier(User.MemberTier.BRONZE)
                 .loyaltyPoints(0)
                 .totalSpent(0L)
                 .isActive(true)
@@ -401,13 +433,6 @@ public class UserService {
             verifyAndConsumeOtp(targetPhoneForOtp, purpose, rawOtp);
         }
 
-        if (emailChanged) {
-            if (userRepository.existsByEmail(nextEmail)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "EMAIL_EXISTS");
-            }
-            customer.setEmail(nextEmail);
-            userRepository.save(customer);
-        }
         UserProfile updated = updateProfile(customer.getId(), req);
         User reloaded = userRepository.findById(updated.getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));
@@ -423,11 +448,14 @@ public class UserService {
         User user = requireCustomerFromToken(token);
         List<String> offers = new ArrayList<>();
         offers.add("Tich 1 diem cho moi 10.000d chi tieu");
-        if (user.getMemberTier() == User.MemberTier.SILVER) {
-            offers.add("Uu dai SILVER: giam 5% toi da 30.000d");
+        if (user.getMemberTier() == User.MemberTier.PLATINUM) {
+            offers.add("Uu dai PLATINUM: giam 15% toi da 150.000d");
+            offers.add("Uu tien phuc vu VIP va uu dai sinh nhat dac biet");
         } else if (user.getMemberTier() == User.MemberTier.GOLD) {
             offers.add("Uu dai GOLD: giam 10% toi da 80.000d");
             offers.add("Uu tien phuc vu va uu dai sinh nhat");
+        } else if (user.getMemberTier() == User.MemberTier.SILVER) {
+            offers.add("Uu dai SILVER: giam 5% toi da 30.000d");
         } else {
             offers.add("Nang cap SILVER khi tong chi tieu dat 3.000.000d");
         }
@@ -489,24 +517,40 @@ public class UserService {
         User user = userRepository.findByEmailAndRole(email, User.Role.CUSTOMER).orElse(null);
         if (user != null) {
             String token = UUID.randomUUID().toString();
-            resetPasswordStore.put(token, new ResetPasswordEntry(user.getId(), System.currentTimeMillis() + RESET_TOKEN_EXPIRES_MILLIS));
+            LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(15);
+            customerPasswordResetTokenRepository.deleteByExpiresAtBefore(LocalDateTime.now());
+            customerPasswordResetTokenRepository.save(CustomerPasswordResetToken.builder()
+                    .userId(user.getId())
+                    .token(token)
+                    .expiresAt(expiresAt)
+                    .usedAt(null)
+                    .build());
         }
-        return Map.of("message", "Link dat lai mat khau da gui ve email (sandbox)");
+        return Map.of(
+                "message", "Link dat lai mat khau da gui ve email cua ban (het han sau 15 phut)",
+                "expiresIn", 900
+        );
     }
 
     public Map<String, Object> resetPassword(ResetPasswordRequest req) {
         String token = String.valueOf(req.getToken() == null ? "" : req.getToken()).trim();
-        ResetPasswordEntry entry = resetPasswordStore.get(token);
-        if (entry == null || System.currentTimeMillis() > entry.expiresAtMillis()) {
-            resetPasswordStore.remove(token);
+        CustomerPasswordResetToken entry = customerPasswordResetTokenRepository.findByToken(token).orElse(null);
+        if (entry == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token dat lai mat khau khong hop le hoac het han");
         }
-        User user = userRepository.findById(entry.userId())
+        if (entry.getUsedAt() != null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token dat lai mat khau da duoc su dung");
+        }
+        if (entry.getExpiresAt() == null || LocalDateTime.now().isAfter(entry.getExpiresAt())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token dat lai mat khau khong hop le hoac het han");
+        }
+        User user = userRepository.findById(entry.getUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));
         validateStrongPassword(req.getNewPassword());
         user.setPassword(passwordEncoder.encode(req.getNewPassword()));
         userRepository.save(user);
-        resetPasswordStore.remove(token);
+        entry.setUsedAt(LocalDateTime.now());
+        customerPasswordResetTokenRepository.save(entry);
         return Map.of("success", true, "message", "Mat khau da duoc cap nhat");
     }
 
@@ -634,11 +678,18 @@ public class UserService {
 
         JsonNode userInfo = fetchGoogleUserInfo(accessToken);
         String email = normalizeEmail(userInfo.path("email").asText(""));
+        String googleId = normalizeNullableText(userInfo.path("sub").asText(""));
         if (email == null || email.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Google khong tra ve email hop le");
         }
+        if (googleId == null || googleId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Google khong tra ve sub hop le");
+        }
 
         User existingAny = userRepository.findByEmail(email).orElse(null);
+        if (existingAny == null) {
+            existingAny = userRepository.findByGoogleId(googleId).orElse(null);
+        }
         if (existingAny != null && existingAny.getRole() != User.Role.CUSTOMER) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email da duoc su dung boi tai khoan nhan vien");
         }
@@ -652,9 +703,10 @@ public class UserService {
                     .name(normalizeNullableText(userInfo.path("name").asText("")) != null ? userInfo.path("name").asText("").trim() : "Khach hang")
                     .phone(null)
                     .role(User.Role.CUSTOMER)
-                    .memberTier(User.MemberTier.STANDARD)
+                    .memberTier(User.MemberTier.BRONZE)
                     .loyaltyPoints(0)
                     .totalSpent(0L)
+                    .googleId(googleId)
                     .isActive(true)
                     .avatarUrl(normalizeNullableText(userInfo.path("picture").asText("")))
                     .build();
@@ -670,6 +722,10 @@ public class UserService {
             }
             if ((user.getName() == null || user.getName().isBlank()) && name != null) {
                 user.setName(name);
+                changed = true;
+            }
+            if ((user.getGoogleId() == null || user.getGoogleId().isBlank()) && googleId != null) {
+                user.setGoogleId(googleId);
                 changed = true;
             }
             if (changed) {
@@ -1037,7 +1093,7 @@ public class UserService {
                 .personalQrCode(personalQrCode)
                 .preferredShift(req.getPreferredShift())
                 .branchId(normalizedBranchId)
-                .memberTier(User.MemberTier.STANDARD)
+                .memberTier(User.MemberTier.BRONZE)
                 .loyaltyPoints(0)
                 .totalSpent(0L)
                 .isActive(true)
@@ -1604,13 +1660,16 @@ public class UserService {
     }
 
     private User.MemberTier resolveTier(long totalSpent, int loyaltyPoints) {
+        if (totalSpent >= 30_000_000L || loyaltyPoints >= 3000) {
+            return User.MemberTier.PLATINUM;
+        }
         if (totalSpent >= 10_000_000L || loyaltyPoints >= 1000) {
             return User.MemberTier.GOLD;
         }
         if (totalSpent >= 3_000_000L || loyaltyPoints >= 300) {
             return User.MemberTier.SILVER;
         }
-        return User.MemberTier.STANDARD;
+        return User.MemberTier.BRONZE;
     }
 
     private boolean isStaffRole(User.Role role) {
@@ -1931,6 +1990,5 @@ public class UserService {
 
     private record OtpEntry(String otpHash, long expiresAtMillis, int attempts) {}
     private record RefreshEntry(String userId, long expiresAtMillis) {}
-    private record ResetPasswordEntry(String userId, long expiresAtMillis) {}
     private record GoogleOauthStateEntry(String redirectUri, long expiresAtMillis) {}
 }

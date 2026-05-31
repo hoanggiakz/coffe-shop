@@ -74,8 +74,9 @@ class AuthControllerTest {
                 "branch-1",
                 "EMP001",
                 null,
+                null,
                 0,
-                "STANDARD",
+                "BRONZE",
                 0L
         );
         authResponse = new AuthResponse("token-123", userProfile);
@@ -149,7 +150,7 @@ class AuthControllerTest {
     void customerOtpAndEmailEndpoints_ShouldDelegateToService() {
         OtpRequest otpRequest = new OtpRequest();
         otpRequest.setPhone("0900000009");
-        OtpResponse otpResponse = new OtpResponse("ok", "123456", 300L);
+        OtpResponse otpResponse = new OtpResponse("ok", "090****009", 300L);
         when(userService.requestCustomerOtp(otpRequest)).thenReturn(otpResponse);
 
         CustomerEmailRegisterRequest emailRegisterRequest = new CustomerEmailRegisterRequest();

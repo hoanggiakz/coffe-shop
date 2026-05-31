@@ -8,6 +8,7 @@ public class UpdateProfileRequest {
     private String email;
     private String phone;
     private String avatarUrl;
+    private String dateOfBirth;
     private String verifyOtp;
     private String verifyPurpose;
 }
