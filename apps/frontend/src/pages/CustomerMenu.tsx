@@ -993,44 +993,6 @@ export default function CustomerMenu() {
   }, [cartStorageKey, cartSessionFallbackKey])
 
   useEffect(() => {
-    if (!cartStorageKey || !cartLoaded) return
-    if (persistCartTimerRef.current) {
-      clearTimeout(persistCartTimerRef.current)
-    }
-    persistCartTimerRef.current = setTimeout(() => {
-      const nextRevision = Date.now()
-      const nextVersion = buildCartVersion(currentOrderId || null, nextRevision)
-      const nextSnapshot: CartStorageSnapshot = {
-        ...cartStorageSnapshot,
-        lastUpdated: new Date(nextRevision).toISOString(),
-        cartVersion: nextVersion,
-      }
-      cartVersionRef.current = nextVersion
-      const serialized = JSON.stringify(nextSnapshot)
-      try {
-        localStorage.setItem(cartStorageKey, serialized)
-        if (cartSessionFallbackKey) {
-          sessionStorage.removeItem(cartSessionFallbackKey)
-        }
-        void deleteCartFromIndexedDb(cartStorageKey)
-      } catch {
-        if (cartSessionFallbackKey) {
-          sessionStorage.setItem(cartSessionFallbackKey, serialized)
-        }
-        void writeCartToIndexedDb(cartStorageKey, serialized)
-        toast.error('Bo nho localStorage day, da tam luu gio hang trong IndexedDB/session hien tai')
-      }
-    }, 300)
-
-    return () => {
-      if (persistCartTimerRef.current) {
-        clearTimeout(persistCartTimerRef.current)
-        persistCartTimerRef.current = null
-      }
-    }
-  }, [cartLoaded, cartSessionFallbackKey, cartStorageKey, cartStorageSnapshot, currentOrderId])
-
-  useEffect(() => {
     const onEscCloseDrawer = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       setCartDrawerOpen(false)
@@ -1809,6 +1771,44 @@ export default function CustomerMenu() {
       lastUpdated: new Date().toISOString(),
     }
   }, [cartLines, cartTotal, menuMap, payableCartTotal, qrBranchId, tableId])
+
+  useEffect(() => {
+    if (!cartStorageKey || !cartLoaded) return
+    if (persistCartTimerRef.current) {
+      clearTimeout(persistCartTimerRef.current)
+    }
+    persistCartTimerRef.current = setTimeout(() => {
+      const nextRevision = Date.now()
+      const nextVersion = buildCartVersion(currentOrderId || null, nextRevision)
+      const nextSnapshot: CartStorageSnapshot = {
+        ...cartStorageSnapshot,
+        lastUpdated: new Date(nextRevision).toISOString(),
+        cartVersion: nextVersion,
+      }
+      cartVersionRef.current = nextVersion
+      const serialized = JSON.stringify(nextSnapshot)
+      try {
+        localStorage.setItem(cartStorageKey, serialized)
+        if (cartSessionFallbackKey) {
+          sessionStorage.removeItem(cartSessionFallbackKey)
+        }
+        void deleteCartFromIndexedDb(cartStorageKey)
+      } catch {
+        if (cartSessionFallbackKey) {
+          sessionStorage.setItem(cartSessionFallbackKey, serialized)
+        }
+        void writeCartToIndexedDb(cartStorageKey, serialized)
+        toast.error('Bo nho localStorage day, da tam luu gio hang trong IndexedDB/session hien tai')
+      }
+    }, 300)
+
+    return () => {
+      if (persistCartTimerRef.current) {
+        clearTimeout(persistCartTimerRef.current)
+        persistCartTimerRef.current = null
+      }
+    }
+  }, [cartLoaded, cartSessionFallbackKey, cartStorageKey, cartStorageSnapshot, currentOrderId])
 
   const increase = (menuItemId: string) => {
     const draft = getDraftForMenuItem(menuItemId)
