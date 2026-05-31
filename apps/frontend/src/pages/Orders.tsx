@@ -73,7 +73,15 @@ interface PaymentApi {
   updatedAt?: string | null
 }
 
-type StaffNotificationType = 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'LOW_STOCK' | 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY'
+type StaffNotificationType =
+  | 'ORDER_NEW'
+  | 'CALL_STAFF'
+  | 'CHAT_MESSAGE'
+  | 'CHAT_OPENED'
+  | 'LOW_STOCK'
+  | 'KDS_ITEM_STATUS'
+  | 'KDS_ORDER_READY'
+  | 'CART_UPDATED'
 
 interface StaffNotificationPayload {
   id: string
@@ -320,11 +328,20 @@ export default function Orders() {
       if (payload.branchId && selectedBranchId && payload.branchId !== selectedBranchId) {
         return
       }
-      if (payload.type === 'KDS_ORDER_READY' || payload.type === 'ORDER_NEW' || payload.type === 'KDS_ITEM_STATUS') {
+      if (
+        payload.type === 'KDS_ORDER_READY' ||
+        payload.type === 'ORDER_NEW' ||
+        payload.type === 'KDS_ITEM_STATUS' ||
+        payload.type === 'CART_UPDATED'
+      ) {
         showRealtimeNotification(
           payload.title,
           payload.message,
-          payload.type === 'ORDER_NEW' ? 'NEW_ORDER' : 'ITEM_READY',
+          payload.type === 'ORDER_NEW'
+            ? 'NEW_ORDER'
+            : payload.type === 'CART_UPDATED'
+              ? 'CART_UPDATED'
+              : 'ITEM_READY',
         )
         if (typeof window !== 'undefined' && payload.createdAt) {
           localStorage.setItem(notifSyncKey, payload.createdAt)

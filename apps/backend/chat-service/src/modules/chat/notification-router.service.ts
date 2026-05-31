@@ -14,6 +14,7 @@ export type RoutedNotificationInput = {
   messageId?: string;
   createdAt?: string;
   cart?: Record<string, any>;
+  payload?: Record<string, any>;
 };
 
 @Injectable()
@@ -37,6 +38,7 @@ export class NotificationRouterService {
       messageId: input.messageId ? String(input.messageId) : undefined,
       createdAt: input.createdAt ? new Date(input.createdAt).toISOString() : new Date().toISOString(),
       cart: input.cart && typeof input.cart === 'object' ? input.cart : undefined,
+      ...(input.payload && typeof input.payload === 'object' ? input.payload : {}),
     };
 
     const branchRooms = payload.branchId ? [`branch:${payload.branchId}`] : [];

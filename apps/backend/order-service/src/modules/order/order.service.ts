@@ -53,6 +53,19 @@ type RealtimeCartLine = {
   selections: Record<string, any>;
 };
 
+type RealtimeCartPayload = {
+  tableId: string;
+  branchId?: string;
+  orderId: string;
+  cartVersion: string;
+  serverWins: true;
+  promotionCode?: string | null;
+  discountAmount?: number;
+  subtotal?: number;
+  finalAmount?: number;
+  cart: Record<string, RealtimeCartLine>;
+};
+
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
@@ -3507,9 +3520,27 @@ export class OrderService {
     id: string;
     tableId: string;
     branchId?: string | null;
+    updatedAt?: Date | string | null;
+    subtotalAmount?: number | null;
+    discountAmount?: number | null;
+    promotionCode?: string | null;
+    totalAmount?: number | null;
     orderItems?: Array<{ menuItemId?: string; quantity?: number; note?: string | null; options?: string | null }>;
   }) {
     const cart = this.buildRealtimeCartFromOrderItems(order.orderItems || []);
+    const cartVersion = new Date(order.updatedAt || new Date()).toISOString();
+    const payload: RealtimeCartPayload = {
+      tableId: order.tableId,
+      branchId: order.branchId || undefined,
+      orderId: order.id,
+      cartVersion,
+      serverWins: true,
+      promotionCode: order.promotionCode || undefined,
+      discountAmount: Number(order.discountAmount || 0),
+      subtotal: Number(order.subtotalAmount || 0),
+      finalAmount: Number(order.totalAmount || 0),
+      cart,
+    };
     await this.emitStaffNotification({
       type: 'CART_UPDATED',
       title: 'Giỏ hàng đã cập nhật',
@@ -3518,6 +3549,7 @@ export class OrderService {
       tableId: order.tableId,
       branchId: order.branchId || undefined,
       cart,
+      payload,
     });
   }
 
@@ -3562,6 +3594,7 @@ export class OrderService {
     tableId?: string;
     branchId?: string;
     cart?: Record<string, RealtimeCartLine>;
+    payload?: RealtimeCartPayload;
   }) {
     try {
       const response = await this.fetchWithRetry(`${this.chatServiceApiUrl}/staff-notifications`, {

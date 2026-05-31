@@ -76,6 +76,19 @@ interface CartStorageSnapshot {
   lastUpdated: string
 }
 
+interface CartRealtimePayload {
+  tableId?: string
+  orderId?: string
+  cartVersion?: string
+  serverWins?: boolean
+  promotionCode?: string | null
+  discountAmount?: number
+  subtotal?: number
+  finalAmount?: number
+  cart?: Record<string, CartItem> | CartStorageSnapshot
+  updatedBy?: string
+}
+
 interface CartDraft {
   note: string
   selections: CartSelections
@@ -677,6 +690,8 @@ export default function CustomerMenu() {
   const pendingChatFlushRef = useRef(false)
   const customerTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lineRemoveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const cartVersionRef = useRef<string>('')
+  const persistCartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let ignore = false
@@ -844,6 +859,11 @@ export default function CustomerMenu() {
         const isSnapshot = Array.isArray(parsed?.items)
         const restored = isSnapshot ? restoreCartFromSnapshot(parsed) : restoreCartFromStorage(parsed)
         if (isSnapshot) {
+          cartVersionRef.current = String(parsed?.lastUpdated || '')
+        } else if (!cartVersionRef.current) {
+          cartVersionRef.current = new Date().toISOString()
+        }
+        if (isSnapshot) {
           const discountCode = String(parsed?.discountCode || '').trim()
           const discountAmount = Number(parsed?.discountAmount || 0)
           if (discountCode && discountAmount > 0) {
@@ -871,19 +891,36 @@ export default function CustomerMenu() {
 
   useEffect(() => {
     if (!cartStorageKey || !cartLoaded) return
-    const serialized = JSON.stringify(cartStorageSnapshot)
-    try {
-      localStorage.setItem(cartStorageKey, serialized)
-      if (cartSessionFallbackKey) {
-        sessionStorage.removeItem(cartSessionFallbackKey)
+    if (persistCartTimerRef.current) {
+      clearTimeout(persistCartTimerRef.current)
+    }
+    persistCartTimerRef.current = setTimeout(() => {
+      const nextSnapshot: CartStorageSnapshot = {
+        ...cartStorageSnapshot,
+        lastUpdated: new Date().toISOString(),
       }
-      void deleteCartFromIndexedDb(cartStorageKey)
-    } catch {
-      if (cartSessionFallbackKey) {
-        sessionStorage.setItem(cartSessionFallbackKey, serialized)
+      cartVersionRef.current = nextSnapshot.lastUpdated
+      const serialized = JSON.stringify(nextSnapshot)
+      try {
+        localStorage.setItem(cartStorageKey, serialized)
+        if (cartSessionFallbackKey) {
+          sessionStorage.removeItem(cartSessionFallbackKey)
+        }
+        void deleteCartFromIndexedDb(cartStorageKey)
+      } catch {
+        if (cartSessionFallbackKey) {
+          sessionStorage.setItem(cartSessionFallbackKey, serialized)
+        }
+        void writeCartToIndexedDb(cartStorageKey, serialized)
+        toast.error('Bo nho localStorage day, da tam luu gio hang trong IndexedDB/session hien tai')
       }
-      void writeCartToIndexedDb(cartStorageKey, serialized)
-      toast.error('Bo nho localStorage day, da tam luu gio hang trong IndexedDB/session hien tai')
+    }, 300)
+
+    return () => {
+      if (persistCartTimerRef.current) {
+        clearTimeout(persistCartTimerRef.current)
+        persistCartTimerRef.current = null
+      }
     }
   }, [cartLoaded, cartSessionFallbackKey, cartStorageKey, cartStorageSnapshot])
 
@@ -1339,18 +1376,36 @@ export default function CustomerMenu() {
     const roomId = `table:${tableId}`
     socket.emit('join-room', { room: roomId })
 
-    const onCartUpdated = (payload: {
-      tableId?: string
-      cart?: Record<string, CartItem> | CartStorageSnapshot
-      updatedBy?: string
-    }) => {
+    const onCartUpdated = (payload: CartRealtimePayload) => {
       if (String(payload?.tableId || '').trim() !== tableId) return
       if (!payload?.cart || typeof payload.cart !== 'object') return
+      const incomingVersion = String(payload?.cartVersion || '').trim()
+      const localVersion = String(cartVersionRef.current || '').trim()
+      if (incomingVersion && localVersion && new Date(incomingVersion).getTime() < new Date(localVersion).getTime()) {
+        return
+      }
       const nextCart = Array.isArray((payload.cart as any)?.items)
         ? restoreCartFromSnapshot(payload.cart)
         : restoreCartFromStorage(payload.cart)
       setCart(nextCart)
-      toast('Giỏ hàng vừa được cập nhật bởi nhân viên')
+      const incomingPromoCode = String(payload.promotionCode || '').trim()
+      const incomingDiscount = Number(payload.discountAmount || 0)
+      if (incomingPromoCode && incomingDiscount > 0) {
+        setPromoCode(incomingPromoCode.toUpperCase())
+        setPromoPreview({
+          code: incomingPromoCode.toUpperCase(),
+          discountAmount: incomingDiscount,
+          finalAmount: Number(payload.finalAmount || 0),
+          description: 'Đồng bộ từ máy chủ',
+        })
+      } else if (!incomingPromoCode && incomingDiscount <= 0) {
+        setPromoCode('')
+        setPromoPreview(null)
+      }
+      if (incomingVersion) {
+        cartVersionRef.current = incomingVersion
+      }
+      toast(payload.serverWins ? 'Giỏ hàng đã đồng bộ theo máy chủ (server-wins)' : 'Giỏ hàng vừa được cập nhật bởi nhân viên')
     }
 
     socket.on('cart-updated', onCartUpdated)
@@ -1514,6 +1569,44 @@ export default function CustomerMenu() {
       return acc
     }, new Map<string, number>())
   }, [cartLines])
+
+  const estimatedPrepMinutes = useMemo(() => {
+    if (cartLines.length === 0) return 0
+    return cartLines.reduce((sum, line) => {
+      const item = menuMap.get(line.menuItemId)
+      const category = String(item?.category || '').toLowerCase()
+      const name = String(item?.name || '').toLowerCase()
+      const unitMinutes =
+        category.includes('banh') || name.includes('croissant')
+          ? 4
+          : category.includes('sinh to') || name.includes('smoothie')
+            ? 5
+            : 3
+      return sum + unitMinutes * Math.max(1, Number(line.quantity || 0))
+    }, 0)
+  }, [cartLines, menuMap])
+
+  const upsellSuggestions = useMemo(() => {
+    const inCart = new Set(cartLines.map((line) => line.menuItemId))
+    const hasDrink = cartLines.some((line) => {
+      const category = String(menuMap.get(line.menuItemId)?.category || '').toLowerCase()
+      return category.includes('ca phe') || category.includes('tra') || category.includes('sinh to')
+    })
+    const hasBakery = cartLines.some((line) => {
+      const category = String(menuMap.get(line.menuItemId)?.category || '').toLowerCase()
+      return category.includes('banh')
+    })
+    const candidates = menuItems
+      .filter((item) => item.available !== false && !inCart.has(item.id))
+      .sort((a, b) => Number(a.price || 0) - Number(b.price || 0))
+    const prioritized = candidates.filter((item) => {
+      const category = String(item.category || '').toLowerCase()
+      if (hasDrink && !hasBakery) return category.includes('banh')
+      if (hasBakery && !hasDrink) return category.includes('ca phe') || category.includes('tra')
+      return category.includes('banh') || category.includes('ca phe') || category.includes('tra')
+    })
+    return (prioritized.length ? prioritized : candidates).slice(0, 3)
+  }, [cartLines, menuItems, menuMap])
 
   const cartStorageSnapshot = useMemo<CartStorageSnapshot>(() => {
     const branchId = String(qrBranchId || 'unknown').trim() || 'unknown'
@@ -2790,7 +2883,36 @@ export default function CustomerMenu() {
                 <span className="font-semibold">Tong</span>
                 <span className="font-bold text-amber-700">{formatVnd(payableCartTotal)}</span>
               </div>
+              {estimatedPrepMinutes > 0 && (
+                <div className="flex items-center justify-between text-xs text-slate-600">
+                  <span>Ước tính chuẩn bị</span>
+                  <span className="font-medium">{Math.max(5, estimatedPrepMinutes)}-{Math.max(8, estimatedPrepMinutes + 4)} phút</span>
+                </div>
+              )}
             </div>
+
+            {upsellSuggestions.length > 0 && (
+              <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50/50 p-3">
+                <p className="text-xs font-semibold uppercase text-amber-800">Gợi ý thêm cho bạn</p>
+                <div className="mt-2 space-y-1">
+                  {upsellSuggestions.map((item) => (
+                    <div key={`upsell-${item.id}`} className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1.5 text-xs">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-slate-800">{item.name}</p>
+                        <p className="text-slate-500">{formatVnd(item.price)}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => increase(item.id)}
+                        className="rounded border border-amber-200 px-2 py-1 font-semibold text-amber-700"
+                      >
+                        + Thêm
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <button
               type="submit"
               className="mt-4 w-full rounded bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
