@@ -5,7 +5,21 @@ const WS_URL = resolveWebsocketBaseUrl()
 
 let socket: Socket | null = null
 
+function readSessionToken(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    const raw = sessionStorage.getItem('auth-storage')
+    if (!raw) return ''
+    const parsed = JSON.parse(raw)
+    const token = String(parsed?.state?.token || '').trim()
+    return token
+  } catch {
+    return ''
+  }
+}
+
 export function getSocket(): Socket {
+  const token = readSessionToken()
   if (!socket) {
     socket = io(`${WS_URL}/chat`, {
       // Start with polling to avoid noisy websocket handshake warnings
@@ -20,7 +34,10 @@ export function getSocket(): Socket {
       randomizationFactor: 0.4,
       timeout: 10000,
       autoConnect: false,
+      auth: token ? { token } : undefined,
     })
+  } else {
+    socket.auth = token ? { token } : {}
   }
   return socket
 }

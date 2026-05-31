@@ -2,12 +2,14 @@ import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/c
 import { Request } from 'express';
 import { ChatGateway, StaffNotificationInput } from './chat.gateway';
 import { ChatService } from './chat.service';
+import { NotificationRouterService } from './notification-router.service';
 
 @Controller()
 export class ChatController {
   constructor(
     private readonly chatService: ChatService,
     private readonly chatGateway: ChatGateway,
+    private readonly notificationRouter: NotificationRouterService,
   ) {}
 
   private actor(req: Request) {
@@ -100,8 +102,8 @@ export class ChatController {
   }
 
   @Post('api/chats/staff-notifications')
-  emitStaffNotification(@Body() payload: StaffNotificationInput) {
-    const notification = this.chatGateway.emitStaffNotificationEvent(payload);
+  async emitStaffNotification(@Body() payload: StaffNotificationInput) {
+    const notification = await this.notificationRouter.dispatch(payload);
     return { success: true, notification };
   }
 

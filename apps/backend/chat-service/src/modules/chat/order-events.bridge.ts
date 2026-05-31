@@ -25,7 +25,7 @@ export class OrderEventsBridge implements OnModuleInit {
         return;
       }
 
-      this.chatGateway.emitStaffNotificationEvent({
+      await this.chatGateway.emitStaffNotificationEvent({
         id: `order-new:${orderId}`,
         type: 'ORDER_NEW',
         title: `Đơn mới từ bàn ${tableId}`,
