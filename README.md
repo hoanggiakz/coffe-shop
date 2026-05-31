@@ -678,6 +678,11 @@ Kỳ vọng: cả 2 trả `200` và có danh sách món.
 
 Chi tiết xem thêm: [docs/sepay-webhook-relay.md](docs/sepay-webhook-relay.md)
 
+### 10.8 SePay direct webhook (Model A)
+
+- Huong dan setup production direct webhook:
+  [ops/docs/sepay-model-a-setup.md](ops/docs/sepay-model-a-setup.md)
+
 ## 11. AI Implementation Changelog
 
 ### 11.1 Data Foundation
