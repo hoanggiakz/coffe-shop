@@ -498,6 +498,7 @@ type DiscountValidationCachePayload = {
 const CART_DB_NAME = 'coffee-cart-db'
 const CART_DB_VERSION = 1
 const CART_DB_STORE = 'cart_snapshots'
+const CUSTOMER_MENU_RETURN_URL_KEY = 'customer-menu-return-url'
 
 async function openCartIndexedDb(): Promise<IDBDatabase> {
   return await new Promise((resolve, reject) => {
@@ -670,6 +671,10 @@ export default function CustomerMenu() {
   const qrTableId = searchParams.get('tableId') || ''
   const qrBranchId = searchParams.get('branchId') || ''
   const qrTableNumber = toNumber(searchParams.get('tableNumber'))
+  const menuReturnUrl = useMemo(() => {
+    const query = searchParams.toString()
+    return query ? `/menu?${query}` : '/menu'
+  }, [searchParams])
 
   const [tableId, setTableId] = useState('')
   const [tableName, setTableName] = useState('Chưa xác định')
@@ -782,6 +787,14 @@ export default function CustomerMenu() {
       // ignore telemetry failures
     }
   }
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CUSTOMER_MENU_RETURN_URL_KEY, menuReturnUrl)
+    } catch {
+      // ignore storage failure
+    }
+  }, [menuReturnUrl])
 
   useEffect(() => {
     let ignore = false
