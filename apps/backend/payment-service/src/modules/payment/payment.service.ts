@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { KafkaService } from '../../kafka/kafka.service';
 import { ConfigService } from '@nestjs/config';
+import PDFDocument from 'pdfkit';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { WebhookDto } from './dto/webhook.dto';
 import { PaymentReturnDto } from './dto/return.dto';
@@ -1102,61 +1103,85 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     return lines;
   }
 
-  private buildMinimalInvoicePdf(invoice: any) {
-    const itemLines = this.buildInvoiceItemLines(Array.isArray(invoice?.items) ? invoice.items : []);
-    const lines = [
-      'COFFEE SHOP - HOA DON',
-      `So hoa don: ${invoice.invoiceNumber}`,
-      `Ngay: ${new Date(invoice.issueDate).toLocaleString('vi-VN')}`,
-      `Khach: ${invoice.customerName || 'Khach vang lai'}`,
-      `SDT: ${invoice.customerPhone || '-'}`,
-      '',
-      ...itemLines,
-      '',
-      `Tam tinh: ${this.formatVnd(Number(invoice.subtotal || 0))}`,
-      `Giam gia: ${this.formatVnd(Number(invoice.discount || 0))}`,
-      `Thue (${Number(invoice.taxRate)}%): ${this.formatVnd(Number(invoice.taxAmount || 0))}`,
-      `Tong cong: ${this.formatVnd(Number(invoice.totalAmount || 0))}`,
-      `Thanh toan: ${invoice.paymentMethod}`,
-      `Trang thai: ${invoice.status || 'ISSUED'}`,
-      ...(invoice?.sepay?.transferContent ? [`Noi dung CK: ${invoice.sepay.transferContent}`] : []),
-      ...(invoice?.sepay?.qrImageUrl ? [`QR URL: ${invoice.sepay.qrImageUrl}`] : []),
-      '',
-      'Cam on quy khach!',
-    ];
+  private async downloadImageBuffer(url: string): Promise<Buffer | null> {
+    const raw = String(url || '').trim();
+    if (!raw) return null;
+    try {
+      const response = await this.fetchWithRetry(raw, { method: 'GET' }, { attempts: 2, retryDelayMs: 200 });
+      if (!response.ok) return null;
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch {
+      return null;
+    }
+  }
 
-    const contentStream = [
-      'BT',
-      '/F1 12 Tf',
-      '50 780 Td',
-      ...lines.map((line, index) => `${index === 0 ? '' : '0 -18 Td ' }(${this.escapePdfText(line)}) Tj`),
-      'ET',
-    ].join('\n');
+  private async buildMinimalInvoicePdf(invoice: any): Promise<Buffer> {
+    const doc = new PDFDocument({ size: 'A4', margin: 36 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    const done = new Promise<Buffer>((resolve) => {
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+    });
 
-    const contentLength = Buffer.byteLength(contentStream, 'utf8');
-    const objects = [
-      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
-      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
-      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
-      '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
-      `5 0 obj << /Length ${contentLength} >> stream\n${contentStream}\nendstream endobj`,
-    ];
+    const issueDate = new Date(invoice.issueDate).toLocaleString('vi-VN');
+    doc.fontSize(20).text('COFFEE SHOP', { align: 'center' });
+    doc.fontSize(14).text('HOA DON BAN HANG', { align: 'center' });
+    doc.moveDown(0.8);
 
-    let pdf = '%PDF-1.4\n';
-    const offsets = [0];
-    for (const object of objects) {
-      offsets.push(Buffer.byteLength(pdf, 'utf8'));
-      pdf += `${object}\n`;
+    doc.fontSize(11);
+    doc.text(`So hoa don: ${invoice.invoiceNumber}`);
+    doc.text(`Ngay: ${issueDate}`);
+    doc.text(`Khach: ${invoice.customerName || 'Khach vang lai'}`);
+    doc.text(`SDT: ${invoice.customerPhone || '-'}`);
+    doc.text(`Thanh toan: ${invoice.paymentMethod}`);
+    doc.text(`Trang thai: ${invoice.status || 'ISSUED'}`);
+    doc.moveDown(0.8);
+
+    doc.fontSize(11).text('Chi tiet mon:', { underline: true });
+    doc.moveDown(0.3);
+    doc.fontSize(10);
+    doc.text(this.padRight('Item', 26) + this.padLeft('Qty', 5) + this.padLeft('Price', 12) + this.padLeft('Total', 14));
+    doc.text('-'.repeat(70));
+    for (const item of Array.isArray(invoice?.items) ? invoice.items.slice(0, 60) : []) {
+      const name = this.padRight(String(item?.name || 'Unknown'), 26);
+      const qty = this.padLeft(String(Number(item?.quantity || 0)), 5);
+      const price = this.padLeft(this.formatVnd(Number(item?.unitPrice || 0)), 12);
+      const total = this.padLeft(this.formatVnd(Number(item?.totalPrice || 0)), 14);
+      doc.text(`${name}${qty}${price}${total}`);
+    }
+    doc.moveDown(0.8);
+
+    doc.fontSize(11);
+    doc.text(`Tam tinh: ${this.formatVnd(Number(invoice.subtotal || 0))}`, { align: 'right' });
+    doc.text(`Giam gia: ${this.formatVnd(Number(invoice.discount || 0))}`, { align: 'right' });
+    doc.text(`Thue (${Number(invoice.taxRate || 0)}%): ${this.formatVnd(Number(invoice.taxAmount || 0))}`, { align: 'right' });
+    doc.font('Helvetica-Bold').text(`Tong cong: ${this.formatVnd(Number(invoice.totalAmount || 0))}`, { align: 'right' });
+    doc.font('Helvetica');
+
+    if (invoice?.sepay?.transferContent || invoice?.sepay?.qrImageUrl) {
+      doc.moveDown(0.8);
+      doc.fontSize(11).text('Thong tin SePay:', { underline: true });
+      if (invoice?.sepay?.transferContent) {
+        doc.fontSize(10).text(`Noi dung CK: ${invoice.sepay.transferContent}`);
+      }
+      const qrImageBuffer = await this.downloadImageBuffer(String(invoice?.sepay?.qrImageUrl || ''));
+      if (qrImageBuffer) {
+        try {
+          doc.moveDown(0.3);
+          doc.image(qrImageBuffer, { fit: [140, 140] });
+        } catch {
+          doc.fontSize(10).text(`QR URL: ${invoice.sepay.qrImageUrl || ''}`);
+        }
+      } else if (invoice?.sepay?.qrImageUrl) {
+        doc.fontSize(10).text(`QR URL: ${invoice.sepay.qrImageUrl}`);
+      }
     }
 
-    const xrefOffset = Buffer.byteLength(pdf, 'utf8');
-    pdf += `xref\n0 ${objects.length + 1}\n`;
-    pdf += '0000000000 65535 f \n';
-    for (let i = 1; i <= objects.length; i += 1) {
-      pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
-    }
-    pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-    return Buffer.from(pdf, 'utf8');
+    doc.moveDown(1.2);
+    doc.fontSize(10).text('Cam on quy khach!', { align: 'center' });
+    doc.end();
+    return done;
   }
 
   private async getPaymentSnapshot(paymentId?: string | null) {
@@ -1376,12 +1401,12 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
 
   async getPublicInvoicePdf(invoiceId: string, token: string) {
     const detail = await this.getPublicInvoiceDetail(invoiceId, token);
-    return this.buildMinimalInvoicePdf(detail);
+    return await this.buildMinimalInvoicePdf(detail);
   }
 
   async getInvoicePdf(invoiceId: string, actor: ActorContext) {
     const detail = await this.getInvoiceDetail(invoiceId, actor);
-    return this.buildMinimalInvoicePdf(detail);
+    return await this.buildMinimalInvoicePdf(detail);
   }
 
   async voidInvoice(invoiceId: string, reason: string, actor: ActorContext) {
