@@ -115,6 +115,8 @@ interface OfflineOrderQueueItem {
 
 const paymentMethods: PaymentMethod[] = ['CASH', 'SEPAY']
 const orderStatuses: Array<OrderApi['status']> = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
+type PosBoardColumnKey = 'PENDING' | 'WORKING' | 'COMPLETED'
+type PosBoardTone = 'neutral' | 'warning' | 'danger'
 const selectClass =
   'min-h-11 w-full rounded-xl border border-amber-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:focus:border-amber-400 dark:focus:ring-amber-500/30'
 const formatDateTimeFull = (value?: string | null) => {
@@ -248,6 +250,8 @@ export default function Orders() {
   const [customSize, setCustomSize] = useState('')
   const [customToppings, setCustomToppings] = useState<string[]>([])
   const [customNote, setCustomNote] = useState('')
+  const [mobileBoardColumn, setMobileBoardColumn] = useState<PosBoardColumnKey>('PENDING')
+  const [boardNow, setBoardNow] = useState(() => Date.now())
   const [sepayExpiresAt, setSepayExpiresAt] = useState<string | null>(null)
   const [sepaySecondsLeft, setSepaySecondsLeft] = useState(0)
   const [sepayExpiredNotified, setSepayExpiredNotified] = useState(false)
@@ -437,6 +441,11 @@ export default function Orders() {
 
   useEffect(() => {
     void loadPaymentHistory()
+  }, [])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setBoardNow(Date.now()), 30_000)
+    return () => window.clearInterval(intervalId)
   }, [])
 
   useEffect(() => {
@@ -1190,12 +1199,139 @@ export default function Orders() {
   }, [cashReceived, payingOrder, selectedMethod])
 
   const lockedProvider = payingOrder && createdPayment?.orderId === payingOrder.id ? createdPayment.provider : null
+  const posBoardOrders = useMemo(() => ({
+    pending: orders.filter((order) => order.status === 'PENDING'),
+    working: orders.filter((order) => ['CONFIRMED', 'PREPARING', 'READY'].includes(order.status)),
+    completed: orders.filter((order) => order.status === 'COMPLETED'),
+  }), [orders])
+
+  const paymentByOrderId = useMemo(() => {
+    const byOrderId: Record<string, PaymentApi> = {}
+    for (const payment of paymentHistory) {
+      if (!payment?.orderId) continue
+      const current = byOrderId[payment.orderId]
+      const paymentTime = new Date(payment.paidAt || payment.updatedAt || payment.createdAt || 0).getTime()
+      const currentTime = current ? new Date(current.paidAt || current.updatedAt || current.createdAt || 0).getTime() : 0
+      if (!current || paymentTime >= currentTime) {
+        byOrderId[payment.orderId] = payment
+      }
+    }
+    return byOrderId
+  }, [paymentHistory])
+
+  const boardColumns: Array<{
+    key: PosBoardColumnKey
+    title: string
+    icon: string
+    orders: OrderApi[]
+    accent: string
+  }> = useMemo(
+    () => [
+      {
+        key: 'PENDING',
+        title: 'Chờ xác nhận',
+        icon: '📋',
+        orders: posBoardOrders.pending,
+        accent: 'border-amber-300 bg-amber-50/70',
+      },
+      {
+        key: 'WORKING',
+        title: 'Đang làm',
+        icon: '🔧',
+        orders: posBoardOrders.working,
+        accent: 'border-sky-300 bg-sky-50/70',
+      },
+      {
+        key: 'COMPLETED',
+        title: 'Hoàn thành',
+        icon: '✅',
+        orders: posBoardOrders.completed,
+        accent: 'border-emerald-300 bg-emerald-50/70',
+      },
+    ],
+    [posBoardOrders.completed, posBoardOrders.pending, posBoardOrders.working],
+  )
+
+  const quickItems = useMemo(() => menuItems.filter((item) => item.available).slice(0, 8), [menuItems])
+
+  const getOrderAgeMinutes = (createdAt: string) => {
+    const created = new Date(createdAt).getTime()
+    if (!Number.isFinite(created) || created <= 0) return 0
+    return Math.max(0, Math.floor((boardNow - created) / 60_000))
+  }
+
+  const getOrderTone = (order: OrderApi): PosBoardTone => {
+    if (order.status === 'COMPLETED') return 'neutral'
+    const age = getOrderAgeMinutes(order.createdAt)
+    if (age >= 10) return 'danger'
+    if (age >= 5) return 'warning'
+    return 'neutral'
+  }
+
+  const openPaymentDialog = (order: OrderApi) => {
+    setCreatedPayment(null)
+    setPayingOrder(order)
+    setSelectedMethod('CASH')
+    setCashReceived(String(order.totalAmount))
+    setAutoPrintInvoiceAfterPaid(true)
+  }
 
   return (
-    <div className="space-y-5 sm:space-y-6">
-      <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">{tv('Đơn hàng / POS', 'Orders / POS')}</h1>
+    <div className="space-y-4 sm:space-y-5">
+      <div className="sticky top-16 z-20 overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-100 via-orange-50 to-amber-100">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+          <div>
+            <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">{tv('Coffee Shop POS', 'Coffee Shop POS')}</h1>
+            <p className="text-sm text-slate-600">
+              {tv('Chi nhánh', 'Branch')}: {selectedBranchId || tv('Toàn hệ thống', 'All branches')}
+              {' · '}
+              {tv('Vai trò', 'Role')}: {normalizedRole || 'N/A'}
+            </p>
+          </div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Kanban POS v2.0</p>
+        </div>
+      </div>
 
-      <Card className="sticky top-16 z-10" title={tv('Bộ lọc đơn hàng', 'Order filters')} subtitle="S-08">
+      <Card className="border border-amber-200/80 bg-amber-50/70">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="rounded-full bg-amber-200 px-2 py-1 text-xs font-semibold text-amber-800">Offline Queue</span>
+          <span className={`rounded-full px-2 py-1 text-xs font-medium ${isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+            {isOnline ? 'Online' : 'Offline'}
+          </span>
+          <span>{offlineQueue.length} đơn đang chờ đồng bộ</span>
+          <Button size="sm" variant="secondary" onClick={() => void syncOfflineQueue()} loading={syncingOfflineQueue} disabled={!offlineQueue.length}>
+            Đồng bộ ngay
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              void writePosOfflineQueue(selectedBranchId || undefined, [])
+              setOfflineQueue([])
+              toast.success('Đã xóa offline queue')
+            }}
+            disabled={!offlineQueue.length}
+          >
+            Xóa queue
+          </Button>
+        </div>
+        {offlineQueue.length > 0 && (
+          <div className="mt-3 max-h-32 space-y-2 overflow-y-auto rounded-xl border border-amber-200/70 bg-white/80 p-2 text-xs">
+            {offlineQueue.map((item) => {
+              const table = tables.find((t) => t.id === item.tableId)
+              const quantity = item.items.reduce((sum, i) => sum + Number(i.quantity || 0), 0)
+              return (
+                <div key={item.localId} className="rounded-lg border border-amber-100 bg-white px-2 py-1.5">
+                  <p className="font-semibold">#{item.localId.slice(-6)} · Bàn {table?.number ?? item.tableId}</p>
+                  <p>{quantity} món · {formatDateTimeFull(item.createdAt)}</p>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
+
+      <Card className="sticky top-[8.8rem] z-10" title={tv('Bộ lọc đơn hàng', 'Order filters')} subtitle="S-08">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <select
             className={selectClass}
@@ -1242,67 +1378,212 @@ export default function Orders() {
         </div>
       </Card>
 
-      <Card title="Offline Queue" subtitle="Đơn chờ đồng bộ khi mất mạng">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className={`rounded-full px-2 py-1 text-xs font-medium ${isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-            {isOnline ? 'Online' : 'Offline'}
-          </span>
-          <span>{offlineQueue.length} đơn trong hàng đợi</span>
-          <Button size="sm" variant="secondary" onClick={() => void syncOfflineQueue()} loading={syncingOfflineQueue} disabled={!offlineQueue.length}>
-            Đồng bộ ngay
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              void writePosOfflineQueue(selectedBranchId || undefined, [])
-              setOfflineQueue([])
-              toast.success('Đã xóa offline queue')
-            }}
-            disabled={!offlineQueue.length}
-          >
-            Xóa queue
-          </Button>
-        </div>
-        {offlineQueue.length > 0 && (
-          <div className="mt-3 max-h-40 space-y-2 overflow-y-auto rounded-xl border border-amber-100 p-2 text-xs">
-            {offlineQueue.map((item) => {
-              const table = tables.find((t) => t.id === item.tableId)
-              const quantity = item.items.reduce((sum, i) => sum + Number(i.quantity || 0), 0)
-              return (
-                <div key={item.localId} className="rounded-lg bg-white/80 p-2 dark:bg-slate-900/40">
-                  <p className="font-semibold">#{item.localId.slice(-6)} · Bàn {table?.number ?? item.tableId}</p>
-                  <p>{quantity} món · {formatDateTimeFull(item.createdAt)} · {item.syncStatus}</p>
-                </div>
-              )
-            })}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2.6fr)_minmax(320px,1fr)]">
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-2 md:hidden">
+            {boardColumns.map((column) => (
+              <button
+                key={column.key}
+                type="button"
+                className={`rounded-xl border px-2 py-2 text-xs font-semibold ${
+                  mobileBoardColumn === column.key ? 'border-amber-400 bg-amber-100 text-amber-900' : 'border-amber-200 bg-white text-slate-600'
+                }`}
+                onClick={() => setMobileBoardColumn(column.key)}
+              >
+                {column.icon} {column.orders.length}
+              </button>
+            ))}
           </div>
-        )}
-      </Card>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-1">
-          <form onSubmit={createOrder} className="space-y-3">
-            <p className="text-base font-semibold text-slate-900 dark:text-white">{tv('Tạo đơn tại quầy (S-07)', 'Create walk-in order (S-07)')}</p>
-            <select
-              ref={tableSelectRef}
-              className={selectClass}
-              value={selectedTableId}
-              onChange={(e) => setSelectedTableId(e.target.value)}
-            >
-              <option value="">{tv('-- Chọn bàn --', '-- Select table --')}</option>
-              {tables.map((table) => (
-                <option key={table.id} value={table.id}>
-                  Bàn {table.number}
-                </option>
-              ))}
-            </select>
+          {loading && <RoutePageSkeleton kind="table" />}
+          {!loading && orders.length === 0 && (
+            <Card>
+              <p className="text-sm text-slate-500">{tv('Không có đơn phù hợp với bộ lọc hiện tại.', 'No orders match the current filters.')}</p>
+            </Card>
+          )}
 
-            <div className="max-h-80 space-y-2 overflow-y-auto rounded-xl border border-amber-100 p-2">
-              {menuItems
-                .filter((item) => item.available)
-                .map((item) => (
-                  <div key={item.id} className="flex items-center justify-between rounded-lg bg-white/80 px-2 py-1.5 text-sm dark:bg-slate-900/40">
+          {!loading && orders.length > 0 && (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
+              {boardColumns.map((column) => {
+                const hiddenOnMobile = mobileBoardColumn !== column.key ? 'hidden md:flex' : 'flex'
+                return (
+                  <div key={column.key} className={`${hiddenOnMobile} min-h-[520px] flex-col rounded-2xl border border-slate-200 bg-white/90 p-3 shadow-sm`}>
+                    <div className={`mb-3 flex items-center justify-between rounded-xl border px-3 py-2 ${column.accent}`}>
+                      <p className="text-sm font-bold uppercase tracking-wide text-slate-700">
+                        {column.icon} {column.title}
+                      </p>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-700">{column.orders.length}</span>
+                    </div>
+
+                    <div className="flex-1 space-y-2 overflow-y-auto pr-1">
+                      {column.orders.length === 0 && (
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 p-3 text-center text-xs text-slate-500">
+                          Chưa có đơn trong cột này.
+                        </div>
+                      )}
+
+                      {column.orders.map((order) => {
+                        const tone = getOrderTone(order)
+                        const ageMinutes = getOrderAgeMinutes(order.createdAt)
+                        const payment = paymentByOrderId[order.id]
+                        const itemCount = order.orderItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
+                        const toneClass = tone === 'danger'
+                          ? 'border-red-300 bg-red-50/90'
+                          : tone === 'warning'
+                            ? 'border-amber-300 bg-amber-50/90'
+                            : order.status === 'COMPLETED'
+                              ? 'border-emerald-200 bg-emerald-50/70'
+                              : order.status === 'PENDING'
+                                ? 'border-amber-200 bg-amber-50/60'
+                                : 'border-sky-200 bg-sky-50/60'
+
+                        return (
+                          <article key={order.id} className={`rounded-2xl border p-3 ${toneClass}`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="font-semibold text-slate-900" title={order.id}>
+                                  {order.status === 'COMPLETED' ? '✅' : order.status === 'PENDING' ? '🟡' : '🔵'} ĐH-{maDonHangNgan(order.id)}
+                                </p>
+                                <p className="text-xs text-slate-600">
+                                  {orderTableLabel(order)} · {formatDateTimeFull(order.createdAt)}
+                                </p>
+                              </div>
+                              <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                {trangThaiDonHang(order.status)}
+                              </span>
+                            </div>
+
+                            {order.status !== 'COMPLETED' && (
+                              <p className={`mt-2 text-xs ${tone === 'danger' ? 'font-semibold text-red-700' : tone === 'warning' ? 'text-amber-700' : 'text-slate-500'}`}>
+                                ⏱ Đã chờ: {ageMinutes} phút
+                              </p>
+                            )}
+
+                            <div className="mt-2 space-y-1 text-sm">
+                              {order.orderItems.slice(0, 3).map((item) => (
+                                <div key={item.id} className="flex items-start justify-between gap-2">
+                                  <span>{item.quantity}x {orderItemLabel(item)}</span>
+                                  <span>{(item.quantity * item.price).toLocaleString()}đ</span>
+                                </div>
+                              ))}
+                              {order.orderItems.length > 3 && (
+                                <p className="text-xs text-slate-500">+{order.orderItems.length - 3} món khác</p>
+                              )}
+                              {(order.discountAmount || 0) > 0 && (
+                                <div className="flex items-center justify-between rounded-lg bg-emerald-100 px-2 py-1 text-xs text-emerald-700">
+                                  <span>🎁 Khuyến mãi {order.promotionCode ? `(${order.promotionCode})` : ''}</span>
+                                  <span>-{Number(order.discountAmount || 0).toLocaleString()}đ</span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-2">
+                              <div>
+                                <p className="text-xs text-slate-500">{itemCount} món</p>
+                                <p className="font-bold text-amber-700">{Number(order.totalAmount || 0).toLocaleString()}đ</p>
+                              </div>
+                              {order.status === 'COMPLETED' && (
+                                <p className="text-right text-[11px] text-slate-500">
+                                  {payment ? `✓ ${phuongThucThanhToan(payment.provider)}` : 'Đã hoàn thành'}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="mt-2 flex flex-wrap justify-end gap-2">
+                              {order.status === 'PENDING' && (
+                                <>
+                                  <Button size="sm" variant="secondary" onClick={() => (canManagePosAdvanced ? openEditOrder(order) : setDetailOrder(order))}>
+                                    {canManagePosAdvanced ? 'Sửa món' : 'Chi tiết'}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    className={tone === 'danger' ? 'bg-red-600 text-white hover:bg-red-700' : ''}
+                                    onClick={() => updateOrderStatus(order.id, 'CONFIRMED')}
+                                  >
+                                    {tone === 'danger' ? 'Xác nhận ngay' : 'Xác nhận'}
+                                  </Button>
+                                </>
+                              )}
+
+                              {(order.status === 'CONFIRMED' || order.status === 'PREPARING') && (
+                                <>
+                                  <Button size="sm" variant="secondary" onClick={() => setDetailOrder(order)}>
+                                    Chi tiết
+                                  </Button>
+                                  {canManagePosAdvanced && (
+                                    <Button size="sm" onClick={() => updateOrderStatus(order.id, 'READY')}>
+                                      Sẵn sàng
+                                    </Button>
+                                  )}
+                                </>
+                              )}
+
+                              {order.status === 'READY' && (
+                                <>
+                                  <Button size="sm" variant="secondary" onClick={() => setDetailOrder(order)}>
+                                    Chi tiết
+                                  </Button>
+                                  <Button size="sm" onClick={() => openPaymentDialog(order)}>
+                                    Thanh toán
+                                  </Button>
+                                </>
+                              )}
+
+                              {order.status === 'COMPLETED' && (
+                                <Button size="sm" variant="secondary" onClick={() => setDetailOrder(order)}>
+                                  Chi tiết
+                                </Button>
+                              )}
+                            </div>
+                          </article>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <Card title="➕ Tạo đơn nhanh" subtitle="S-07">
+            <form onSubmit={createOrder} className="space-y-3">
+              <select
+                ref={tableSelectRef}
+                className={selectClass}
+                value={selectedTableId}
+                onChange={(e) => setSelectedTableId(e.target.value)}
+              >
+                <option value="">{tv('-- Chọn bàn --', '-- Select table --')}</option>
+                {tables.map((table) => (
+                  <option key={table.id} value={table.id}>
+                    Bàn {table.number}
+                  </option>
+                ))}
+              </select>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Món gợi ý</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {quickItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2 text-left transition hover:border-amber-300 hover:bg-amber-100/70"
+                      onClick={() => increase(item.id)}
+                    >
+                      <p className="text-sm font-semibold text-slate-800">{item.name}</p>
+                      <p className="text-xs text-slate-500">{item.price.toLocaleString()}đ</p>
+                      <p className="mt-1 text-xs font-semibold text-amber-700">+ Thêm</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="max-h-56 space-y-2 overflow-y-auto rounded-xl border border-amber-100 p-2">
+                {menuItems.filter((item) => item.available).map((item) => (
+                  <div key={item.id} className="flex items-center justify-between rounded-lg bg-white/80 px-2 py-1.5 text-sm">
                     <div>
                       <p className="font-medium">{item.name}</p>
                       <p className="text-xs text-slate-500">{item.price.toLocaleString()}đ</p>
@@ -1310,15 +1591,15 @@ export default function Orders() {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-amber-200 px-2"
+                        className="inline-flex h-8 min-w-8 items-center justify-center rounded-lg border border-amber-200 px-2"
                         onClick={() => decrease(item.id)}
                       >
                         -
                       </button>
-                      <span>{cart[item.id] || 0}</span>
+                      <span className="min-w-4 text-center">{cart[item.id] || 0}</span>
                       <button
                         type="button"
-                        className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-amber-200 px-2"
+                        className="inline-flex h-8 min-w-8 items-center justify-center rounded-lg border border-amber-200 px-2"
                         onClick={() => increase(item.id)}
                       >
                         +
@@ -1326,184 +1607,99 @@ export default function Orders() {
                     </div>
                   </div>
                 ))}
-            </div>
+              </div>
 
-            <div className="flex items-center justify-between border-t pt-2">
-              <span className="font-semibold">{tv('Tổng', 'Total')}</span>
-              <span className="font-bold text-amber-700">{(cartTotal + customCartTotal).toLocaleString()}đ</span>
-            </div>
-
-            {customCartLines.length > 0 && (
-              <div className="rounded-xl border border-amber-100 p-2 text-xs">
-                <p className="mb-1 font-semibold">Món đã tùy chỉnh</p>
-                <div className="space-y-1">
-                  {customCartLines.map((line) => (
-                    <div key={line.localId} className="flex items-start justify-between gap-2">
-                      <div>
-                        <p>{line.quantity}x {line.menuItemName}</p>
-                        <p className="text-slate-500">
-                          {line.selectedOptions.size?.name ? `Size ${line.selectedOptions.size.name}. ` : ''}
-                          {Array.isArray(line.selectedOptions.toppings) && line.selectedOptions.toppings.length > 0
-                            ? `Topping: ${line.selectedOptions.toppings.map((item) => item.name).join(', ')}. `
-                            : ''}
-                          {line.selectedOptions.note ? `Ghi chú: ${line.selectedOptions.note}` : ''}
-                        </p>
+              {customCartLines.length > 0 && (
+                <div className="rounded-xl border border-amber-100 p-2 text-xs">
+                  <p className="mb-1 font-semibold">Món đã tùy chỉnh</p>
+                  <div className="space-y-1">
+                    {customCartLines.map((line) => (
+                      <div key={line.localId} className="flex items-start justify-between gap-2">
+                        <div>
+                          <p>{line.quantity}x {line.menuItemName}</p>
+                          <p className="text-slate-500">
+                            {line.selectedOptions.size?.name ? `Size ${line.selectedOptions.size.name}. ` : ''}
+                            {Array.isArray(line.selectedOptions.toppings) && line.selectedOptions.toppings.length > 0
+                              ? `Topping: ${line.selectedOptions.toppings.map((item) => item.name).join(', ')}. `
+                              : ''}
+                            {line.selectedOptions.note ? `Ghi chú: ${line.selectedOptions.note}` : ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="rounded border border-amber-200 px-2 py-1"
+                          onClick={() => setCustomCartLines((prev) => prev.filter((entry) => entry.localId !== line.localId))}
+                        >
+                          Xóa
+                        </button>
                       </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between border-t pt-2">
+                <span className="font-semibold">Tổng cộng</span>
+                <span className="font-bold text-amber-700">{(cartTotal + customCartTotal).toLocaleString()}đ</span>
+              </div>
+
+              <Button type="submit" className="w-full" loading={creating}>
+                {tv('Tạo đơn cho bàn', 'Create order')}
+              </Button>
+            </form>
+          </Card>
+
+          <Card title="🧾 Lịch sử thanh toán gần đây" subtitle="Dành cho nhân viên">
+            {loadingPaymentHistory && <p className="text-sm text-slate-500">Đang tải lịch sử...</p>}
+            {!loadingPaymentHistory && paymentHistory.length === 0 && (
+              <p className="text-sm text-slate-500">Chưa có giao dịch thanh toán.</p>
+            )}
+            {!loadingPaymentHistory && paymentHistory.length > 0 && (
+              <div className="space-y-2">
+                {paymentHistory.slice(0, 8).map((payment) => {
+                  const order = historyOrderDetails[payment.orderId]
+                  const expanded = !!expandedHistoryRows[payment.paymentId]
+                  return (
+                    <div key={payment.paymentId} className="rounded-xl border border-amber-100 p-2.5 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="font-semibold" title={payment.paymentId}>
+                            {maDonHangNgan(payment.orderId)} · {phuongThucThanhToan(payment.provider)}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {payment.paidAt ? new Date(payment.paidAt).toLocaleString() : '-'} · {trangThaiThanhToan(payment.status)}
+                          </p>
+                        </div>
+                        <p className="font-semibold text-amber-700">{Number(payment.amount || 0).toLocaleString()}đ</p>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Bàn: {payment.tableId ? tableLabel(payment.tableId) : 'Không xác định'} · {payment.paidBy || payment.customerName || 'Khách hàng'}
+                      </p>
                       <button
                         type="button"
-                        className="rounded border border-amber-200 px-2 py-1"
-                        onClick={() => setCustomCartLines((prev) => prev.filter((entry) => entry.localId !== line.localId))}
+                        className="mt-2 rounded border px-2 py-1 text-xs"
+                        onClick={() => void toggleHistoryRow(payment)}
                       >
-                        Xóa
+                        {expanded ? 'Ẩn chi tiết đơn' : 'Xem chi tiết đơn'}
                       </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <Button type="submit" className="w-full" loading={creating}>
-              {tv('Tạo đơn cho bàn', 'Create order')}
-            </Button>
-          </form>
-        </Card>
-
-        <div className="space-y-4 xl:col-span-2">
-          {loading && <RoutePageSkeleton kind="table" />}
-          {!loading && orders.length === 0 && (
-            <p className="text-sm text-gray-500">{tv('Không có đơn phù hợp với bộ lọc hiện tại.', 'No orders match the current filters.')}</p>
-          )}
-          {orders.map((order) => (
-            <Card key={order.id}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-gray-900 dark:text-white" title={order.id}>
-                    Đơn {maDonHangNgan(order.id)}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    {orderTableLabel(order)} · {new Date(order.createdAt).toLocaleString()}
-                  </p>
-                </div>
-                <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
-                  {trangThaiDonHang(order.status)}
-                </span>
-              </div>
-
-              <div className="mt-3 space-y-1 text-sm">
-                {order.orderItems.map((item) => {
-                  return (
-                    <div key={item.id} className="flex justify-between">
-                      <span>
-                        {item.quantity}x {orderItemLabel(item)}
-                      </span>
-                      <span>{(item.quantity * item.price).toLocaleString()}đ</span>
+                      {expanded && order && (
+                        <div className="mt-2 rounded bg-slate-50 p-2 text-xs">
+                          {order.orderItems.map((item) => (
+                            <div key={item.id} className="flex justify-between gap-2">
+                              <span>{item.quantity}x {orderItemLabel(item)}</span>
+                              <span>{(item.quantity * item.price).toLocaleString()}đ</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
-                {(order.discountAmount || 0) > 0 && (
-                  <div className="flex justify-between text-xs text-emerald-700">
-                    <span>Khuyến mãi {order.promotionCode ? `(${order.promotionCode})` : ''}</span>
-                    <span>-{(order.discountAmount || 0).toLocaleString()}đ</span>
-                  </div>
-                )}
               </div>
-
-              <div className="mt-3 flex items-center justify-between border-t pt-3">
-                <span className="font-bold text-amber-700">{order.totalAmount.toLocaleString()}đ</span>
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="secondary" onClick={() => setDetailOrder(order)}>
-                  Chi tiết
-                  </Button>
-                  {!['COMPLETED', 'CANCELLED'].includes(order.status) && canManagePosAdvanced && (
-                    <Button size="sm" variant="secondary" onClick={() => openEditOrder(order)}>
-                      Sửa món
-                    </Button>
-                  )}
-                  {order.status === 'PENDING' && (
-                    <Button size="sm" onClick={() => updateOrderStatus(order.id, 'CONFIRMED')}>
-                      Xác nhận đơn
-                    </Button>
-                  )}
-                  {(order.status === 'CONFIRMED' || order.status === 'PREPARING') && canManagePosAdvanced && (
-                    <Button size="sm" variant="secondary" onClick={() => updateOrderStatus(order.id, 'READY')}>
-                      Chuyển sang sẵn sàng
-                    </Button>
-                  )}
-                  {order.status === 'READY' && (
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setCreatedPayment(null)
-                        setPayingOrder(order)
-                        setSelectedMethod('CASH')
-                        setCashReceived(String(order.totalAmount))
-                        setAutoPrintInvoiceAfterPaid(true)
-                      }}
-                    >
-                      Thanh toán
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </Card>
-          ))}
+            )}
+          </Card>
         </div>
       </div>
-
-      <Card title="Lịch sử thanh toán" subtitle="Dành cho nhân viên">
-        {loadingPaymentHistory && <p className="text-sm text-slate-500">Đang tải lịch sử...</p>}
-        {!loadingPaymentHistory && paymentHistory.length === 0 && (
-          <p className="text-sm text-slate-500">Chưa có giao dịch thanh toán.</p>
-        )}
-        {!loadingPaymentHistory && paymentHistory.length > 0 && (
-          <div className="space-y-2">
-            {paymentHistory.map((payment) => {
-              const order = historyOrderDetails[payment.orderId]
-              const expanded = !!expandedHistoryRows[payment.paymentId]
-              return (
-                <div key={payment.paymentId} className="rounded-xl border border-amber-100 p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="font-semibold" title={payment.paymentId}>
-                        {maDonHangNgan(payment.orderId)} · {phuongThucThanhToan(payment.provider)}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {payment.paidAt ? new Date(payment.paidAt).toLocaleString() : '-'} · {trangThaiThanhToan(payment.status)}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-amber-700">{Number(payment.amount || 0).toLocaleString()}đ</p>
-                      <p className="text-xs text-slate-500">
-                        Bàn: {payment.tableId ? tableLabel(payment.tableId) : 'Không xác định'}
-                      </p>
-                    </div>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-600">
-                    Người thanh toán: <span className="font-medium">{payment.paidBy || payment.customerName || 'Khách hàng'}</span>
-                  </p>
-                  <button
-                    type="button"
-                    className="mt-2 rounded border px-2 py-1 text-xs"
-                    onClick={() => void toggleHistoryRow(payment)}
-                  >
-                    {expanded ? 'Ẩn chi tiết đơn' : 'Xem chi tiết đơn'}
-                  </button>
-                  {expanded && order && (
-                    <div className="mt-2 rounded bg-slate-50 p-2 text-xs">
-                      {order.orderItems.map((item) => (
-                        <div key={item.id} className="flex justify-between gap-2">
-                          <span>{item.quantity}x {orderItemLabel(item)}</span>
-                          <span>{(item.quantity * item.price).toLocaleString()}đ</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </Card>
 
       {payingOrder && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-4">
