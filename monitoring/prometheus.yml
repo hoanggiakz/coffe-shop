@@ -4,6 +4,7 @@ global:
 
 rule_files:
   - /etc/prometheus/alerts/ai-alerts.yml
+  - /etc/prometheus/alerts/realtime-alerts.yml
 
 scrape_configs:
   - job_name: "api-gateway"

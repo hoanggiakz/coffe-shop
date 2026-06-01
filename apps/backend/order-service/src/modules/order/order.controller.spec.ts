@@ -38,11 +38,15 @@ describe('OrderController', () => {
     updateCustomerOrderItems: jest.fn(),
     updateItemStatus: jest.fn(),
   };
+  const kafkaService = {
+    readiness: jest.fn(() => ({ configured: true, connected: true, required: false, lastError: null })),
+  };
 
-  const controller = new OrderController(orderService as any);
+  const controller = new OrderController(orderService as any, kafkaService as any);
 
   beforeEach(() => {
     jest.clearAllMocks();
+    orderService.findOne.mockResolvedValue({ id: 'o1', branchId: 'b1', status: 'PENDING', orderItems: [] });
   });
 
   it('returns health payload', () => {
@@ -143,7 +147,7 @@ describe('OrderController', () => {
     expect(orderService.disablePromotion).toHaveBeenCalledWith('p1');
   });
 
-  it('forwards order requests', () => {
+  it('forwards order requests', async () => {
     const createOrderDto = { tableId: 't1', items: [] };
     const tableActionDto = { fromTableId: 't1', toTableId: 't2' };
     const staffItemsDto = { items: [] };
@@ -151,15 +155,15 @@ describe('OrderController', () => {
     const statusDto = { status: 'PREPARING' };
 
     controller.create(createOrderDto as any);
-    controller.findAll('t1', 'PENDING', '2026-01-01', '2026-01-31', 'b1');
+    controller.findAll('t1', 'PENDING', '2026-01-01', '2026-01-31', 'b1', 'MANAGER', 'b1');
     controller.transferOrMergeTables(tableActionDto as any);
     controller.getCustomerHistory('c1', 'e@x.com', '0909', '5');
     controller.getCustomerRecommendations('c1', 'e@x.com', '0909', 'b1', 't1', '6');
     controller.findOne('o1');
-    controller.updateStatus('o1', statusDto as any);
-    controller.updateItems('o1', staffItemsDto as any);
+    await controller.updateStatus('o1', statusDto as any, 'MANAGER', 'b1');
+    await controller.updateItems('o1', staffItemsDto as any, 'WAITER', 'b1');
     controller.updateCustomerItems('o1', customerItemsDto as any);
-    controller.updateItemStatus('o1', 'i1', 'DONE');
+    await controller.updateItemStatus('o1', 'i1', 'DONE', 'BARISTA', 'b1');
 
     expect(orderService.create).toHaveBeenCalledWith(createOrderDto);
     expect(orderService.findAll).toHaveBeenCalledWith({

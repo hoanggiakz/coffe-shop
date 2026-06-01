@@ -30,12 +30,17 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
   private kafka: Kafka | null = null;
   private consumer: Consumer | null = null;
   private enabled = false;
+  private readonly isProduction: boolean;
+  private configured = false;
+  private lastError: string | null = null;
 
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
     @Inject('CustomLogger') private logger: CustomLogger,
-  ) {}
+  ) {
+    this.isProduction = String(this.configService.get('NODE_ENV', 'development')).toLowerCase() === 'production';
+  }
 
   async onModuleInit() {
     const brokers = this.configService
@@ -43,8 +48,12 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       .split(',')
       .map((item) => item.trim())
       .filter((item) => item.length > 0);
+    this.configured = brokers.length > 0;
 
     if (!brokers.length) {
+      if (this.isProduction) {
+        throw new Error('KAFKA_BROKERS is required in production');
+      }
       this.logger.log('Kafka consumer disabled (KAFKA_BROKERS is empty)');
       return;
     }
@@ -74,6 +83,10 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Kafka consumer connected and subscribed to OrderCreated, PaymentCompleted');
     } catch (error) {
       this.enabled = false;
+      this.lastError = (error as Error).message;
+      if (this.isProduction) {
+        throw error;
+      }
       this.logger.warn(`Kafka consumer init failed: ${(error as Error).message}`);
     }
   }
@@ -112,6 +125,15 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.logger.log(`Aggregated payment ${data.paymentId} for $${data.amount} on ${date}`);
+  }
+
+  readiness() {
+    return {
+      configured: this.configured,
+      connected: this.enabled,
+      required: this.isProduction,
+      lastError: this.lastError,
+    };
   }
 }
 

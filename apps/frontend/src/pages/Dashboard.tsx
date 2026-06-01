@@ -183,7 +183,7 @@ export default function Dashboard() {
     }
   }
 
-  const loadOverview = async (fromPolling = false) => {
+  const loadOverview = async () => {
     try {
       const [tableRes, orderRes] = await Promise.all([
         api.get('/tables', { params: { branchId: selectedBranchId || undefined } }),
@@ -199,24 +199,6 @@ export default function Dashboard() {
       } else {
         const newOrders = nextOrders.filter((order) => !knownOrderIdsRef.current.has(order.id))
         newOrders.forEach((order) => knownOrderIdsRef.current.add(order.id))
-
-        if (fromPolling) {
-          newOrders.forEach((order) => {
-            pushNotification(
-              {
-                id: `order-poll:${order.id}`,
-                type: 'ORDER_NEW',
-                title: `Đơn mới từ ${orderTableLabel(order)}`,
-                message: `Đơn ${maDonHangNgan(order.id)} - ${formatMoney(Number(order.totalAmount || 0))}`,
-                tableId: order.tableId,
-                orderId: order.id,
-                createdAt: order.createdAt || new Date().toISOString(),
-              },
-              'POLL',
-              true,
-            )
-          })
-        }
       }
 
       setTables(nextTables)
@@ -229,11 +211,7 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    loadOverview(false)
-    const timer = window.setInterval(() => {
-      loadOverview(true)
-    }, 10000)
-    return () => window.clearInterval(timer)
+    loadOverview()
   }, [selectedBranchId])
 
   useEffect(() => {

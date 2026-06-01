@@ -70,6 +70,7 @@ export class ProxyController {
 
   @All('api/*path')
   async handleProxy(@Req() req: Request, @Res() res: Response) {
+    this.attachBearerFromQueryForRealtime(req);
     const isBranchOrdersPath = /^\/api\/branches\/[^/]+\/orders(\/|$)/.test(req.path);
     const isBranchCartValidatePath = /^\/api\/branches\/[^/]+\/cart\/validate(\/|$)/.test(req.path);
     const isBranchInvoicesPath = /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(req.path);
@@ -421,13 +422,11 @@ export class ProxyController {
 
   private parseTokenPayload(req: Request): Record<string, any> {
     const authHeader = String(req.headers.authorization || '');
-    if (!authHeader.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
-    }
-
-    const token = authHeader.slice('Bearer '.length).trim();
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : '';
+    const queryToken = String(req.query.access_token || '').trim();
+    const token = bearer || (this.isRealtimeStreamPath(req.path) ? queryToken : '');
     if (!token) {
-      throw new UnauthorizedException('Invalid bearer token');
+      throw new UnauthorizedException('Missing bearer token');
     }
 
     try {
@@ -574,5 +573,26 @@ export class ProxyController {
     const padded = Buffer.alloc(32);
     key.copy(padded);
     return padded;
+  }
+
+  private isRealtimeStreamPath(path: string): boolean {
+    return (
+      path.startsWith('/api/reports/realtime/stream') ||
+      /^\/api\/branches\/[^/]+\/hr\/events(\/|$)/.test(path)
+    );
+  }
+
+  private attachBearerFromQueryForRealtime(req: Request) {
+    if (String(req.headers.authorization || '').startsWith('Bearer ')) {
+      return;
+    }
+    if (!this.isRealtimeStreamPath(req.path)) {
+      return;
+    }
+    const queryToken = String(req.query.access_token || '').trim();
+    if (!queryToken) {
+      return;
+    }
+    req.headers.authorization = `Bearer ${queryToken}`;
   }
 }

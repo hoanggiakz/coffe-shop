@@ -107,5 +107,22 @@ public class SchemaMigrationRunner {
         );
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_salary_history_user_changed ON salary_history(user_id, changed_at DESC)");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_salary_history_branch_changed ON salary_history(branch_id, changed_at DESC)");
+
+        jdbcTemplate.execute(
+                "CREATE TABLE IF NOT EXISTS salary_advance (" +
+                        "id VARCHAR(255) PRIMARY KEY, " +
+                        "user_id VARCHAR(255) NOT NULL, " +
+                        "amount NUMERIC(10,2) NOT NULL, " +
+                        "request_date DATE NOT NULL, " +
+                        "approved_by VARCHAR(255), " +
+                        "status VARCHAR(20) NOT NULL DEFAULT 'PENDING', " +
+                        "deduct_month DATE, " +
+                        "notes TEXT, " +
+                        "created_at TIMESTAMP DEFAULT NOW()" +
+                        ")"
+        );
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_salary_advance_user ON salary_advance(user_id)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_salary_advance_deduct_month ON salary_advance(deduct_month)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_salary_advance_status ON salary_advance(status)");
     }
 }

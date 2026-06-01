@@ -17,6 +17,7 @@ import {
   UpsertBranchRecipeDto,
 } from './dto/spec-inventory.dto';
 import nodemailer, { Transporter } from 'nodemailer';
+import PDFDocument from 'pdfkit';
 
 type ApplyMovementInput = {
   branchId?: string | null;
@@ -30,6 +31,7 @@ type ApplyMovementInput = {
   note?: string;
   referenceCode?: string;
   createdBy?: string;
+  bypassNegativeStockCheck?: boolean;
 };
 
 @Injectable()
@@ -37,6 +39,7 @@ export class InventoryService {
   private logger = new Logger(InventoryService.name);
   private readonly lowStockState = new Map<string, boolean>();
   private readonly emailTransporter: Transporter | null;
+  private readonly autoPoSupplier = 'AUTO_REPLENISH';
 
   constructor(
     private prisma: PrismaService,
@@ -613,6 +616,24 @@ export class InventoryService {
             importPrice: nextCost,
           },
         });
+        try {
+          await tx.inventoryBatch.create({
+            data: {
+              ingredientId: ingredient.id,
+              purchaseOrderItemId: item.id,
+              branchId: po.branchId,
+              batchNumber: item.id,
+              expiryDate: item.expiryDate || null,
+              initialQty: importQty,
+              remainingQty: importQty,
+              unitPrice: importPrice,
+              status: 'ACTIVE',
+            },
+          });
+        } catch (error) {
+          if (!this.isMissingTableError(error)) throw error;
+          this.logger.warn('inventory_batches table not found, skip batch create');
+        }
         movements.push({ movement, ingredient: updatedIngredient });
       }
       const updatedPo = await tx.purchaseOrder.update({
@@ -732,7 +753,8 @@ export class InventoryService {
         throw new BadRequestException('Số lượng xuất không hợp lệ!');
       }
       afterStock = beforeStock - quantity;
-      if (afterStock < 0) {
+      const allowNegativeStock = await this.resolveAllowNegativeStock(client, ingredient.branchId || normalizedBranchId);
+      if (afterStock < 0 && !allowNegativeStock && !input.bypassNegativeStockCheck) {
         throw new BadRequestException(`Tồn kho không đủ cho ingredient ${ingredient.id}`);
       }
     } else {
@@ -767,6 +789,10 @@ export class InventoryService {
         ...(input.type === StockType.IMPORT && unitPrice > 0 ? { importPrice: unitPrice } : {}),
       },
     });
+
+    if (input.type === StockType.EXPORT && quantity > 0) {
+      await this.consumeBatchesFefo(client, ingredient, quantity);
+    }
 
     return { movement, ingredient: updatedIngredient };
   }
@@ -809,7 +835,233 @@ export class InventoryService {
         message,
         action,
       }),
+      this.autoCreateDraftPoForLowStock(ingredient),
     ]);
+  }
+
+  async getInventorySummary(branchId: string) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { branchId: normalizedBranchId || undefined, isActive: true },
+      orderBy: { name: 'asc' },
+    });
+    const rows = ingredients.map((i) => this.mapIngredient(i));
+    const totalValue = rows.reduce((sum, i) => sum + Number(i.stock) * Number(i.importPrice), 0);
+    return {
+      branchId: normalizedBranchId,
+      generatedAt: new Date().toISOString(),
+      totalItems: rows.length,
+      lowStockItems: rows.filter((i) => i.isLowStock).length,
+      totalStockValue: Number(totalValue.toFixed(2)),
+      items: rows,
+    };
+  }
+
+  async exportInventorySummaryCsv(branchId: string) {
+    const summary = await this.getInventorySummary(branchId);
+    const lines = [
+      'ingredient_id,name,unit,stock,min_stock,import_price,is_low_stock,stock_value',
+      ...summary.items.map((item) =>
+        [
+          item.id,
+          this.escapeCsv(item.name),
+          this.escapeCsv(item.unit),
+          item.stock,
+          item.minStock,
+          item.importPrice,
+          item.isLowStock ? 'true' : 'false',
+          (Number(item.stock) * Number(item.importPrice)).toFixed(2),
+        ].join(','),
+      ),
+    ];
+    return lines.join('\n');
+  }
+
+  async exportInventorySummaryPdf(branchId: string) {
+    const summary = await this.getInventorySummary(branchId);
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk) => chunks.push(chunk as Buffer));
+    doc.fontSize(16).text(`Inventory Summary - Branch ${summary.branchId || 'N/A'}`);
+    doc.moveDown(0.5);
+    doc.fontSize(10).text(`Generated: ${summary.generatedAt}`);
+    doc.text(`Total items: ${summary.totalItems}`);
+    doc.text(`Low stock items: ${summary.lowStockItems}`);
+    doc.text(`Total stock value: ${summary.totalStockValue.toFixed(2)}`);
+    doc.moveDown();
+    doc.fontSize(10).text('Name | Stock | Min | Unit | Value');
+    doc.moveDown(0.3);
+    for (const item of summary.items.slice(0, 120)) {
+      const line = `${item.name} | ${item.stock} | ${item.minStock} | ${item.unit} | ${(Number(item.stock) * Number(item.importPrice)).toFixed(2)}`;
+      doc.text(line);
+    }
+    doc.end();
+    return await new Promise<Buffer>((resolve) => {
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+  }
+
+  async listBatchExpiryAlerts(branchId: string, daysRaw?: number) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    const days = Math.max(1, Math.min(Number(daysRaw || 7), 90));
+    const now = new Date();
+    const to = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+    let rows: any[] = [];
+    let batchTableAvailable = true;
+    try {
+      rows = await this.prisma.inventoryBatch.findMany({
+        where: {
+          branchId: normalizedBranchId || undefined,
+          remainingQty: { gt: 0 },
+          status: 'ACTIVE',
+          expiryDate: { not: null, lte: to },
+        },
+        include: { ingredient: true },
+        orderBy: [{ expiryDate: 'asc' }],
+        take: 500,
+      });
+    } catch (error) {
+      if (!this.isMissingTableError(error)) throw error;
+      this.logger.warn('inventory_batches table not found, expiry alert fallback empty');
+      batchTableAvailable = false;
+    }
+    const items = rows.map((row) => {
+      const expiry = row.expiryDate as Date;
+      return {
+        batchId: row.id,
+        ingredientId: row.ingredientId,
+        ingredientName: row.ingredient?.name || null,
+        expiryDate: expiry.toISOString(),
+        remainingQty: Number(row.remainingQty || 0),
+        status: expiry.getTime() < now.getTime() ? 'EXPIRED' : 'NEAR_EXPIRY',
+      };
+    });
+    return {
+      branchId: normalizedBranchId,
+      days,
+      generatedAt: now.toISOString(),
+      total: items.length,
+      available: batchTableAvailable,
+      items,
+    };
+  }
+
+  async upsertBranchInventoryPolicy(branchId: string, allowNegativeStock: boolean) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) {
+      throw new BadRequestException('branchId khong hop le');
+    }
+    return this.prisma.branchInventoryPolicy.upsert({
+      where: { branchId: normalizedBranchId },
+      update: { allowNegativeStock: Boolean(allowNegativeStock) },
+      create: { branchId: normalizedBranchId, allowNegativeStock: Boolean(allowNegativeStock) },
+    });
+  }
+
+  private async resolveAllowNegativeStock(client: any, branchId?: string | null) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) return false;
+    try {
+      const policy = await client.branchInventoryPolicy.findUnique({ where: { branchId: normalizedBranchId } });
+      return Boolean(policy?.allowNegativeStock);
+    } catch (error) {
+      if (!this.isMissingTableError(error)) throw error;
+      this.logger.warn('branch_inventory_policy table not found, default allowNegativeStock=false');
+      return false;
+    }
+  }
+
+  private async consumeBatchesFefo(client: any, ingredient: any, quantity: number) {
+    let remaining = Number(quantity);
+    if (remaining <= 0) return;
+    let batches: any[] = [];
+    try {
+      batches = await client.inventoryBatch.findMany({
+        where: {
+          ingredientId: ingredient.id,
+          branchId: ingredient.branchId || undefined,
+          status: 'ACTIVE',
+          remainingQty: { gt: 0 },
+        },
+        orderBy: [{ expiryDate: 'asc' }, { receivedAt: 'asc' }],
+      });
+    } catch (error) {
+      if (!this.isMissingTableError(error)) throw error;
+      this.logger.warn('inventory_batches table not found, skip FEFO consumption');
+      return;
+    }
+
+    for (const batch of batches) {
+      if (remaining <= 0) break;
+      const current = Number(batch.remainingQty || 0);
+      if (current <= 0) continue;
+      const consume = Math.min(current, remaining);
+      const next = current - consume;
+      await client.inventoryBatch.update({
+        where: { id: batch.id },
+        data: {
+          remainingQty: next,
+          status: next <= 0 ? 'DEPLETED' : 'ACTIVE',
+        },
+      });
+      remaining -= consume;
+    }
+  }
+
+  private async autoCreateDraftPoForLowStock(ingredient: any) {
+    try {
+      const branchId = this.normalizeBranchId(ingredient.branchId);
+      if (!branchId) return;
+      const stock = Number(ingredient.stock || 0);
+      const minStock = Number(ingredient.minStock || 0);
+      if (stock > minStock) return;
+
+      const existing = await this.prisma.purchaseOrder.findFirst({
+        where: {
+          branchId,
+          status: { in: ['DRAFT', 'SUBMITTED'] },
+          supplierName: this.autoPoSupplier,
+          items: { some: { ingredientId: ingredient.id } },
+        },
+      });
+      if (existing) return;
+
+      const suggestQty = Math.max(minStock * 2 - stock, minStock || 1, 1);
+      await this.prisma.purchaseOrder.create({
+        data: {
+          branchId,
+          supplierName: this.autoPoSupplier,
+          notes: `AUTO: low stock for ${ingredient.name}`,
+          status: 'DRAFT',
+          totalAmount: Number((suggestQty * Number(ingredient.importPrice || 0)).toFixed(2)),
+          createdBy: 'system:auto-replenish',
+          items: {
+            create: {
+              ingredientId: ingredient.id,
+              quantity: suggestQty,
+              unitPrice: Number(ingredient.importPrice || 0),
+            },
+          },
+        },
+      });
+    } catch (error) {
+      this.logger.warn(`Auto draft PO failed: ${(error as Error).message}`);
+    }
+  }
+
+  private escapeCsv(value: string) {
+    const normalized = String(value || '');
+    if (normalized.includes(',') || normalized.includes('"') || normalized.includes('\n')) {
+      return `"${normalized.replace(/"/g, '""')}"`;
+    }
+    return normalized;
+  }
+
+  private isMissingTableError(error: unknown) {
+    const e = error as { code?: string; message?: string };
+    const message = String(e?.message || '').toLowerCase();
+    return e?.code === 'P2021' || message.includes('does not exist') || message.includes('doesn\'t exist');
   }
 
   private async sendInAppLowStockAlert(payload: {

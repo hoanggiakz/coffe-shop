@@ -1,9 +1,30 @@
-import { Body, Controller, Delete, Get, Headers, HttpCode, HttpStatus, Param, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Headers, HttpCode, HttpStatus, Param, Post, Put, Query } from '@nestjs/common';
 import { OrderService } from './order.service';
 
 @Controller('api/branches')
 export class BranchMenuController {
   constructor(private readonly orderService: OrderService) {}
+
+  private normalizeRole(role?: string | null) {
+    return String(role || '').trim().toUpperCase();
+  }
+
+  private assertRoleAllowed(role: string | undefined, allowed: string[]) {
+    const normalized = this.normalizeRole(role);
+    if (!normalized || !allowed.includes(normalized)) {
+      throw new ForbiddenException('FORBIDDEN_ROLE');
+    }
+    return normalized;
+  }
+
+  private assertBranchScope(role: string, actorBranchId: string | undefined, targetBranchId?: string | null) {
+    if (role === 'ADMIN') return;
+    const actorBranch = String(actorBranchId || '').trim();
+    if (!actorBranch) throw new ForbiddenException('MISSING_BRANCH_SCOPE');
+    if (targetBranchId && actorBranch !== String(targetBranchId).trim()) {
+      throw new ForbiddenException('FORBIDDEN_BRANCH_SCOPE');
+    }
+  }
 
   @Get(':branchId/menu')
   getBranchMenu(
@@ -20,7 +41,11 @@ export class BranchMenuController {
     @Query('status') status?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA']);
+    this.assertBranchScope(role, actorBranchId, branchId);
     return this.orderService.findByBranch(branchId, { tableId, status, dateFrom, dateTo });
   }
 
@@ -28,8 +53,28 @@ export class BranchMenuController {
   getBranchOrderDetail(
     @Param('branchId') branchId: string,
     @Param('orderId') orderId: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA']);
+    this.assertBranchScope(role, actorBranchId, branchId);
     return this.orderService.findOneByBranch(branchId, orderId);
+  }
+
+  @Get(':branchId/kds')
+  getKdsQueue(
+    @Param('branchId') branchId: string,
+    @Query('limit') limit?: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
+  ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'BARISTA']);
+    this.assertBranchScope(role, actorBranchId, branchId);
+    const parsed = limit ? Number(limit) : undefined;
+    if (parsed !== undefined && (!Number.isFinite(parsed) || parsed <= 0)) {
+      throw new BadRequestException('limit khong hop le');
+    }
+    return this.orderService.getKdsQueueByBranch(branchId, { limit: parsed });
   }
 
   @Post(':branchId/cart/validate')

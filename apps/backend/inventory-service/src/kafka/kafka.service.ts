@@ -26,18 +26,28 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
   private consumer?: Consumer;
   private enabled = false;
   private logger = new Logger(KafkaService.name);
+  private readonly isProduction: boolean;
+  private readonly kafkaRequired: boolean;
+  private readonly configured: boolean;
+  private lastError: string | null = null;
 
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
   ) {
+    this.isProduction = String(this.configService.get('NODE_ENV', 'development')).toLowerCase() === 'production';
+    this.kafkaRequired = String(this.configService.get('KAFKA_REQUIRED', 'false')).toLowerCase() === 'true';
     const brokers = this.configService
       .get<string>('KAFKA_BROKERS', '')
       .split(',')
       .map((broker) => broker.trim())
       .filter(Boolean);
 
+    this.configured = brokers.length > 0;
     if (brokers.length === 0) {
+      if (this.kafkaRequired) {
+        throw new Error('KAFKA_BROKERS is required when KAFKA_REQUIRED=true');
+      }
       this.logger.warn('KAFKA_BROKERS is empty, skip Kafka initialization');
       return;
     }
@@ -74,6 +84,10 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Kafka connected for inventory-service');
     } catch (error) {
       this.enabled = false;
+      this.lastError = (error as Error).message;
+      if (this.kafkaRequired) {
+        throw error;
+      }
       this.logger.warn(`Kafka unavailable, continue without consumer: ${(error as Error).message}`);
     }
   }
@@ -170,5 +184,14 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       topic,
       messages: [{ value: JSON.stringify(payload) }],
     });
+  }
+
+  readiness() {
+    return {
+      configured: this.configured,
+      connected: this.enabled,
+      required: this.kafkaRequired,
+      lastError: this.lastError,
+    };
   }
 }

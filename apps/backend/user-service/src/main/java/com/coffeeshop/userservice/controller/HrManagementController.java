@@ -17,8 +17,10 @@ import com.coffeeshop.userservice.entity.HrShift;
 import com.coffeeshop.userservice.entity.Payroll;
 import com.coffeeshop.userservice.entity.PayrollDetail;
 import com.coffeeshop.userservice.entity.SalaryHistory;
+import com.coffeeshop.userservice.entity.SalaryAdvance;
 import com.coffeeshop.userservice.entity.SalaryComponent;
 import com.coffeeshop.userservice.service.HrManagementService;
+import com.coffeeshop.userservice.service.HrRealtimeHub;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -34,6 +36,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -44,6 +47,7 @@ import java.util.Map;
 public class HrManagementController {
 
     private final HrManagementService hrManagementService;
+    private final HrRealtimeHub hrRealtimeHub;
 
     @GetMapping("/staff/{userId}")
     public ResponseEntity<StaffResponse> getStaff(
@@ -242,6 +246,43 @@ public class HrManagementController {
         return ResponseEntity.ok(hrManagementService.listAttendance(extractToken(authHeader), branchId, from, to));
     }
 
+    @GetMapping("/branches/{branchId}/hr/events")
+    public SseEmitter branchHrEvents(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String branchId
+    ) {
+        hrManagementService.assertRealtimeBranchAccess(extractToken(authHeader), branchId);
+        return hrRealtimeHub.subscribe(branchId);
+    }
+
+    @GetMapping("/hr/realtime/metrics")
+    public ResponseEntity<Map<String, Object>> hrRealtimeMetrics(
+            @RequestHeader("Authorization") String authHeader
+    ) {
+        hrManagementService.assertRealtimeAdminOrManager(extractToken(authHeader));
+        return ResponseEntity.ok(hrRealtimeHub.metrics());
+    }
+
+    @GetMapping("/branches/{branchId}/attendance/export")
+    public ResponseEntity<Map<String, Object>> exportAttendance(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String branchId,
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to", required = false) String to,
+            @RequestParam(value = "format", required = false, defaultValue = "excel") String format
+    ) {
+        return ResponseEntity.ok(hrManagementService.exportAttendance(extractToken(authHeader), branchId, from, to, format));
+    }
+
+    @GetMapping("/branches/{branchId}/attendance/monthly-summary")
+    public ResponseEntity<Map<String, Object>> attendanceMonthlySummary(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String branchId,
+            @RequestParam(value = "month", required = false) String month
+    ) {
+        return ResponseEntity.ok(hrManagementService.attendanceMonthlySummary(extractToken(authHeader), branchId, month));
+    }
+
     @GetMapping("/attendance/me")
     public ResponseEntity<List<Map<String, Object>>> myAttendance(
             @RequestHeader("Authorization") String authHeader,
@@ -290,6 +331,14 @@ public class HrManagementController {
             @PathVariable String branchId
     ) {
         return ResponseEntity.ok(hrManagementService.branchLeaveRequests(extractToken(authHeader), branchId));
+    }
+
+    @GetMapping("/branches/{branchId}/leave-requests/export")
+    public ResponseEntity<Map<String, Object>> exportLeaveRequests(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String branchId
+    ) {
+        return ResponseEntity.ok(hrManagementService.exportLeaveRequests(extractToken(authHeader), branchId));
     }
 
     @PutMapping("/leave-requests/{id}/approve")
@@ -352,6 +401,16 @@ public class HrManagementController {
         return ResponseEntity.ok(hrManagementService.listBranchPayroll(extractToken(authHeader), branchId, month));
     }
 
+    @GetMapping("/branches/{branchId}/payroll/export")
+    public ResponseEntity<Map<String, Object>> exportBranchPayroll(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String branchId,
+            @RequestParam(value = "month", required = false) String month,
+            @RequestParam(value = "format", required = false, defaultValue = "excel") String format
+    ) {
+        return ResponseEntity.ok(hrManagementService.exportBranchPayroll(extractToken(authHeader), branchId, month, format));
+    }
+
     @GetMapping("/payroll/{userId}")
     public ResponseEntity<List<Payroll>> getUserPayroll(
             @RequestHeader("Authorization") String authHeader,
@@ -396,9 +455,44 @@ public class HrManagementController {
     @GetMapping("/payroll/{payrollId}/export")
     public ResponseEntity<Map<String, Object>> exportPayroll(
             @RequestHeader("Authorization") String authHeader,
-            @PathVariable String payrollId
+            @PathVariable String payrollId,
+            @RequestParam(value = "format", required = false, defaultValue = "pdf") String format
     ) {
-        return ResponseEntity.ok(hrManagementService.exportPayroll(extractToken(authHeader), payrollId));
+        return ResponseEntity.ok(hrManagementService.exportPayroll(extractToken(authHeader), payrollId, format));
+    }
+
+    @PostMapping("/staff/{userId}/salary-advances")
+    public ResponseEntity<Map<String, Object>> createSalaryAdvance(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String userId,
+            @RequestBody Map<String, Object> payload
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(hrManagementService.createSalaryAdvance(extractToken(authHeader), userId, payload));
+    }
+
+    @GetMapping("/staff/{userId}/salary-advances")
+    public ResponseEntity<List<SalaryAdvance>> listSalaryAdvances(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String userId
+    ) {
+        return ResponseEntity.ok(hrManagementService.listSalaryAdvances(extractToken(authHeader), userId));
+    }
+
+    @PutMapping("/salary-advances/{advanceId}/approve")
+    public ResponseEntity<SalaryAdvance> approveSalaryAdvance(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String advanceId
+    ) {
+        return ResponseEntity.ok(hrManagementService.approveSalaryAdvance(extractToken(authHeader), advanceId, true));
+    }
+
+    @PutMapping("/salary-advances/{advanceId}/reject")
+    public ResponseEntity<SalaryAdvance> rejectSalaryAdvance(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String advanceId
+    ) {
+        return ResponseEntity.ok(hrManagementService.approveSalaryAdvance(extractToken(authHeader), advanceId, false));
     }
 
     private String extractToken(String authHeader) {

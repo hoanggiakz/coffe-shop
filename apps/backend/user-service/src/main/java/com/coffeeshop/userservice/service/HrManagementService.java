@@ -22,6 +22,7 @@ import com.coffeeshop.userservice.entity.Payroll;
 import com.coffeeshop.userservice.entity.PayrollDetail;
 import com.coffeeshop.userservice.entity.SalaryHistory;
 import com.coffeeshop.userservice.entity.SalaryComponent;
+import com.coffeeshop.userservice.entity.SalaryAdvance;
 import com.coffeeshop.userservice.entity.User;
 import com.coffeeshop.userservice.entity.WorkSchedule;
 import com.coffeeshop.userservice.repository.BranchRepository;
@@ -32,13 +33,23 @@ import com.coffeeshop.userservice.repository.LeaveRequestRepository;
 import com.coffeeshop.userservice.repository.PayrollDetailRepository;
 import com.coffeeshop.userservice.repository.PayrollRepository;
 import com.coffeeshop.userservice.repository.SalaryComponentRepository;
+import com.coffeeshop.userservice.repository.SalaryAdvanceRepository;
 import com.coffeeshop.userservice.repository.UserRepository;
 import com.coffeeshop.userservice.repository.WorkScheduleRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.DayOfWeek;
@@ -56,6 +67,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
+import java.util.Base64;
 import java.util.stream.Collectors;
 
 @Service
@@ -73,11 +85,13 @@ public class HrManagementService {
     private final HrAttendanceRepository hrAttendanceRepository;
     private final LeaveRequestRepository leaveRequestRepository;
     private final SalaryComponentRepository salaryComponentRepository;
+    private final SalaryAdvanceRepository salaryAdvanceRepository;
     private final EmployeeSalaryComponentRepository employeeSalaryComponentRepository;
     private final PayrollRepository payrollRepository;
     private final PayrollDetailRepository payrollDetailRepository;
     private final UserService userService;
     private final JwtUtil jwtUtil;
+    private final HrRealtimeHub hrRealtimeHub;
 
     public List<StaffResponse> listBranchStaff(String token, String branchId) {
         User actor = requireManagerOrAdmin(token);
@@ -286,6 +300,11 @@ public class HrManagementService {
         next.setNotes(normalizeText(request.getNotes()));
         next.setCreatedBy(actor.getId());
         WorkSchedule saved = workScheduleRepository.save(next);
+        hrRealtimeHub.publish(staff.getBranchId(), "schedule.updated", Map.of(
+                "userId", staff.getId(),
+                "date", date.toString(),
+                "shiftId", shift.getId()
+        ));
         return toScheduleResponse(saved);
     }
 
@@ -328,6 +347,10 @@ public class HrManagementService {
         User staff = requireUser(schedule.getUserId());
         assertCanAccessBranch(actor, staff.getBranchId());
         workScheduleRepository.delete(schedule);
+        hrRealtimeHub.publish(staff.getBranchId(), "schedule.deleted", Map.of(
+                "userId", staff.getId(),
+                "date", schedule.getDate().toString()
+        ));
         return Map.of("id", scheduleId, "deleted", true);
     }
 
@@ -347,6 +370,10 @@ public class HrManagementService {
         attendance.setCheckInNote(normalizeText(request.getNote()));
         attendance.setStatus(resolveAttendanceStatus(staff.getId(), date, attendance.getCheckInTime(), null));
         HrAttendance saved = hrAttendanceRepository.save(attendance);
+        hrRealtimeHub.publish(staff.getBranchId(), "attendance.checkin", Map.of(
+                "userId", staff.getId(),
+                "date", date.toString()
+        ));
         return toAttendanceResponse(saved);
     }
 
@@ -363,6 +390,11 @@ public class HrManagementService {
         attendance.setCheckOutNote(normalizeText(request.getNote()));
         recalculateAttendance(attendance);
         HrAttendance saved = hrAttendanceRepository.save(attendance);
+        hrRealtimeHub.publish(staff.getBranchId(), "attendance.checkout", Map.of(
+                "userId", staff.getId(),
+                "date", date.toString(),
+                "workedMinutes", saved.getWorkedMinutes()
+        ));
         return toAttendanceResponse(saved);
     }
 
@@ -399,7 +431,12 @@ public class HrManagementService {
         recalculateAttendance(attendance);
         attendance.setApprovedBy(actor.getId());
         attendance.setApprovedAt(LocalDateTime.now());
-        return toAttendanceResponse(hrAttendanceRepository.save(attendance));
+        HrAttendance saved = hrAttendanceRepository.save(attendance);
+        hrRealtimeHub.publish(staff.getBranchId(), "attendance.updated", Map.of(
+                "userId", staff.getId(),
+                "date", saved.getDate().toString()
+        ));
+        return toAttendanceResponse(saved);
     }
 
     public Map<String, Object> approveAttendance(String token, String attendanceId) {
@@ -410,7 +447,12 @@ public class HrManagementService {
         assertCanAccessBranch(actor, staff.getBranchId());
         attendance.setApprovedBy(actor.getId());
         attendance.setApprovedAt(LocalDateTime.now());
-        return toAttendanceResponse(hrAttendanceRepository.save(attendance));
+        HrAttendance saved = hrAttendanceRepository.save(attendance);
+        hrRealtimeHub.publish(staff.getBranchId(), "attendance.approved", Map.of(
+                "userId", staff.getId(),
+                "date", saved.getDate().toString()
+        ));
+        return toAttendanceResponse(saved);
     }
 
     public Map<String, Object> createLeaveRequest(String token, LeaveRequestCreateRequest request) {
@@ -423,6 +465,10 @@ public class HrManagementService {
                 .reason(normalizeText(request.getReason()))
                 .status(LeaveRequest.LeaveStatus.PENDING)
                 .build());
+        hrRealtimeHub.publish(actor.getBranchId(), "leave.created", Map.of(
+                "userId", actor.getId(),
+                "leaveId", saved.getId()
+        ));
         return toLeaveResponse(saved);
     }
 
@@ -450,7 +496,12 @@ public class HrManagementService {
         assertCanAccessBranch(actor, staff.getBranchId());
         leave.setStatus(approved ? LeaveRequest.LeaveStatus.APPROVED : LeaveRequest.LeaveStatus.REJECTED);
         leave.setApprovedBy(actor.getId());
-        return toLeaveResponse(leaveRequestRepository.save(leave));
+        LeaveRequest saved = leaveRequestRepository.save(leave);
+        hrRealtimeHub.publish(staff.getBranchId(), approved ? "leave.approved" : "leave.rejected", Map.of(
+                "userId", staff.getId(),
+                "leaveId", saved.getId()
+        ));
+        return toLeaveResponse(saved);
     }
 
     public List<SalaryComponent> listSalaryComponents(String token, String branchId) {
@@ -541,6 +592,7 @@ public class HrManagementService {
             payrollRepository.save(payroll);
             generated++;
         }
+        hrRealtimeHub.publish(branchId, "payroll.generated", Map.of("month", month.toString(), "generated", generated));
         return Map.of("month", month.toString(), "generated", generated);
     }
 
@@ -562,7 +614,9 @@ public class HrManagementService {
         payroll.setStatus(Payroll.PayrollStatus.APPROVED);
         payroll.setApprovedBy(actor.getId());
         payroll.setApprovedAt(LocalDateTime.now());
-        return payrollRepository.save(payroll);
+        Payroll saved = payrollRepository.save(payroll);
+        hrRealtimeHub.publish(user.getBranchId(), "payroll.approved", Map.of("payrollId", saved.getId(), "userId", user.getId()));
+        return saved;
     }
 
     public Payroll payPayroll(String token, String payrollId) {
@@ -572,17 +626,378 @@ public class HrManagementService {
         User user = requireUser(payroll.getUserId());
         assertCanAccessBranch(actor, user.getBranchId());
         payroll.setStatus(Payroll.PayrollStatus.PAID);
-        return payrollRepository.save(payroll);
+        Payroll saved = payrollRepository.save(payroll);
+        hrRealtimeHub.publish(user.getBranchId(), "payroll.paid", Map.of("payrollId", saved.getId(), "userId", user.getId()));
+        return saved;
     }
 
     public Map<String, Object> exportPayroll(String token, String payrollId) {
+        return exportPayroll(token, payrollId, "pdf");
+    }
+
+    public Map<String, Object> exportPayroll(String token, String payrollId, String formatRaw) {
         User actor = requireManagerOrAdmin(token);
         Payroll payroll = payrollRepository.findById(payrollId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay bang luong"));
         User user = requireUser(payroll.getUserId());
         assertCanAccessBranch(actor, user.getBranchId());
         List<PayrollDetail> details = payrollDetailRepository.findByPayrollIdOrderByIdAsc(payrollId);
-        return Map.of("payroll", payroll, "details", details, "exportedAt", LocalDateTime.now().toString());
+        String format = normalizeExportFormat(formatRaw);
+        StringBuilder csv = new StringBuilder();
+        csv.append("componentName,componentType,amount,note\n");
+        for (PayrollDetail detail : details) {
+            csv.append(csvCell(detail.getComponentName())).append(',')
+                    .append(csvCell(detail.getComponentType().name())).append(',')
+                    .append(csvCell(detail.getAmount() == null ? "0" : detail.getAmount().toPlainString())).append(',')
+                    .append(csvCell(detail.getNote()))
+                    .append('\n');
+        }
+
+        String title = "Payroll slip - " + user.getName() + " - " + payroll.getMonth();
+        List<String> lines = new ArrayList<>();
+        lines.add("Staff: " + user.getName() + " (" + (user.getEmployeeCode() == null ? "-" : user.getEmployeeCode()) + ")");
+        lines.add("Branch: " + (resolveBranchName(user.getBranchId()) == null ? "-" : resolveBranchName(user.getBranchId())));
+        lines.add("Month: " + payroll.getMonth());
+        lines.add("Status: " + payroll.getStatus().name());
+        lines.add("Worked hours: " + valueOf(payroll.getTotalWorkedHours()));
+        lines.add("Worked days: " + valueOf(payroll.getTotalWorkedDays()));
+        lines.add("Base salary earned: " + valueOf(payroll.getBaseSalaryEarned()));
+        lines.add("Allowances: " + valueOf(payroll.getTotalAllowances()));
+        lines.add("Bonus: " + valueOf(payroll.getTotalBonus()));
+        lines.add("Deductions: " + valueOf(payroll.getTotalDeductions()));
+        lines.add("Net salary: " + valueOf(payroll.getNetSalary()));
+        lines.add("");
+        lines.add("Details:");
+        for (PayrollDetail detail : details) {
+            lines.add("- " + detail.getComponentName() + " | " + detail.getComponentType().name() + " | " + valueOf(detail.getAmount()));
+        }
+
+        if ("excel".equals(format)) {
+            byte[] xlsx = createXlsx(
+                    "payroll_detail",
+                    List.of("componentName", "componentType", "amount", "note"),
+                    details.stream().map(detail -> List.of(
+                            nullableString(detail.getComponentName()),
+                            nullableString(detail.getComponentType() == null ? null : detail.getComponentType().name()),
+                            valueOf(detail.getAmount()),
+                            nullableString(detail.getNote())
+                    )).toList()
+            );
+            return encodeFilePayload(
+                    "payroll-" + payroll.getId() + ".xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    xlsx,
+                    Map.of("payroll", payroll, "detailsCount", details.size())
+            );
+        }
+        return encodeFilePayload(
+                "payroll-" + payroll.getId() + ".pdf",
+                "application/pdf",
+                createPdf(title, lines),
+                Map.of("payroll", payroll, "detailsCount", details.size())
+        );
+    }
+
+    public Map<String, Object> exportAttendance(String token, String branchId, String from, String to, String formatRaw) {
+        User actor = requireManagerOrAdmin(token);
+        assertCanAccessBranch(actor, branchId);
+        List<Map<String, Object>> rows = listAttendance(token, branchId, from, to);
+        String format = normalizeExportFormat(formatRaw);
+
+        StringBuilder csv = new StringBuilder();
+        csv.append("date,userName,userId,checkInTime,checkOutTime,status,workedMinutes,overtimeMinutes,checkInNote,checkOutNote\n");
+        for (Map<String, Object> row : rows) {
+            csv.append(csvCell(String.valueOf(row.get("date")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("userName")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("userId")))).append(',')
+                    .append(csvCell(nullableString(row.get("checkInTime")))).append(',')
+                    .append(csvCell(nullableString(row.get("checkOutTime")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("status")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("workedMinutes")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("overtimeMinutes")))).append(',')
+                    .append(csvCell(nullableString(row.get("checkInNote")))).append(',')
+                    .append(csvCell(nullableString(row.get("checkOutNote"))))
+                    .append('\n');
+        }
+
+        if ("excel".equals(format)) {
+            byte[] xlsx = createXlsx(
+                    "attendance",
+                    List.of("date", "userName", "userId", "checkInTime", "checkOutTime", "status", "workedMinutes", "overtimeMinutes", "checkInNote", "checkOutNote"),
+                    rows.stream().map(row -> List.of(
+                            nullableString(row.get("date")),
+                            nullableString(row.get("userName")),
+                            nullableString(row.get("userId")),
+                            nullableString(row.get("checkInTime")),
+                            nullableString(row.get("checkOutTime")),
+                            nullableString(row.get("status")),
+                            nullableString(row.get("workedMinutes")),
+                            nullableString(row.get("overtimeMinutes")),
+                            nullableString(row.get("checkInNote")),
+                            nullableString(row.get("checkOutNote"))
+                    )).toList()
+            );
+            return encodeFilePayload(
+                    "attendance-" + branchId + ".xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    xlsx,
+                    Map.of("count", rows.size(), "branchId", branchId)
+            );
+        }
+
+        List<String> lines = new ArrayList<>();
+        lines.add("Branch: " + (resolveBranchName(branchId) == null ? branchId : resolveBranchName(branchId)));
+        lines.add("Range: " + (from == null ? "-" : from) + " -> " + (to == null ? "-" : to));
+        lines.add("Total rows: " + rows.size());
+        lines.add("");
+        for (Map<String, Object> row : rows) {
+            lines.add(String.format(
+                    "%s | %s | IN %s | OUT %s | %s | work=%s min",
+                    String.valueOf(row.get("date")),
+                    String.valueOf(row.get("userName")),
+                    nullableString(row.get("checkInTime")),
+                    nullableString(row.get("checkOutTime")),
+                    String.valueOf(row.get("status")),
+                    String.valueOf(row.get("workedMinutes"))
+            ));
+        }
+        return encodeFilePayload(
+                "attendance-" + branchId + ".pdf",
+                "application/pdf",
+                createPdf("Attendance report", lines),
+                Map.of("count", rows.size(), "branchId", branchId)
+        );
+    }
+
+    public Map<String, Object> attendanceMonthlySummary(String token, String branchId, String monthRaw) {
+        User actor = requireManagerOrAdmin(token);
+        assertCanAccessBranch(actor, branchId);
+        LocalDate month = parsePayrollMonth(monthRaw);
+        LocalDate from = month.withDayOfMonth(1);
+        LocalDate to = from.withDayOfMonth(from.lengthOfMonth());
+        List<Map<String, Object>> rows = listAttendance(token, branchId, from.toString(), to.toString());
+
+        Map<String, Map<String, Object>> byUser = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            String userId = String.valueOf(row.get("userId"));
+            Map<String, Object> agg = byUser.computeIfAbsent(userId, key -> {
+                Map<String, Object> value = new HashMap<>();
+                value.put("userId", userId);
+                value.put("userName", String.valueOf(row.get("userName")));
+                value.put("present", 0);
+                value.put("late", 0);
+                value.put("halfDay", 0);
+                value.put("absent", 0);
+                value.put("workedMinutes", 0);
+                return value;
+            });
+            String status = String.valueOf(row.get("status"));
+            if ("PRESENT".equals(status)) agg.put("present", ((int) agg.get("present")) + 1);
+            if ("LATE".equals(status)) agg.put("late", ((int) agg.get("late")) + 1);
+            if ("HALF_DAY".equals(status)) agg.put("halfDay", ((int) agg.get("halfDay")) + 1);
+            if ("ABSENT".equals(status)) agg.put("absent", ((int) agg.get("absent")) + 1);
+            int worked = safeInt(row.get("workedMinutes"));
+            agg.put("workedMinutes", ((int) agg.get("workedMinutes")) + worked);
+        }
+
+        List<Map<String, Object>> items = new ArrayList<>(byUser.values());
+        items.sort((a, b) -> String.valueOf(a.get("userName")).compareToIgnoreCase(String.valueOf(b.get("userName"))));
+        return Map.of(
+                "branchId", branchId,
+                "month", month.toString(),
+                "from", from.toString(),
+                "to", to.toString(),
+                "items", items,
+                "count", items.size()
+        );
+    }
+
+    public Map<String, Object> exportLeaveRequests(String token, String branchId) {
+        User actor = requireManagerOrAdmin(token);
+        assertCanAccessBranch(actor, branchId);
+        List<Map<String, Object>> rows = branchLeaveRequests(token, branchId);
+        StringBuilder csv = new StringBuilder();
+        csv.append("id,userName,startDate,endDate,leaveType,status,reason,approvedBy,createdAt\n");
+        for (Map<String, Object> row : rows) {
+            csv.append(csvCell(String.valueOf(row.get("id")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("userName")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("startDate")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("endDate")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("leaveType")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("status")))).append(',')
+                    .append(csvCell(nullableString(row.get("reason")))).append(',')
+                    .append(csvCell(nullableString(row.get("approvedBy")))).append(',')
+                    .append(csvCell(nullableString(row.get("createdAt"))))
+                    .append('\n');
+        }
+        byte[] xlsx = createXlsx(
+                "leave_requests",
+                List.of("id", "userName", "startDate", "endDate", "leaveType", "status", "reason", "approvedBy", "createdAt"),
+                rows.stream().map(row -> List.of(
+                        nullableString(row.get("id")),
+                        nullableString(row.get("userName")),
+                        nullableString(row.get("startDate")),
+                        nullableString(row.get("endDate")),
+                        nullableString(row.get("leaveType")),
+                        nullableString(row.get("status")),
+                        nullableString(row.get("reason")),
+                        nullableString(row.get("approvedBy")),
+                        nullableString(row.get("createdAt"))
+                )).toList()
+        );
+        return encodeFilePayload(
+                "leave-requests-" + branchId + ".xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                xlsx,
+                Map.of("count", rows.size(), "branchId", branchId)
+        );
+    }
+
+    public Map<String, Object> exportBranchPayroll(String token, String branchId, String monthRaw, String formatRaw) {
+        User actor = requireManagerOrAdmin(token);
+        assertCanAccessBranch(actor, branchId);
+        List<Payroll> items = listBranchPayroll(token, branchId, monthRaw);
+        String format = normalizeExportFormat(formatRaw);
+        StringBuilder csv = new StringBuilder();
+        csv.append("payrollId,userId,month,totalWorkedHours,totalWorkedDays,baseSalaryEarned,totalAllowances,totalBonus,totalDeductions,netSalary,status\n");
+        for (Payroll payroll : items) {
+            csv.append(csvCell(payroll.getId())).append(',')
+                    .append(csvCell(payroll.getUserId())).append(',')
+                    .append(csvCell(payroll.getMonth() == null ? null : payroll.getMonth().toString())).append(',')
+                    .append(csvCell(valueOf(payroll.getTotalWorkedHours()))).append(',')
+                    .append(csvCell(valueOf(payroll.getTotalWorkedDays()))).append(',')
+                    .append(csvCell(valueOf(payroll.getBaseSalaryEarned()))).append(',')
+                    .append(csvCell(valueOf(payroll.getTotalAllowances()))).append(',')
+                    .append(csvCell(valueOf(payroll.getTotalBonus()))).append(',')
+                    .append(csvCell(valueOf(payroll.getTotalDeductions()))).append(',')
+                    .append(csvCell(valueOf(payroll.getNetSalary()))).append(',')
+                    .append(csvCell(payroll.getStatus() == null ? null : payroll.getStatus().name()))
+                    .append('\n');
+        }
+
+        if ("excel".equals(format)) {
+            byte[] xlsx = createXlsx(
+                    "payroll_branch",
+                    List.of("payrollId", "userId", "month", "totalWorkedHours", "totalWorkedDays", "baseSalaryEarned", "totalAllowances", "totalBonus", "totalDeductions", "netSalary", "status"),
+                    items.stream().map(payroll -> List.of(
+                            nullableString(payroll.getId()),
+                            nullableString(payroll.getUserId()),
+                            nullableString(payroll.getMonth()),
+                            valueOf(payroll.getTotalWorkedHours()),
+                            valueOf(payroll.getTotalWorkedDays()),
+                            valueOf(payroll.getBaseSalaryEarned()),
+                            valueOf(payroll.getTotalAllowances()),
+                            valueOf(payroll.getTotalBonus()),
+                            valueOf(payroll.getTotalDeductions()),
+                            valueOf(payroll.getNetSalary()),
+                            nullableString(payroll.getStatus() == null ? null : payroll.getStatus().name())
+                    )).toList()
+            );
+            return encodeFilePayload(
+                    "payroll-branch-" + branchId + ".xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    xlsx,
+                    Map.of("count", items.size(), "branchId", branchId)
+            );
+        }
+
+        List<String> lines = new ArrayList<>();
+        lines.add("Branch: " + (resolveBranchName(branchId) == null ? branchId : resolveBranchName(branchId)));
+        lines.add("Month: " + (monthRaw == null ? "-" : monthRaw));
+        lines.add("Total payroll rows: " + items.size());
+        lines.add("");
+        for (Payroll payroll : items) {
+            User staff = requireUser(payroll.getUserId());
+            lines.add(String.format(
+                    "%s | %s | net=%s | status=%s",
+                    staff.getName(),
+                    payroll.getMonth() == null ? "-" : payroll.getMonth(),
+                    valueOf(payroll.getNetSalary()),
+                    payroll.getStatus() == null ? "-" : payroll.getStatus().name()
+            ));
+        }
+        return encodeFilePayload(
+                "payroll-branch-" + branchId + ".pdf",
+                "application/pdf",
+                createPdf("Payroll monthly report", lines),
+                Map.of("count", items.size(), "branchId", branchId)
+        );
+    }
+
+    public Map<String, Object> createSalaryAdvance(String token, String userId, Map<String, Object> payload) {
+        User actor = requireAnyStaff(token);
+        User target = requireUser(userId);
+        if (actor.getRole() != User.Role.ADMIN && actor.getRole() != User.Role.MANAGER && !Objects.equals(actor.getId(), target.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Khong co quyen tao tam ung");
+        }
+        if (actor.getRole() == User.Role.MANAGER) {
+            assertCanAccessBranch(actor, target.getBranchId());
+        }
+        BigDecimal amount = parseDecimal(payload == null ? null : payload.get("amount"));
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount phai > 0");
+        }
+        LocalDate requestDate = parseDateOrDefault(payload == null ? null : nullableString(payload.get("requestDate")), LocalDate.now());
+        LocalDate deductMonth = parsePayrollMonth(payload == null ? null : nullableString(payload.get("deductMonth")));
+        String notes = payload == null ? null : normalizeText(nullableString(payload.get("notes")));
+
+        SalaryAdvance advance = SalaryAdvance.builder()
+                .userId(target.getId())
+                .amount(amount)
+                .requestDate(requestDate)
+                .deductMonth(deductMonth)
+                .notes(notes)
+                .status(actor.getRole() == User.Role.STAFF ? SalaryAdvance.SalaryAdvanceStatus.PENDING : SalaryAdvance.SalaryAdvanceStatus.APPROVED)
+                .approvedBy(actor.getRole() == User.Role.STAFF ? null : actor.getId())
+                .build();
+        SalaryAdvance saved = salaryAdvanceRepository.save(advance);
+        hrRealtimeHub.publish(target.getBranchId(), "salary-advance.created", Map.of(
+                "advanceId", saved.getId(),
+                "userId", target.getId(),
+                "status", saved.getStatus().name()
+        ));
+        return Map.of("id", saved.getId(), "status", saved.getStatus().name());
+    }
+
+    public List<SalaryAdvance> listSalaryAdvances(String token, String userId) {
+        User actor = requireAnyStaff(token);
+        User target = requireUser(userId);
+        if (actor.getRole() != User.Role.ADMIN && actor.getRole() != User.Role.MANAGER && !Objects.equals(actor.getId(), target.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Khong co quyen xem tam ung");
+        }
+        if (actor.getRole() == User.Role.MANAGER) {
+            assertCanAccessBranch(actor, target.getBranchId());
+        }
+        return salaryAdvanceRepository.findByUserIdOrderByRequestDateDesc(target.getId());
+    }
+
+    public SalaryAdvance approveSalaryAdvance(String token, String advanceId, boolean approved) {
+        User actor = requireManagerOrAdmin(token);
+        SalaryAdvance advance = salaryAdvanceRepository.findById(advanceId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay tam ung"));
+        User target = requireUser(advance.getUserId());
+        assertCanAccessBranch(actor, target.getBranchId());
+        if (advance.getStatus() != SalaryAdvance.SalaryAdvanceStatus.PENDING) {
+            return advance;
+        }
+        advance.setStatus(approved ? SalaryAdvance.SalaryAdvanceStatus.APPROVED : SalaryAdvance.SalaryAdvanceStatus.REJECTED);
+        advance.setApprovedBy(actor.getId());
+        SalaryAdvance saved = salaryAdvanceRepository.save(advance);
+        hrRealtimeHub.publish(target.getBranchId(), approved ? "salary-advance.approved" : "salary-advance.rejected", Map.of(
+                "advanceId", saved.getId(),
+                "userId", target.getId(),
+                "status", saved.getStatus().name()
+        ));
+        return saved;
+    }
+
+    public void assertRealtimeBranchAccess(String token, String branchId) {
+        User actor = requireManagerOrAdmin(token);
+        assertCanAccessBranch(actor, branchId);
+    }
+
+    public void assertRealtimeAdminOrManager(String token) {
+        requireManagerOrAdmin(token);
     }
 
     private Payroll buildPayrollForUser(User user, LocalDate from, LocalDate to, LocalDate month, User actor) {
@@ -642,6 +1057,25 @@ public class HrManagementService {
                     .build());
         }
 
+        List<SalaryAdvance> advances = salaryAdvanceRepository.findByUserIdAndDeductMonthAndStatusIn(
+                user.getId(),
+                month,
+                List.of(SalaryAdvance.SalaryAdvanceStatus.APPROVED, SalaryAdvance.SalaryAdvanceStatus.PENDING)
+        );
+        BigDecimal advanceDeduction = advances.stream()
+                .map(SalaryAdvance::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (advanceDeduction.compareTo(BigDecimal.ZERO) > 0) {
+            deduction = deduction.add(advanceDeduction);
+            details.add(PayrollDetail.builder()
+                    .componentName("Salary advance deduction")
+                    .componentType(PayrollDetail.ComponentType.DEDUCTION)
+                    .amount(advanceDeduction)
+                    .note("Auto from salary_advance")
+                    .build());
+        }
+
         BigDecimal net = baseEarned.add(allowance).add(bonus).subtract(deduction).max(BigDecimal.ZERO);
         Payroll payroll = payrollRepository.findByUserIdAndMonth(user.getId(), month).orElse(Payroll.builder()
                 .userId(user.getId())
@@ -664,6 +1098,15 @@ public class HrManagementService {
             detail.setPayrollId(saved.getId());
         }
         payrollDetailRepository.saveAll(details);
+        for (SalaryAdvance advance : advances) {
+            if (advance.getStatus() == SalaryAdvance.SalaryAdvanceStatus.APPROVED
+                    || advance.getStatus() == SalaryAdvance.SalaryAdvanceStatus.PENDING) {
+                advance.setStatus(SalaryAdvance.SalaryAdvanceStatus.DEDUCTED);
+            }
+        }
+        if (!advances.isEmpty()) {
+            salaryAdvanceRepository.saveAll(advances);
+        }
         return saved;
     }
 
@@ -918,5 +1361,119 @@ public class HrManagementService {
     private String resolveBranchName(String branchId) {
         if (branchId == null) return null;
         return branchRepository.findById(branchId).map(Branch::getName).orElse(null);
+    }
+
+    private Map<String, Object> encodeFilePayload(
+            String filename,
+            String contentType,
+            byte[] bytes,
+            Map<String, Object> extra
+    ) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("filename", filename);
+        response.put("contentType", contentType);
+        response.put("contentBase64", Base64.getEncoder().encodeToString(bytes));
+        response.put("size", bytes.length);
+        response.putAll(extra);
+        return response;
+    }
+
+    private byte[] createPdf(String title, List<String> lines) {
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            PDPage page = new PDPage();
+            document.addPage(page);
+            try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+                content.beginText();
+                content.setFont(PDType1Font.HELVETICA_BOLD, 14);
+                content.newLineAtOffset(40, 760);
+                content.showText(sanitizePdfText(title));
+                content.setFont(PDType1Font.HELVETICA, 10);
+                int maxLines = 48;
+                int written = 0;
+                for (String line : lines) {
+                    if (written >= maxLines) break;
+                    content.newLineAtOffset(0, -14);
+                    content.showText(sanitizePdfText(line));
+                    written++;
+                }
+                content.endText();
+            }
+            document.save(output);
+            return output.toByteArray();
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Khong tao duoc file PDF");
+        }
+    }
+
+    private String sanitizePdfText(String text) {
+        String value = text == null ? "" : text;
+        return value.replaceAll("[\\r\\n]+", " ");
+    }
+
+    private String normalizeExportFormat(String formatRaw) {
+        String format = normalizeUpper(formatRaw, "EXCEL");
+        if (!"EXCEL".equals(format) && !"PDF".equals(format)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "format chi ho tro excel/pdf");
+        }
+        return "PDF".equals(format) ? "pdf" : "excel";
+    }
+
+    private String nullableString(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private int safeInt(Object value) {
+        if (value == null) return 0;
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private String valueOf(BigDecimal value) {
+        return value == null ? "0" : value.toPlainString();
+    }
+
+    private String csvCell(String value) {
+        if (value == null) return "";
+        String escaped = value.replace("\"", "\"\"");
+        if (escaped.contains(",") || escaped.contains("\n") || escaped.contains("\r")) {
+            return "\"" + escaped + "\"";
+        }
+        return escaped;
+    }
+
+    private BigDecimal parseDecimal(Object value) {
+        if (value == null) return BigDecimal.ZERO;
+        try {
+            return new BigDecimal(String.valueOf(value).trim());
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Gia tri so khong hop le");
+        }
+    }
+
+    private byte[] createXlsx(String sheetName, List<String> headers, List<List<String>> rows) {
+        try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XSSFSheet sheet = workbook.createSheet(sheetName);
+            int rowIndex = 0;
+            Row headerRow = sheet.createRow(rowIndex++);
+            for (int index = 0; index < headers.size(); index++) {
+                headerRow.createCell(index).setCellValue(headers.get(index));
+            }
+            for (List<String> row : rows) {
+                Row dataRow = sheet.createRow(rowIndex++);
+                for (int index = 0; index < row.size(); index++) {
+                    dataRow.createCell(index).setCellValue(row.get(index) == null ? "" : row.get(index));
+                }
+            }
+            for (int index = 0; index < headers.size(); index++) {
+                sheet.autoSizeColumn(index);
+            }
+            workbook.write(output);
+            return output.toByteArray();
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Khong tao duoc file XLSX");
+        }
     }
 }

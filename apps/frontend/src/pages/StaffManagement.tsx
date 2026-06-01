@@ -202,6 +202,7 @@ export default function StaffManagement() {
   const [payrollDateTo, setPayrollDateTo] = useState(new Date().toISOString().split('T')[0])
   const [payrollSummary, setPayrollSummary] = useState<PayrollSummary | null>(null)
   const [loadingPayroll, setLoadingPayroll] = useState(true)
+  const [hrRealtimeLagMs, setHrRealtimeLagMs] = useState(0)
   const [staffQrImages, setStaffQrImages] = useState<Record<string, string>>({})
   const activeBranchId = useMemo(() => {
     if (currentRole === 'MANAGER') return currentUser?.branchId || ''
@@ -490,6 +491,37 @@ export default function StaffManagement() {
   useEffect(() => {
     loadPayroll()
   }, [payrollStaffId, payrollDateFrom, payrollDateTo, canManageAccounts, currentUser?.id, activeBranchId, staffs])
+
+  useEffect(() => {
+    const token = useAuthStore.getState().token
+    if (!token || !activeBranchId || !canManageAccounts) return
+    const params = new URLSearchParams()
+    params.set('access_token', token)
+    const es = new EventSource(`/api/branches/${activeBranchId}/hr/events?${params.toString()}`)
+    let lastReloadAt = 0
+    es.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        const emittedAt = String(payload?.emittedAt || '')
+        if (emittedAt) {
+          const lag = Date.now() - new Date(emittedAt).getTime()
+          setHrRealtimeLagMs(Number.isFinite(lag) ? Math.max(0, lag) : 0)
+        }
+      } catch {
+        // ignore parse error
+      }
+      const now = Date.now()
+      if (now - lastReloadAt >= 4000) {
+        lastReloadAt = now
+        void loadSchedules()
+        void loadAttendance()
+        void loadPayroll()
+      }
+    }
+    return () => {
+      es.close()
+    }
+  }, [activeBranchId, canManageAccounts])
 
   useEffect(() => {
     void loadBranches()
@@ -1028,6 +1060,11 @@ export default function StaffManagement() {
   return (
     <div className="space-y-5 sm:space-y-6">
       <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">Quản lý nhân sự (Quản lý / Quản trị)</h1>
+      {canManageAccounts && (
+        <p className={`text-xs ${hrRealtimeLagMs > 5000 ? 'text-rose-700' : 'text-emerald-700'}`}>
+          HR realtime lag: {Math.round(hrRealtimeLagMs)} ms
+        </p>
+      )}
 
       <Card title="M-01 Quản lý nhân sự" subtitle="Chi ADMIN/MANAGER moi duoc them, sua, xoa tai khoan nhan vien">
         <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">

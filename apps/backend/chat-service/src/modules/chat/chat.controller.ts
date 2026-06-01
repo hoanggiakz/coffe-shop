@@ -3,6 +3,9 @@ import { Request } from 'express';
 import { ChatGateway, StaffNotificationInput } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { NotificationRouterService } from './notification-router.service';
+import { KafkaService } from '../../kafka/kafka.service';
+import { RedisService } from '../../redis/redis.service';
+import { ConfigService } from '@nestjs/config';
 
 @Controller()
 export class ChatController {
@@ -10,6 +13,9 @@ export class ChatController {
     private readonly chatService: ChatService,
     private readonly chatGateway: ChatGateway,
     private readonly notificationRouter: NotificationRouterService,
+    private readonly kafkaService: KafkaService,
+    private readonly redisService: RedisService,
+    private readonly configService: ConfigService,
   ) {}
 
   private actor(req: Request) {
@@ -51,6 +57,30 @@ export class ChatController {
   ) {
     const customerToken = String(token || req?.headers['x-chat-token'] || '');
     return this.chatService.getMessages(sessionId, this.actor(req!), Number(page), Number(limit), before, customerToken);
+  }
+
+  @Get('api/chats/ready')
+  async ready() {
+    const kafka = this.kafkaService.readiness();
+    const redis = await this.redisService.readiness();
+    const redisAdapterEnabled = String(this.configService.get('SOCKET_IO_REDIS_ADAPTER') || 'false').toLowerCase() === 'true';
+    const isProduction = String(this.configService.get('NODE_ENV') || '').toLowerCase() === 'production';
+    const redisRequired = isProduction || redisAdapterEnabled;
+    const ready = (kafka.required ? kafka.connected : kafka.configured ? kafka.connected : true)
+      && (redisRequired ? redis.connected : true);
+    return {
+      service: 'chat-service',
+      status: ready ? 'ready' : 'not-ready',
+      checks: {
+        kafka,
+        redis: {
+          connected: redis.connected,
+          required: redisRequired,
+          lastError: redis.error,
+        },
+      },
+      timestamp: new Date().toISOString(),
+    };
   }
 
   @Post('api/chat/sessions/:sessionId/customer-token')

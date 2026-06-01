@@ -66,6 +66,12 @@ interface InventoryReportResponse {
     totalStockValue: number
   }
   stocks: InventoryStockItem[]
+  analytics?: {
+    movementTrend: Array<{ day: string; importQty: number; exportQty: number; adjustQty: number }>
+    movementTypeBreakdown: Array<{ type: string; source: string; count: number; quantity: number }>
+    topConsumption: Array<{ ingredientId: string; ingredientName: string; quantity: number }>
+    stockRiskBands: { critical: number; low: number; healthy: number }
+  }
 }
 
 interface DashboardResponse {
@@ -146,6 +152,13 @@ interface QualitySummaryResponse {
     source: string
     checks: QualityCheckItem[]
   }
+  modelQuality?: {
+    sentiment?: {
+      geminiEnabled?: boolean
+      ratios?: { geminiSuccessRatio: number; geminiErrorRatio: number; fallbackRatio: number }
+      avgConfidence?: { gemini: number; fallback: number }
+    }
+  }
   fallbackRatios: Record<
     string,
     {
@@ -196,6 +209,27 @@ interface RecommendAbSummary {
   groups: Record<string, { shown: number; click: number; add_to_cart: number; purchase: number; ctr: number; addToCartRate: number; purchaseRate: number }>
   uplift: { ctr: number; addToCartRate: number; purchaseRate: number }
   events: number
+  significance?: {
+    minSamplePerGroup: number
+    sampleSize: { treatment: number; control: number }
+    sampleReady: boolean
+    confidence: { ctr: number; addToCartRate: number; purchaseRate: number }
+    pValue: { ctr: number; addToCartRate: number; purchaseRate: number }
+    confidenceReady: boolean
+    decisionReady: boolean
+  }
+}
+
+interface RealtimeTelemetry {
+  subscribers: number
+  peakSubscribers: number
+  emitted: number
+  connections: number
+  disconnects: number
+  subscriberDrops: number
+  disconnectRate: number
+  lag: { samples: number; p95Ms: number }
+  alerts: { p95LagHigh: boolean; subscriberDropHigh: boolean; disconnectRateHigh: boolean }
 }
 
 function formatSentimentIssueLabel(issue: string): string {
@@ -273,6 +307,8 @@ export default function Reports() {
   const [fallbackTrendWindowMinutes, setFallbackTrendWindowMinutes] = useState(120)
   const [showOnlyHighFallback, setShowOnlyHighFallback] = useState(false)
   const [recommendAbSummary, setRecommendAbSummary] = useState<RecommendAbSummary | null>(null)
+  const [realtimeLagMs, setRealtimeLagMs] = useState<number>(0)
+  const [realtimeTelemetry, setRealtimeTelemetry] = useState<RealtimeTelemetry | null>(null)
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
@@ -294,7 +330,7 @@ export default function Reports() {
   const loadReports = async () => {
     setLoading(true)
     try {
-      const [dashboardRes, revenueRes, topRes, inventoryRes, staffRes] = await Promise.all([
+      const [dashboardRes, revenueRes, topRes, inventoryRes, staffRes, realtimeMetricsRes] = await Promise.all([
         api.get('/reports/dashboard', {
           params: { dateFrom, dateTo, groupBy, branchId: selectedBranchId || undefined },
         }),
@@ -310,6 +346,7 @@ export default function Reports() {
         api.get('/reports/staff-performance', {
           params: { dateFrom, dateTo, branchId: selectedBranchId || undefined, limit: 10 },
         }),
+        api.get('/reports/realtime/metrics'),
       ])
 
       setDashboard((dashboardRes.data || null) as DashboardResponse | null)
@@ -317,6 +354,7 @@ export default function Reports() {
       setTopItems(Array.isArray(topRes.data) ? (topRes.data as TopItem[]) : [])
       setInventory((inventoryRes.data || null) as InventoryReportResponse | null)
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
+      setRealtimeTelemetry((realtimeMetricsRes.data || null) as RealtimeTelemetry | null)
 
       try {
         const [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult, qualitySummaryResult, fallbackTrendResult, fallbackSummaryResult, recommendAbResult] = await Promise.allSettled([
@@ -389,6 +427,7 @@ export default function Reports() {
         setRecommendAbSummary(null)
       }
     } catch (error: any) {
+      setRealtimeTelemetry(null)
       toast.error(error.response?.data?.message || tv('Không tải được dữ liệu báo cáo', 'Unable to load report data'))
     } finally {
       setLoading(false)
@@ -400,11 +439,43 @@ export default function Reports() {
   }, [dateFrom, dateTo, groupBy, selectedBranchId, fallbackTrendWindowMinutes])
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      void loadReports()
-    }, 30000)
-    return () => window.clearInterval(timer)
-  }, [dateFrom, dateTo, groupBy, selectedBranchId, fallbackTrendWindowMinutes])
+    const token = useAuthStore.getState().token
+    if (!token) return
+    const params = new URLSearchParams()
+    if (selectedBranchId) params.set('branchId', selectedBranchId)
+    params.set('access_token', token)
+    const es = new EventSource(`/api/reports/realtime/stream?${params.toString()}`, {
+      withCredentials: false,
+    } as EventSourceInit)
+    let lastReloadAt = 0
+    let lastLagPostAt = 0
+    es.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        const emittedAt = String(payload?.emittedAt || '')
+        if (emittedAt) {
+          const lag = Date.now() - new Date(emittedAt).getTime()
+          const normalizedLag = Number.isFinite(lag) ? Math.max(0, lag) : 0
+          setRealtimeLagMs(normalizedLag)
+          const now = Date.now()
+          if (now - lastLagPostAt >= 15000) {
+            lastLagPostAt = now
+            void api.post('/reports/realtime/lag-sample', { lagMs: normalizedLag }).catch(() => undefined)
+          }
+        }
+      } catch {
+        // ignore payload parse errors
+      }
+      const now = Date.now()
+      if (now - lastReloadAt >= 8000) {
+        lastReloadAt = now
+        void loadReports()
+      }
+    }
+    return () => {
+      es.close()
+    }
+  }, [selectedBranchId])
 
   const revenueChartData = useMemo(
     () =>
@@ -445,6 +516,27 @@ export default function Reports() {
       })),
     [dashboard?.payments.byStatus],
   )
+
+  const inventoryTrendChartData = useMemo(
+    () =>
+      (inventory?.analytics?.movementTrend || []).map((item) => ({
+        day: formatPeriodLabel(item.day),
+        importQty: item.importQty,
+        exportQty: item.exportQty,
+        adjustQty: item.adjustQty,
+      })),
+    [inventory?.analytics?.movementTrend],
+  )
+
+  const inventoryRiskChartData = useMemo(() => {
+    const bands = inventory?.analytics?.stockRiskBands
+    if (!bands) return []
+    return [
+      { label: 'Critical', count: Number(bands.critical || 0) },
+      { label: 'Low', count: Number(bands.low || 0) },
+      { label: 'Healthy', count: Number(bands.healthy || 0) },
+    ]
+  }, [inventory?.analytics?.stockRiskBands])
 
   const noBusinessDataForSelectedBranch = useMemo(() => {
     if (!selectedBranchId || !dashboard) return false
@@ -632,6 +724,9 @@ export default function Reports() {
         <Button variant="secondary" className="w-full sm:w-auto" onClick={() => void loadReports()} loading={loading}>
           {tv('Làm mới', 'Refresh')}
         </Button>
+        <p className={`text-xs ${realtimeLagMs > 5000 ? 'text-rose-700' : 'text-emerald-700'}`}>
+          Realtime lag: {Math.round(realtimeLagMs)} ms
+        </p>
       </div>
 
       {noBusinessDataForSelectedBranch && (
@@ -772,6 +867,16 @@ export default function Reports() {
             >
               Data quality: <span className="font-semibold">{qualitySummary.quality.status.toUpperCase()}</span>
             </div>
+            {qualitySummary.modelQuality?.sentiment && (
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3 text-xs text-emerald-900">
+                <p className="font-semibold">Sentiment model quality</p>
+                <p>
+                  Gemini: {qualitySummary.modelQuality.sentiment.geminiEnabled ? 'ON' : 'OFF'} · success{' '}
+                  {Math.round(Number(qualitySummary.modelQuality.sentiment.ratios?.geminiSuccessRatio || 0) * 100)}% · fallback{' '}
+                  {Math.round(Number(qualitySummary.modelQuality.sentiment.ratios?.fallbackRatio || 0) * 100)}%
+                </p>
+              </div>
+            )}
 
             {qualitySummary.attention.count > 0 && (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
@@ -867,6 +972,50 @@ export default function Reports() {
         )}
       </Card>
 
+      <Card title="Realtime Telemetry Alerts" subtitle="Cảnh báo vận hành backend stream">
+        {!realtimeTelemetry && <p className="text-sm text-slate-500">Chưa có dữ liệu telemetry.</p>}
+        {realtimeTelemetry && (
+          <div className="space-y-3">
+            {(realtimeTelemetry.alerts.p95LagHigh || realtimeTelemetry.alerts.subscriberDropHigh || realtimeTelemetry.alerts.disconnectRateHigh) && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                <p className="font-semibold">Có cảnh báo vận hành cần xử lý</p>
+                <p className="text-xs">
+                  p95 lag {Math.round(realtimeTelemetry.lag.p95Ms)}ms · drops {realtimeTelemetry.subscriberDrops} · disconnect rate {Math.round(realtimeTelemetry.disconnectRate * 100)}%
+                </p>
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-sky-100 bg-sky-50/60 p-3">
+                <p className="text-xs text-slate-600">Subscribers</p>
+                <p className="text-lg font-semibold text-slate-900">{realtimeTelemetry.subscribers}</p>
+                <p className="text-xs text-slate-500">Peak: {realtimeTelemetry.peakSubscribers}</p>
+              </div>
+              <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
+                <p className="text-xs text-slate-600">p95 Lag</p>
+                <p className={`text-lg font-semibold ${realtimeTelemetry.alerts.p95LagHigh ? 'text-rose-700' : 'text-slate-900'}`}>
+                  {Math.round(realtimeTelemetry.lag.p95Ms)} ms
+                </p>
+                <p className="text-xs text-slate-500">Samples: {realtimeTelemetry.lag.samples}</p>
+              </div>
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                <p className="text-xs text-slate-600">Subscriber Drops</p>
+                <p className={`text-lg font-semibold ${realtimeTelemetry.alerts.subscriberDropHigh ? 'text-rose-700' : 'text-slate-900'}`}>
+                  {realtimeTelemetry.subscriberDrops}
+                </p>
+                <p className="text-xs text-slate-500">Connections: {realtimeTelemetry.connections}</p>
+              </div>
+              <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-3">
+                <p className="text-xs text-slate-600">Disconnect Rate</p>
+                <p className={`text-lg font-semibold ${realtimeTelemetry.alerts.disconnectRateHigh ? 'text-rose-700' : 'text-slate-900'}`}>
+                  {Math.round(realtimeTelemetry.disconnectRate * 100)}%
+                </p>
+                <p className="text-xs text-slate-500">Disconnects: {realtimeTelemetry.disconnects}</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
+
       {recommendAbSummary && (
         <Card title="Recommendation A/B (24h)" subtitle="Hiệu quả control vs treatment cho gợi ý món">
           <div className="space-y-2 text-sm">
@@ -886,6 +1035,26 @@ export default function Reports() {
                 </p>
               ))}
             </div>
+            {recommendAbSummary.significance && (
+              <div
+                className={`rounded-xl border px-3 py-2 text-xs ${
+                  recommendAbSummary.significance.decisionReady
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    : 'border-amber-200 bg-amber-50 text-amber-800'
+                }`}
+              >
+                <p className="font-semibold">
+                  {recommendAbSummary.significance.decisionReady ? 'Decision-ready' : 'Chưa decision-ready'}
+                </p>
+                <p>
+                  Sample: treatment {recommendAbSummary.significance.sampleSize.treatment} / control {recommendAbSummary.significance.sampleSize.control}
+                  {' '} (min {recommendAbSummary.significance.minSamplePerGroup})
+                </p>
+                <p>
+                  Confidence CTR {Math.round(recommendAbSummary.significance.confidence.ctr * 100)}% · Add-to-cart {Math.round(recommendAbSummary.significance.confidence.addToCartRate * 100)}%
+                </p>
+              </div>
+            )}
           </div>
         </Card>
       )}
@@ -1047,6 +1216,57 @@ export default function Reports() {
             </tbody>
           </table>
         </div>
+
+        {(inventoryTrendChartData.length > 0 || inventoryRiskChartData.length > 0) && (
+          <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-amber-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+              <p className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">Xu hướng nhập/xuất kho</p>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={inventoryTrendChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="day" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="importQty" name="Nhập" stroke="#16a34a" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="exportQty" name="Xuất" stroke="#dc2626" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="adjustQty" name="Điều chỉnh" stroke="#0284c7" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-amber-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+              <p className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">Phân tầng rủi ro tồn kho</p>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={inventoryRiskChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="count" name="Số nguyên liệu" fill="#f59e0b" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {(inventory?.analytics?.topConsumption || []).length > 0 && (
+          <div className="mt-4 rounded-xl border border-amber-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+            <p className="mb-2 font-semibold text-slate-800 dark:text-slate-100">Top nguyên liệu tiêu hao</p>
+            <div className="space-y-1 text-xs text-slate-700 dark:text-slate-300">
+              {(inventory?.analytics?.topConsumption || []).slice(0, 8).map((item, index) => (
+                <p key={item.ingredientId}>
+                  #{index + 1} {item.ingredientName}: <span className="font-semibold">{Math.round(item.quantity * 100) / 100}</span>
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
       </Card>
 
       <Card title="Report Chat (AI)" subtitle="Hỏi đáp dữ liệu báo cáo bằng ngôn ngữ tự nhiên">

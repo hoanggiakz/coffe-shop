@@ -856,6 +856,36 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  private async emitStaffPaymentSuccessNotification(payment: any, metadata?: Record<string, any>) {
+    try {
+      const branchId = String(metadata?.branchId || '').trim() || undefined;
+      const tableId = String(payment?.tableId || '').trim() || undefined;
+      const orderId = String(payment?.orderId || '').trim() || undefined;
+      const amount = Number(payment?.amount || 0);
+      const payload = {
+        type: 'PAYMENT_SUCCESS',
+        title: 'Thanh toán thành công',
+        message: orderId
+          ? `Đơn ${orderId} đã thanh toán ${amount.toLocaleString('vi-VN')}đ`
+          : `Đã ghi nhận thanh toán ${amount.toLocaleString('vi-VN')}đ`,
+        branchId,
+        tableId,
+        orderId,
+      };
+      const response = await this.fetchWithRetry(`${this.chatServiceUrl}/staff-notifications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        this.logger.warn(`Cannot emit PAYMENT_SUCCESS notification: ${response.status} ${body}`);
+      }
+    } catch (error) {
+      this.logger.warn(`Emit PAYMENT_SUCCESS notification failed: ${(error as Error).message}`);
+    }
+  }
+
   private async sendChatPaymentMessage(tableId: string, content: string) {
     if (!tableId) return;
 
@@ -1527,6 +1557,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
 
     if (statusChanged && targetStatus === PaymentStatus.PAID) {
       await this.emitPaymentCompleted(updated);
+      await this.emitStaffPaymentSuccessNotification(
+        updated,
+        (nextMetadata && typeof nextMetadata === 'object' ? nextMetadata : {}) as Record<string, any>,
+      );
       try {
         await this.ensureInvoiceForPayment(updated, String((nextMetadata as any)?.confirmedBy || 'system'));
       } catch (error) {

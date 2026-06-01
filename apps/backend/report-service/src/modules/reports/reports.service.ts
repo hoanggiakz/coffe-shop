@@ -160,6 +160,9 @@ export class ReportsService implements OnModuleDestroy {
 
     let movements: Array<Record<string, any>> = [];
     let movementSummary: Array<Record<string, any>> = [];
+    let movementTrend: Array<Record<string, any>> = [];
+    let movementTypeBreakdown: Array<Record<string, any>> = [];
+    let topConsumption: Array<Record<string, any>> = [];
 
     if (includeMovements) {
       const dateWhere = this.buildDateWhere('sm."createdAt"', query.dateFrom, query.dateTo);
@@ -236,7 +239,76 @@ export class ReportsService implements OnModuleDestroy {
         quantity: Number(row.quantity || 0),
         totalPrice: Number(row.totalPrice || 0),
       }));
+
+      const movementTrendRows = await this.inventoryPool.query(
+        `
+          SELECT
+            date_trunc('day', sm."createdAt") AS day,
+            COALESCE(SUM(CASE WHEN sm.type = 'IMPORT' THEN sm.quantity ELSE 0 END), 0)::numeric AS import_qty,
+            COALESCE(SUM(CASE WHEN sm.type = 'EXPORT' THEN sm.quantity ELSE 0 END), 0)::numeric AS export_qty,
+            COALESCE(SUM(CASE WHEN sm.type = 'ADJUST' THEN sm.quantity ELSE 0 END), 0)::numeric AS adjust_qty
+          FROM stock_movements sm
+          ${movementWhere}
+          GROUP BY day
+          ORDER BY day ASC
+        `,
+        movementParams,
+      );
+      movementTrend = movementTrendRows.rows.map((row) => ({
+        day: new Date(row.day).toISOString(),
+        importQty: Number(row.import_qty || 0),
+        exportQty: Number(row.export_qty || 0),
+        adjustQty: Number(row.adjust_qty || 0),
+      }));
+
+      const movementTypeRows = await this.inventoryPool.query(
+        `
+          SELECT
+            sm.type,
+            sm.source,
+            COUNT(*)::int AS count,
+            COALESCE(SUM(sm.quantity), 0)::numeric AS quantity
+          FROM stock_movements sm
+          ${movementWhere}
+          GROUP BY sm.type, sm.source
+          ORDER BY sm.type ASC, count DESC
+        `,
+        movementParams,
+      );
+      movementTypeBreakdown = movementTypeRows.rows.map((row) => ({
+        type: String(row.type),
+        source: String(row.source),
+        count: Number(row.count || 0),
+        quantity: Number(row.quantity || 0),
+      }));
+
+      const topConsumptionRows = await this.inventoryPool.query(
+        `
+          SELECT
+            sm."ingredientId" AS "ingredientId",
+            i.name AS "ingredientName",
+            COALESCE(SUM(sm.quantity), 0)::numeric AS qty
+          FROM stock_movements sm
+          INNER JOIN ingredients i ON i.id = sm."ingredientId"
+          ${movementWhere ? `${movementWhere} AND sm.type = 'EXPORT'` : "WHERE sm.type = 'EXPORT'"}
+          GROUP BY sm."ingredientId", i.name
+          ORDER BY qty DESC
+          LIMIT 10
+        `,
+        movementParams,
+      );
+      topConsumption = topConsumptionRows.rows.map((row) => ({
+        ingredientId: String(row.ingredientId),
+        ingredientName: String(row.ingredientName),
+        quantity: Number(row.qty || 0),
+      }));
     }
+
+    const stockRiskBands = {
+      critical: stocks.filter((item) => item.stock <= 0).length,
+      low: stocks.filter((item) => item.stock > 0 && item.stock < item.minStock).length,
+      healthy: stocks.filter((item) => item.stock >= item.minStock).length,
+    };
 
     return {
       range: this.buildRangeResponse(query),
@@ -244,6 +316,12 @@ export class ReportsService implements OnModuleDestroy {
       stocks,
       movementSummary,
       movements,
+      analytics: {
+        movementTrend,
+        movementTypeBreakdown,
+        topConsumption,
+        stockRiskBands,
+      },
     };
   }
 

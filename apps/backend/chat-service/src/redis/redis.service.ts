@@ -28,4 +28,21 @@ export class RedisService implements OnModuleDestroy {
       Array.from(this.clients.values()).map(client => client.quit()),
     );
   }
+
+  async readiness() {
+    try {
+      const client = this.getClient('health-check');
+      await client.connect();
+      const pong = await client.ping();
+      return {
+        connected: String(pong || '').toUpperCase() === 'PONG',
+        error: null as string | null,
+      };
+    } catch (error) {
+      return {
+        connected: false,
+        error: (error as Error).message,
+      };
+    }
+  }
 }

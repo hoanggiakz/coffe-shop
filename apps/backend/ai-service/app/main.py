@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import math
 import os
 import re
 import time
@@ -24,6 +25,7 @@ REQUEST_LATENCY = Histogram("ai_request_latency_seconds", "AI request latency", 
 RESPONSE_SOURCE_COUNT = Counter("ai_response_source_total", "AI response source counter", ["endpoint", "source"])
 PREDICTION_ERROR_GAUGE = Gauge("ai_prediction_error_mape", "Latest prediction error (MAPE)")
 DATA_FRESHNESS_MINUTES = Gauge("ai_data_freshness_minutes", "Latest data freshness in minutes")
+SENTIMENT_SOURCE_COUNT = Counter("ai_sentiment_source_total", "Sentiment source usage", ["source", "status"])
 
 REPORT_DATABASE_URL = os.getenv("REPORT_DATABASE_URL", "").strip()
 CHATBOT_SQL_TIMEOUT_MS = int(os.getenv("AI_CHATBOT_SQL_TIMEOUT_MS", "2000"))
@@ -40,6 +42,10 @@ AI_ALLOW_LEGACY_NO_AUTH = os.getenv("AI_ALLOW_LEGACY_NO_AUTH", "true").strip().l
 AI_RATE_LIMIT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_PER_MINUTE", "120"))
 AI_RATE_LIMIT_REPORT_CHAT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_REPORT_CHAT_PER_MINUTE", "30"))
 AI_RATE_LIMIT_CHAT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_CHAT_PER_MINUTE", "60"))
+AI_SENTIMENT_GEMINI_API_KEY = os.getenv("AI_SENTIMENT_GEMINI_API_KEY", "").strip()
+AI_SENTIMENT_GEMINI_MODEL = os.getenv("AI_SENTIMENT_GEMINI_MODEL", "gemini-1.5-flash").strip() or "gemini-1.5-flash"
+AI_SENTIMENT_GEMINI_TIMEOUT_MS = int(os.getenv("AI_SENTIMENT_GEMINI_TIMEOUT_MS", "2500"))
+AI_SENTIMENT_QUALITY_LOOKBACK_HOURS = int(os.getenv("AI_SENTIMENT_QUALITY_LOOKBACK_HOURS", "24"))
 
 DEFAULT_MENU_KB = [
     {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
@@ -175,6 +181,16 @@ FALLBACK_TREND_MAX_POINTS = int(os.getenv("AI_FALLBACK_TREND_MAX_POINTS", "240")
 RECOMMEND_AB_EVENTS: list[dict[str, Any]] = []
 RECOMMEND_AB_EVENT_LIMIT = int(os.getenv("AI_RECOMMEND_AB_EVENT_LIMIT", "2000"))
 AI_RECOMMEND_AB_TREATMENT_PERCENT = int(os.getenv("AI_RECOMMEND_AB_TREATMENT_PERCENT", "50"))
+AI_RECOMMEND_AB_MIN_SAMPLE_PER_GROUP = int(os.getenv("AI_RECOMMEND_AB_MIN_SAMPLE_PER_GROUP", "120"))
+SENTIMENT_TELEMETRY: dict[str, Any] = {
+    "totals": {"requests": 0, "geminiSuccess": 0, "geminiError": 0, "fallbackLexicon": 0},
+    "confidenceSum": {"gemini": 0.0, "fallback": 0.0},
+    "confidenceCount": {"gemini": 0, "fallback": 0},
+    "lastError": None,
+    "lastUpdatedAt": None,
+}
+EMAIL_REDACT_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+PHONE_REDACT_RE = re.compile(r"(?<!\d)(?:\+?84|0)\d{8,10}(?!\d)")
 
 
 @app.middleware("http")
@@ -210,6 +226,23 @@ def json_dumps(obj: dict[str, Any]) -> str:
     import json
 
     return json.dumps(obj, ensure_ascii=False)
+
+
+def redact_pii_text(text: str | None) -> str:
+    raw = str(text or "")
+    masked = EMAIL_REDACT_RE.sub("[redacted_email]", raw)
+    masked = PHONE_REDACT_RE.sub("[redacted_phone]", masked)
+    return masked
+
+
+def redact_pii_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): redact_pii_metadata(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_pii_metadata(item) for item in value]
+    if isinstance(value, str):
+        return redact_pii_text(value)
+    return value
 
 
 def normalize_branch_id(value: str | None) -> str:
@@ -310,35 +343,31 @@ def record_recommend_ab_event(
     customer_id: str | None = None,
     session_id: str | None = None,
 ) -> None:
+    safe_customer_id = ""
+    if customer_id:
+        safe_customer_id = hashlib.sha1(str(customer_id).encode("utf-8")).hexdigest()[:16]
+    safe_session_id = ""
+    if session_id:
+        safe_session_id = hashlib.sha1(str(session_id).encode("utf-8")).hexdigest()[:16]
     now_iso = datetime.now(timezone.utc).isoformat()
-    RECOMMEND_AB_EVENTS.append(
-        {
-            "timestamp": now_iso,
-            "branchId": branch_id,
-            "group": str(group or "unknown").lower(),
-            "event": str(event or "unknown").lower(),
-            "strategy": str(strategy or "").lower(),
-            "customerId": customer_id or "",
-            "sessionId": session_id or "",
-        }
-    )
+    event_row = {
+        "timestamp": now_iso,
+        "branchId": branch_id,
+        "group": str(group or "unknown").lower(),
+        "event": str(event or "unknown").lower(),
+        "strategy": str(strategy or "").lower(),
+        "customerId": safe_customer_id,
+        "sessionId": safe_session_id,
+    }
+    RECOMMEND_AB_EVENTS.append(event_row)
     if len(RECOMMEND_AB_EVENTS) > max(100, RECOMMEND_AB_EVENT_LIMIT):
         del RECOMMEND_AB_EVENTS[:-RECOMMEND_AB_EVENT_LIMIT]
+    persist_recommend_ab_event(event_row)
 
 
 def build_recommend_ab_summary(branch_id: str, lookback_hours: int = 24) -> dict[str, Any]:
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=max(1, min(lookback_hours, 24 * 14)))
-    rows: list[dict[str, Any]] = []
-    for item in RECOMMEND_AB_EVENTS:
-        if str(item.get("branchId") or "") != branch_id:
-            continue
-        try:
-            ts = datetime.fromisoformat(str(item.get("timestamp") or ""))
-        except Exception:
-            continue
-        if ts < cutoff:
-            continue
-        rows.append(item)
+    safe_hours = max(1, min(lookback_hours, 24 * 14))
+    rows: list[dict[str, Any]] = load_recommend_ab_events(branch_id, safe_hours)
     by_group: dict[str, dict[str, int]] = {}
     for item in rows:
         group = str(item.get("group") or "unknown")
@@ -361,18 +390,163 @@ def build_recommend_ab_summary(branch_id: str, lookback_hours: int = 24) -> dict
         }
     treatment = groups.get("treatment") or {"ctr": 0.0, "addToCartRate": 0.0, "purchaseRate": 0.0}
     control = groups.get("control") or {"ctr": 0.0, "addToCartRate": 0.0, "purchaseRate": 0.0}
+    treatment_shown = int((groups.get("treatment") or {}).get("shown", 0))
+    control_shown = int((groups.get("control") or {}).get("shown", 0))
     uplift = {
         "ctr": round(float(treatment["ctr"]) - float(control["ctr"]), 4),
         "addToCartRate": round(float(treatment["addToCartRate"]) - float(control["addToCartRate"]), 4),
         "purchaseRate": round(float(treatment["purchaseRate"]) - float(control["purchaseRate"]), 4),
     }
+    min_sample = max(30, AI_RECOMMEND_AB_MIN_SAMPLE_PER_GROUP)
+
+    def confidence_from_diff(p_treatment: float, p_control: float, n_treatment: int, n_control: int) -> tuple[float, float]:
+        if n_treatment <= 0 or n_control <= 0:
+            return 0.0, 1.0
+        pooled = ((p_treatment * n_treatment) + (p_control * n_control)) / max(1, n_treatment + n_control)
+        se = (pooled * (1 - pooled) * ((1 / max(1, n_treatment)) + (1 / max(1, n_control)))) ** 0.5
+        if se <= 1e-9:
+            return 1.0, 0.0
+        z_score = abs((p_treatment - p_control) / se)
+        cdf = 0.5 * (1 + math.erf(z_score / (2 ** 0.5)))
+        p_value = max(0.0, min(1.0, 2 * (1 - cdf)))
+        confidence = max(0.0, min(1.0, 1 - p_value))
+        return round(confidence, 4), round(p_value, 6)
+
+    ctr_conf, ctr_p = confidence_from_diff(float(treatment["ctr"]), float(control["ctr"]), treatment_shown, control_shown)
+    cart_conf, cart_p = confidence_from_diff(
+        float(treatment["addToCartRate"]),
+        float(control["addToCartRate"]),
+        treatment_shown,
+        control_shown,
+    )
+    purchase_conf, purchase_p = confidence_from_diff(
+        float(treatment["purchaseRate"]),
+        float(control["purchaseRate"]),
+        treatment_shown,
+        control_shown,
+    )
+    sample_ready = treatment_shown >= min_sample and control_shown >= min_sample
+    confidence_ready = ctr_conf >= 0.95 and cart_conf >= 0.95
+    decision_ready = bool(sample_ready and confidence_ready)
     return {
         "branchId": branch_id,
-        "lookbackHours": max(1, min(lookback_hours, 24 * 14)),
+        "lookbackHours": safe_hours,
         "events": len(rows),
         "groups": groups,
         "uplift": uplift,
+        "significance": {
+            "minSamplePerGroup": min_sample,
+            "sampleSize": {"treatment": treatment_shown, "control": control_shown},
+            "sampleReady": sample_ready,
+            "confidence": {
+                "ctr": ctr_conf,
+                "addToCartRate": cart_conf,
+                "purchaseRate": purchase_conf,
+            },
+            "pValue": {
+                "ctr": ctr_p,
+                "addToCartRate": cart_p,
+                "purchaseRate": purchase_p,
+            },
+            "confidenceReady": confidence_ready,
+            "decisionReady": decision_ready,
+        },
     }
+
+
+def init_recommend_ab_event_store() -> None:
+    if not REPORT_DATABASE_URL:
+        return
+    try:
+        with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS recommend_ab_event (
+                        id UUID PRIMARY KEY,
+                        "branchId" VARCHAR(64) NOT NULL,
+                        "event" VARCHAR(32) NOT NULL,
+                        "group" VARCHAR(16) NOT NULL,
+                        strategy VARCHAR(64),
+                        "customerKey" VARCHAR(32),
+                        "sessionKey" VARCHAR(32),
+                        "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute('CREATE INDEX IF NOT EXISTS idx_recommend_ab_event_branch_time ON recommend_ab_event ("branchId", "createdAt" DESC)')
+    except Exception:
+        return
+
+
+def persist_recommend_ab_event(event_row: dict[str, Any]) -> None:
+    if not REPORT_DATABASE_URL:
+        return
+    try:
+        with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO recommend_ab_event (id, "branchId", "event", "group", strategy, "customerKey", "sessionKey", "createdAt")
+                    VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s::timestamptz)
+                    """,
+                    (
+                        str(uuid4()),
+                        str(event_row.get("branchId") or ""),
+                        str(event_row.get("event") or "unknown"),
+                        str(event_row.get("group") or "unknown"),
+                        str(event_row.get("strategy") or ""),
+                        str(event_row.get("customerId") or ""),
+                        str(event_row.get("sessionId") or ""),
+                        str(event_row.get("timestamp") or datetime.now(timezone.utc).isoformat()),
+                    ),
+                )
+    except Exception:
+        return
+
+
+def load_recommend_ab_events(branch_id: str, lookback_hours: int) -> list[dict[str, Any]]:
+    safe_hours = max(1, min(lookback_hours, 24 * 14))
+    if REPORT_DATABASE_URL:
+        try:
+            rows = execute_sql(
+                """
+                SELECT "branchId", "event", "group", strategy, "createdAt"
+                FROM recommend_ab_event
+                WHERE "branchId" = %s
+                  AND "createdAt" >= (NOW() - (%s::int || ' hours')::interval)
+                ORDER BY "createdAt" DESC
+                LIMIT 5000
+                """,
+                [branch_id, safe_hours],
+            )
+            if rows:
+                return [
+                    {
+                        "branchId": str(row.get("branchId") or ""),
+                        "event": str(row.get("event") or "unknown"),
+                        "group": str(row.get("group") or "unknown"),
+                        "strategy": str(row.get("strategy") or ""),
+                        "timestamp": str(row.get("createdAt") or ""),
+                    }
+                    for row in rows
+                ]
+        except Exception:
+            pass
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=safe_hours)
+    fallback_rows: list[dict[str, Any]] = []
+    for item in RECOMMEND_AB_EVENTS:
+        if str(item.get("branchId") or "") != branch_id:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(item.get("timestamp") or ""))
+        except Exception:
+            continue
+        if ts < cutoff:
+            continue
+        fallback_rows.append(item)
+    return fallback_rows
 
 
 def build_fallback_ratio_snapshot() -> dict[str, Any]:
@@ -522,6 +696,7 @@ def log_audit(
     if not REPORT_DATABASE_URL:
         return
     try:
+        safe_metadata = None if metadata is None else redact_pii_metadata(metadata)
         with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -536,7 +711,7 @@ def log_audit(
                         actor_id,
                         success,
                         latency_ms,
-                        "{}" if metadata is None else json_dumps(metadata),
+                        "{}" if safe_metadata is None else json_dumps(safe_metadata),
                     ),
                 )
     except Exception:
@@ -699,6 +874,161 @@ def classify_sentiment(text: str) -> tuple[str, float, dict[str, float], dict[st
         "delta": round(delta, 3),
     }
     return label, round(confidence, 2), normalized, explanation
+
+
+def classify_sentiment_with_gemini(text: str) -> tuple[str, float, dict[str, float], dict[str, Any]]:
+    if not AI_SENTIMENT_GEMINI_API_KEY:
+        raise RuntimeError("gemini_api_key_missing")
+    endpoint = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{AI_SENTIMENT_GEMINI_MODEL}:generateContent?key={AI_SENTIMENT_GEMINI_API_KEY}"
+    )
+    prompt = (
+        "Analyze Vietnamese coffee-shop feedback sentiment.\n"
+        "Return JSON only: {\"label\":\"POSITIVE|NEUTRAL|NEGATIVE\",\"confidence\":0..1,"
+        "\"scores\":{\"positive\":0..1,\"neutral\":0..1,\"negative\":0..1}}.\n"
+        f"Text: {text}"
+    )
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"},
+    }
+    req = urlrequest.Request(
+        endpoint,
+        data=json_dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    timeout_sec = max(0.5, AI_SENTIMENT_GEMINI_TIMEOUT_MS / 1000.0)
+    with urlrequest.urlopen(req, timeout=timeout_sec) as response:  # nosec B310
+        body = response.read().decode("utf-8", errors="ignore")
+    import json
+
+    parsed = json.loads(body)
+    text_out = parsed.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
+    model_json = json.loads(str(text_out or "{}"))
+    label = str(model_json.get("label") or "NEUTRAL").upper().strip()
+    if label not in {"POSITIVE", "NEUTRAL", "NEGATIVE"}:
+        label = "NEUTRAL"
+    confidence = max(0.0, min(float(model_json.get("confidence") or 0.5), 1.0))
+    scores_raw = model_json.get("scores") or {}
+    positive = max(0.0, float(scores_raw.get("positive") or 0.0))
+    neutral = max(0.0, float(scores_raw.get("neutral") or 0.0))
+    negative = max(0.0, float(scores_raw.get("negative") or 0.0))
+    total = positive + neutral + negative
+    if total <= 0:
+        normalized = {"POSITIVE": 0.0, "NEUTRAL": 1.0, "NEGATIVE": 0.0}
+    else:
+        normalized = {
+            "POSITIVE": round(positive / total, 2),
+            "NEUTRAL": round(neutral / total, 2),
+            "NEGATIVE": round(negative / total, 2),
+        }
+    explanation = {"provider": "gemini", "model": AI_SENTIMENT_GEMINI_MODEL}
+    return label, round(confidence, 2), normalized, explanation
+
+
+def record_sentiment_telemetry(source: str, success: bool, confidence: float | None = None, error: str | None = None) -> None:
+    source_key = "gemini" if str(source).lower() == "gemini" else "fallback"
+    SENTIMENT_TELEMETRY["totals"]["requests"] = int(SENTIMENT_TELEMETRY["totals"].get("requests", 0)) + 1
+    if source_key == "gemini" and success:
+        SENTIMENT_TELEMETRY["totals"]["geminiSuccess"] = int(SENTIMENT_TELEMETRY["totals"].get("geminiSuccess", 0)) + 1
+    elif source_key == "gemini":
+        SENTIMENT_TELEMETRY["totals"]["geminiError"] = int(SENTIMENT_TELEMETRY["totals"].get("geminiError", 0)) + 1
+    else:
+        SENTIMENT_TELEMETRY["totals"]["fallbackLexicon"] = int(SENTIMENT_TELEMETRY["totals"].get("fallbackLexicon", 0)) + 1
+    if isinstance(confidence, float):
+        SENTIMENT_TELEMETRY["confidenceSum"][source_key] = float(SENTIMENT_TELEMETRY["confidenceSum"].get(source_key, 0.0)) + confidence
+        SENTIMENT_TELEMETRY["confidenceCount"][source_key] = int(SENTIMENT_TELEMETRY["confidenceCount"].get(source_key, 0)) + 1
+    if error:
+        SENTIMENT_TELEMETRY["lastError"] = str(error)[:240]
+    SENTIMENT_TELEMETRY["lastUpdatedAt"] = datetime.now(timezone.utc).isoformat()
+    SENTIMENT_SOURCE_COUNT.labels(source=source_key, status="success" if success else "error").inc()
+
+
+def sentiment_model_quality_snapshot(branch_id: str | None = None) -> dict[str, Any]:
+    safe_lookback = max(1, min(AI_SENTIMENT_QUALITY_LOOKBACK_HOURS, 24 * 14))
+    if REPORT_DATABASE_URL:
+        try:
+            where_branch = 'AND "branchId" = %s' if branch_id else ""
+            params: list[Any] = [safe_lookback]
+            if branch_id:
+                params.append(branch_id)
+            rows = execute_sql(
+                f"""
+                SELECT reason, COUNT(*)::int AS count, AVG(confidence)::float AS avg_confidence
+                FROM sentiment_analysis
+                WHERE "analyzedAt" >= (NOW() - (%s::int || ' hours')::interval)
+                  {where_branch}
+                GROUP BY reason
+                """,
+                params,
+            )
+            totals = {"requests": 0, "geminiSuccess": 0, "geminiError": 0, "fallbackLexicon": 0}
+            gemini_avg = 0.0
+            fallback_avg = 0.0
+            for row in rows:
+                reason = str(row.get("reason") or "").lower()
+                count = int(row.get("count") or 0)
+                avg_conf = float(row.get("avg_confidence") or 0.0)
+                totals["requests"] += count
+                if "gemini" in reason:
+                    totals["geminiSuccess"] += count
+                    gemini_avg = avg_conf
+                elif "fallback" in reason or "lexicon" in reason:
+                    totals["fallbackLexicon"] += count
+                    fallback_avg = avg_conf
+            requests = max(1, totals["requests"])
+            return {
+                "provider": "gemini+fallback-lexicon",
+                "geminiEnabled": bool(AI_SENTIMENT_GEMINI_API_KEY),
+                "geminiModel": AI_SENTIMENT_GEMINI_MODEL,
+                "lookbackHours": safe_lookback,
+                "source": "db",
+                "totals": totals,
+                "ratios": {
+                    "geminiSuccessRatio": round(totals["geminiSuccess"] / requests, 4),
+                    "geminiErrorRatio": 0.0,
+                    "fallbackRatio": round(totals["fallbackLexicon"] / requests, 4),
+                },
+                "avgConfidence": {
+                    "gemini": round(gemini_avg, 4),
+                    "fallback": round(fallback_avg, 4),
+                },
+                "lastError": SENTIMENT_TELEMETRY.get("lastError"),
+                "lastUpdatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception:
+            pass
+
+    totals = SENTIMENT_TELEMETRY.get("totals", {})
+    requests = max(1, int(totals.get("requests", 0)))
+    gemini_success = int(totals.get("geminiSuccess", 0))
+    gemini_error = int(totals.get("geminiError", 0))
+    fallback = int(totals.get("fallbackLexicon", 0))
+    confidence_sum = SENTIMENT_TELEMETRY.get("confidenceSum", {})
+    confidence_count = SENTIMENT_TELEMETRY.get("confidenceCount", {})
+    gemini_avg_conf = float(confidence_sum.get("gemini", 0.0)) / max(1, int(confidence_count.get("gemini", 0)))
+    fallback_avg_conf = float(confidence_sum.get("fallback", 0.0)) / max(1, int(confidence_count.get("fallback", 0)))
+    return {
+        "provider": "gemini+fallback-lexicon",
+        "geminiEnabled": bool(AI_SENTIMENT_GEMINI_API_KEY),
+        "geminiModel": AI_SENTIMENT_GEMINI_MODEL,
+        "lookbackHours": safe_lookback,
+        "source": "memory",
+        "totals": totals,
+        "ratios": {
+            "geminiSuccessRatio": round(gemini_success / requests, 4),
+            "geminiErrorRatio": round(gemini_error / requests, 4),
+            "fallbackRatio": round(fallback / requests, 4),
+        },
+        "avgConfidence": {
+            "gemini": round(gemini_avg_conf, 4),
+            "fallback": round(fallback_avg_conf, 4),
+        },
+        "lastError": SENTIMENT_TELEMETRY.get("lastError"),
+        "lastUpdatedAt": SENTIMENT_TELEMETRY.get("lastUpdatedAt"),
+    }
 
 
 def decimal_from_any(value: Any, default: float = 0.0) -> float:
@@ -938,6 +1268,7 @@ async def forecast_cron_loop():
 @app.on_event("startup")
 async def startup_tasks():
     reload_knowledge_base(source="startup")
+    init_recommend_ab_event_store()
     if AI_FORECAST_CRON_ENABLED:
         asyncio.create_task(forecast_cron_loop())
 
@@ -1225,11 +1556,22 @@ def ai_ops_quality_summary(request: Request, branchId: str | None = None) -> dic
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "branchId": branchId,
         "quality": quality,
+        "modelQuality": {"sentiment": sentiment_model_quality_snapshot(branchId)},
         "fallbackRatios": fallback_by_endpoint,
         "attention": {
             "highFallbackEndpoints": critical_ratio,
             "count": len(critical_ratio),
         },
+    }
+
+
+@app.get("/api/ai/ops/model-quality")
+def ai_ops_model_quality(request: Request, branchId: str | None = None) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "branchId": branchId,
+        "sentiment": sentiment_model_quality_snapshot(branchId),
     }
 
 
@@ -1884,7 +2226,21 @@ def sentiment_issues_top(request: Request, branchId: str, days: int = 7, limit: 
 def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dict[str, Any]:
     authorize_request(request, payload.branchId, {"ADMIN", "MANAGER"})
     payload.branchId = normalize_branch_id(payload.branchId)
-    label, confidence, scores, explanation = classify_sentiment(payload.text)
+    sanitized_text = redact_pii_text(payload.text)
+    sentiment_source = "fallback"
+    persist_reason = "fallback_lexicon_v2"
+    try:
+        label, confidence, scores, explanation = classify_sentiment_with_gemini(sanitized_text)
+        sentiment_source = "gemini"
+        persist_reason = "gemini_flash"
+        record_sentiment_telemetry("gemini", True, confidence=confidence)
+    except Exception as gemini_error:  # pylint: disable=broad-except
+        label, confidence, scores, explanation = classify_sentiment(sanitized_text)
+        explanation["geminiError"] = str(gemini_error)[:160]
+        sentiment_source = "fallback"
+        persist_reason = "fallback_lexicon_v2"
+        record_sentiment_telemetry("gemini", False, error=str(gemini_error))
+        record_sentiment_telemetry("fallback", True, confidence=confidence)
     persisted = False
     if REPORT_DATABASE_URL:
         try:
@@ -1899,10 +2255,10 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
                             payload.branchId,
                             str(payload.sourceType or "CHAT").upper(),
                             payload.sourceId,
-                            payload.text,
+                            sanitized_text,
                             label,
                             confidence,
-                            "vi_weighted_lexicon_v2",
+                            persist_reason,
                             AI_ACTIVE_MODEL_VERSION,
                         ),
                     )
@@ -1922,8 +2278,10 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
         "confidence": confidence,
         "scores": scores,
         "persisted": persisted,
-        "reason": "vi_weighted_lexicon_v2",
+        "reason": "gemini_flash+fallback_lexicon_v2",
+        "source": sentiment_source,
         "explanation": explanation,
+        "sanitized": sanitized_text != str(payload.text or ""),
     }
 
 
@@ -1938,15 +2296,16 @@ def ai_chat(payload: ChatPayload, request: Request) -> dict[str, Any]:
     question = str(payload.message or payload.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="message/question is required")
+    sanitized_question = redact_pii_text(question)
 
-    answer, intent, confidence, escalated = answer_from_knowledge_base(question)
+    answer, intent, confidence, escalated = answer_from_knowledge_base(sanitized_question)
     generated_sql = None
     sql_result: list[dict[str, Any]] = []
     success = True
     error_message = None
 
     if intent == "ESCALATE" and REPORT_DATABASE_URL:
-        generated_sql = map_question_to_sql(question, payload.branchId)
+        generated_sql = map_question_to_sql(sanitized_question, payload.branchId)
         try:
             params = [payload.branchId] if payload.branchId and "%s" in generated_sql else []
             sql_result = execute_sql(generated_sql, params)
@@ -1965,7 +2324,7 @@ def ai_chat(payload: ChatPayload, request: Request) -> dict[str, Any]:
         "branchId": payload.branchId,
         "sessionId": payload.sessionId,
         "tableId": payload.tableId,
-        "question": question,
+        "question": sanitized_question,
         "answer": answer,
         "intent": intent,
         "confidence": round(confidence, 2),
@@ -1976,7 +2335,14 @@ def ai_chat(payload: ChatPayload, request: Request) -> dict[str, Any]:
     CHAT_HISTORY.append(record)
 
     latency_ms = int((time.perf_counter() - start) * 1000)
-    log_audit("/api/ai/chat", "chat_query", success, payload.branchId, latency_ms=latency_ms, metadata={"error": error_message, "intent": intent})
+    log_audit(
+        "/api/ai/chat",
+        "chat_query",
+        success,
+        payload.branchId,
+        latency_ms=latency_ms,
+        metadata={"error": error_message, "intent": intent, "questionPreview": sanitized_question[:120]},
+    )
 
     return {
         **record,
@@ -2012,6 +2378,7 @@ def report_chat(payload: ReportChatPayload, request: Request) -> dict[str, Any]:
     question = str(payload.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="question is required")
+    sanitized_question = redact_pii_text(question)
 
     branch_id = normalize_branch_id(payload.branchId) if payload.branchId is not None else None
     role = str(payload.role or "MANAGER").upper()
@@ -2020,8 +2387,8 @@ def report_chat(payload: ReportChatPayload, request: Request) -> dict[str, Any]:
         role = "ADMIN"
     elif actor["role"] == "MANAGER":
         role = "MANAGER"
-    intent = infer_report_intent(question)
-    sql = map_question_to_sql(question, branch_id)
+    intent = infer_report_intent(sanitized_question)
+    sql = map_question_to_sql(sanitized_question, branch_id)
 
     rows: list[dict[str, Any]] = []
     success = True
@@ -2043,7 +2410,7 @@ def report_chat(payload: ReportChatPayload, request: Request) -> dict[str, Any]:
         branch_id,
         actor_id=payload.userId,
         latency_ms=execution_ms,
-        metadata={"intent": intent, "error": error_message, "role": role},
+        metadata={"intent": intent, "error": error_message, "role": role, "questionPreview": sanitized_question[:120]},
     )
 
     return {

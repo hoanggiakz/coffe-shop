@@ -3,6 +3,7 @@ import { PurchaseOrderStatus, StockType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -55,6 +56,11 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   @IsString()
   expiryDate?: string;
+
+  @ApiProperty({ required: false, example: 'BATCH-20260601-01' })
+  @IsOptional()
+  @IsString()
+  batchNumber?: string;
 }
 
 export class CreatePurchaseOrderDto {
@@ -120,4 +126,25 @@ export class QueryInventoryMovementsDto {
   @IsOptional()
   @IsString()
   dateTo?: string;
+}
+
+export class QueryInventoryReportDto {
+  @ApiProperty({ required: false, example: 'csv', enum: ['csv', 'pdf', 'json'] })
+  @IsOptional()
+  @IsString()
+  format?: 'csv' | 'pdf' | 'json';
+}
+
+export class QueryExpiryAlertDto {
+  @ApiProperty({ required: false, example: 7 })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  days?: number;
+}
+
+export class UpdateBranchInventoryPolicyDto {
+  @ApiProperty({ required: true, example: false })
+  @IsBoolean()
+  allowNegativeStock: boolean;
 }

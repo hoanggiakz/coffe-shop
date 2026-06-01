@@ -4,11 +4,12 @@ import { CommonModule } from '../../common/common.module';
 import { ReportsController } from './reports.controller';
 import { ReportsHealthController } from './reports-health.controller';
 import { ReportsService } from './reports.service';
+import { ReportsRealtimeService } from './reports-realtime.service';
 
 @Module({
   imports: [PrismaModule, CommonModule],
   controllers: [ReportsController, ReportsHealthController],
-  providers: [ReportsService],
+  providers: [ReportsService, ReportsRealtimeService],
 })
 export class ReportsModule {}
 

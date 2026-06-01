@@ -1,0 +1,20 @@
+groups:
+  - name: realtime-alerts
+    rules:
+      - alert: RealtimeLagP95High
+        expr: max_over_time(realtime_lag_p95_ms{job="report-service"}[5m]) > 1500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Realtime lag p95 is high"
+          description: "Realtime lag p95 stayed above 1500ms for 10 minutes."
+
+      - alert: RealtimeDisconnectRateHigh
+        expr: max_over_time(realtime_disconnect_rate{job="report-service"}[5m]) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Realtime disconnect rate is high"
+          description: "Realtime disconnect rate stayed above 20% for 10 minutes."

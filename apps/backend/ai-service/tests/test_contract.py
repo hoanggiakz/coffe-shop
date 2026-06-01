@@ -30,6 +30,7 @@ def test_quality_summary_contract():
     payload = response.json()
     assert 'quality' in payload
     assert 'fallbackRatios' in payload
+    assert 'modelQuality' in payload
 
 
 def test_fallback_trend_contract():
@@ -90,17 +91,40 @@ def test_recommend_ab_summary_contract():
     assert payload.get('branchId') == 'branch-e2e'
     assert 'groups' in payload
     assert 'uplift' in payload
+    assert 'significance' in payload
+    assert 'decisionReady' in payload.get('significance', {})
+
+
+def test_recommend_feedback_contract():
+    response = client.post(
+        '/api/ai/recommend/feedback',
+        json={'branchId': 'branch-e2e', 'action': 'click', 'event': 'add_to_cart', 'experimentGroup': 'control'},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get('event') == 'add_to_cart'
+    assert payload.get('experimentGroup') in ['control', 'treatment']
 
 
 def test_sentiment_analyze_contract():
     response = client.post(
         '/api/ai/sentiment/analyze',
-        json={'branchId': 'branch-e2e', 'text': 'Phuc vu rat te va cho lau'},
+        json={'branchId': 'branch-e2e', 'text': 'Phuc vu rat te va cho lau. Goi 0912345678'},
     )
     assert response.status_code == 200
     payload = response.json()
     assert payload['label'] in ['POSITIVE', 'NEUTRAL', 'NEGATIVE']
     assert 'scores' in payload
+    assert 'sanitized' in payload
+    assert payload.get('source') in ['gemini', 'fallback']
+
+
+def test_model_quality_contract():
+    response = client.get('/api/ai/ops/model-quality')
+    assert response.status_code == 200
+    payload = response.json()
+    assert 'sentiment' in payload
+    assert 'ratios' in payload.get('sentiment', {})
 
 
 def test_chat_contract():

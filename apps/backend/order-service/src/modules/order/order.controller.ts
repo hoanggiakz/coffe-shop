@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UsePipes, ValidationPipe, HttpCode, HttpStatus, Headers, BadRequestException, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UsePipes, ValidationPipe, HttpCode, HttpStatus, Headers, BadRequestException, ForbiddenException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -15,17 +15,64 @@ import {
 } from './dto/menu-option.dto';
 import { CreateMenuItemManagementDto, UpdateMenuItemManagementDto } from './dto/menu-item-management.dto';
 import { CreatePromotionDto, QueryPromotionDto, UpdatePromotionDto } from './dto/promotion.dto';
+import { KafkaService } from '../../kafka/kafka.service';
 
 @Controller('api/orders')
 @UsePipes(new ValidationPipe({ transform: true }))
 export class OrderController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly kafkaService: KafkaService,
+  ) {}
+
+  private normalizeRole(role?: string | null) {
+    return String(role || '').trim().toUpperCase();
+  }
+
+  private assertRoleAllowed(role: string | undefined, allowed: string[]) {
+    const normalized = this.normalizeRole(role);
+    if (!normalized || !allowed.includes(normalized)) {
+      throw new ForbiddenException('FORBIDDEN_ROLE');
+    }
+    return normalized;
+  }
+
+  private assertBranchScope(role: string, actorBranchId: string | undefined, targetBranchId?: string | null) {
+    if (role === 'ADMIN') return;
+    const actorBranch = String(actorBranchId || '').trim();
+    if (!actorBranch) throw new ForbiddenException('MISSING_BRANCH_SCOPE');
+    if (targetBranchId && actorBranch !== String(targetBranchId).trim()) {
+      throw new ForbiddenException('FORBIDDEN_BRANCH_SCOPE');
+    }
+  }
+
+  private async assertOrderScope(role: string, actorBranchId: string | undefined, orderId: string) {
+    if (role === 'ADMIN') return;
+    const actorBranch = String(actorBranchId || '').trim();
+    if (!actorBranch) throw new ForbiddenException('MISSING_BRANCH_SCOPE');
+    const order = await this.orderService.findOne(orderId) as any;
+    if (String(order?.branchId || '') !== actorBranch) {
+      throw new ForbiddenException('FORBIDDEN_BRANCH_SCOPE');
+    }
+  }
 
   @Get('health')
   health() {
     return {
       service: 'order-service',
       status: 'ok',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('ready')
+  ready() {
+    const kafka = this.kafkaService.readiness();
+    const ready = kafka.required ? kafka.connected : kafka.configured ? kafka.connected : true;
+    return {
+      service: 'order-service',
+      status: ready ? 'ready' : 'not-ready',
+      checks: { kafka },
       timestamp: new Date().toISOString(),
     };
   }
@@ -292,7 +339,11 @@ export class OrderController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('branchId') branchId?: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA']);
+    this.assertBranchScope(role, actorBranchId, branchId || actorBranchId);
     return this.orderService.findAll({ tableId, status, dateFrom, dateTo, branchId });
   }
 
@@ -303,7 +354,11 @@ export class OrderController {
     @Query('status') status?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA']);
+    this.assertBranchScope(role, actorBranchId, branchId);
     return this.orderService.findByBranch(branchId, { tableId, status, dateFrom, dateTo });
   }
 
@@ -368,6 +423,7 @@ export class OrderController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
+    // Keep compatibility for internal service calls; prefer /branches/:branchId/orders/:orderId for staff flows.
     return this.orderService.findOne(id);
   }
 
@@ -375,17 +431,34 @@ export class OrderController {
   findOneByBranch(
     @Param('branchId') branchId: string,
     @Param('orderId') orderId: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA']);
+    this.assertBranchScope(role, actorBranchId, branchId);
     return this.orderService.findOneByBranch(branchId, orderId);
   }
 
   @Patch(':id/status')
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
+  async updateStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateOrderStatusDto,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
+  ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER']);
+    await this.assertOrderScope(role, actorBranchId, id);
     return this.orderService.updateStatus(id, dto);
   }
 
   @Get(':id/status')
-  async getStatus(@Param('id') id: string) {
+  async getStatus(
+    @Param('id') id: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
+  ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA']);
+    await this.assertOrderScope(role, actorBranchId, id);
     const order = await this.orderService.findOne(id) as any;
     return {
       orderId: order.id,
@@ -395,18 +468,38 @@ export class OrderController {
   }
 
   @Patch(':id/items')
-  updateItems(@Param('id') id: string, @Body() dto: StaffUpdateOrderItemsDto) {
+  async updateItems(
+    @Param('id') id: string,
+    @Body() dto: StaffUpdateOrderItemsDto,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
+  ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER']);
+    await this.assertOrderScope(role, actorBranchId, id);
     return this.orderService.updateOrderItems(id, dto);
   }
 
   @Get(':id/items')
-  async getOrderItems(@Param('id') id: string) {
+  async getOrderItems(
+    @Param('id') id: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
+  ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA']);
+    await this.assertOrderScope(role, actorBranchId, id);
     const order = await this.orderService.findOne(id) as any;
     return order?.orderItems || [];
   }
 
   @Post(':id/items')
-  async addItems(@Param('id') id: string, @Body() dto: { items?: any[] }) {
+  async addItems(
+    @Param('id') id: string,
+    @Body() dto: { items?: any[] },
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
+  ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER']);
+    await this.assertOrderScope(role, actorBranchId, id);
     const order = await this.orderService.findOne(id) as any;
     const mergedItems = [...(order?.orderItems || []), ...(dto?.items || [])].map((item: any) => ({
       menuItemId: item.menuItemId,
@@ -422,7 +515,11 @@ export class OrderController {
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @Body() payload: { quantity?: number; note?: string; options?: string },
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER']);
+    await this.assertOrderScope(role, actorBranchId, id);
     const order = await this.orderService.findOne(id) as any;
     const mapped = (order?.orderItems || []).map((item: any) =>
       item.id === itemId
@@ -443,7 +540,14 @@ export class OrderController {
   }
 
   @Delete(':id/items/:itemId')
-  async removeOneItem(@Param('id') id: string, @Param('itemId') itemId: string) {
+  async removeOneItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
+  ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER']);
+    await this.assertOrderScope(role, actorBranchId, id);
     const order = await this.orderService.findOne(id) as any;
     const mapped = (order?.orderItems || [])
       .filter((item: any) => item.id !== itemId)
@@ -463,11 +567,15 @@ export class OrderController {
 
   // ── KDS: cập nhật trạng thái từng món ──────────────────
   @Patch(':id/items/:itemId/status')
-  updateItemStatus(
+  async updateItemStatus(
     @Param('id') orderId: string,
     @Param('itemId') itemId: string,
     @Body('status') status: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'BARISTA']);
+    await this.assertOrderScope(role, actorBranchId, orderId);
     return this.orderService.updateItemStatus(orderId, itemId, status);
   }
 
@@ -475,7 +583,11 @@ export class OrderController {
   async updateItemBatchStatus(
     @Param('id') orderId: string,
     @Body() body: { items?: Array<{ itemId: string; status: string }> },
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'BARISTA']);
+    await this.assertOrderScope(role, actorBranchId, orderId);
     const items = Array.isArray(body?.items) ? body.items : [];
     const results = [];
     for (const item of items) {
@@ -485,28 +597,52 @@ export class OrderController {
   }
 
   @Patch(':id/cancel')
-  cancelOrder(@Param('id') orderId: string, @Body('reason') reason?: string) {
+  async cancelOrder(
+    @Param('id') orderId: string,
+    @Body('reason') reason?: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
+  ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER']);
+    await this.assertOrderScope(role, actorBranchId, orderId);
     return this.orderService.cancelOrder(orderId, reason);
   }
 
   @Get(':id/bill')
-  getBill(@Param('id') orderId: string) {
+  async getBill(
+    @Param('id') orderId: string,
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
+  ) {
+    const normalized = this.normalizeRole(actorRole);
+    if (normalized) {
+      const role = this.assertRoleAllowed(normalized, ['ADMIN', 'MANAGER', 'WAITER']);
+      await this.assertOrderScope(role, actorBranchId, orderId);
+    }
     return this.orderService.getOrderBill(orderId);
   }
 
   @Post(':id/payment')
-  confirmPayment(
+  async confirmPayment(
     @Param('id') orderId: string,
     @Body() payload?: { method?: string; amount?: number },
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER']);
+    await this.assertOrderScope(role, actorBranchId, orderId);
     return this.orderService.confirmOrderPayment(orderId, payload);
   }
 
   @Post(':id/discount')
-  applyDiscount(
+  async applyDiscount(
     @Param('id') orderId: string,
     @Body() payload?: { discount?: number; reason?: string },
+    @Headers('x-actor-role') actorRole?: string,
+    @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER']);
+    await this.assertOrderScope(role, actorBranchId, orderId);
     return this.orderService.applyOrderDiscount(orderId, payload);
   }
 }
