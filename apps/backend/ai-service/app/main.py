@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import re
 import time
@@ -88,6 +89,10 @@ class RecommendationFeedback(BaseModel):
     sourceItemId: str | None = None
     targetItemId: str | None = None
     action: str
+    event: str | None = None
+    experimentGroup: str | None = None
+    customerId: str | None = None
+    sessionId: str | None = None
 
 
 class RecommendationPayload(BaseModel):
@@ -167,6 +172,9 @@ RATE_LIMIT_COUNTERS: dict[str, dict[str, int]] = {}
 SOURCE_TRACKING: dict[str, dict[str, int]] = {}
 FALLBACK_TREND_HISTORY: dict[str, list[dict[str, Any]]] = {}
 FALLBACK_TREND_MAX_POINTS = int(os.getenv("AI_FALLBACK_TREND_MAX_POINTS", "240"))
+RECOMMEND_AB_EVENTS: list[dict[str, Any]] = []
+RECOMMEND_AB_EVENT_LIMIT = int(os.getenv("AI_RECOMMEND_AB_EVENT_LIMIT", "2000"))
+AI_RECOMMEND_AB_TREATMENT_PERCENT = int(os.getenv("AI_RECOMMEND_AB_TREATMENT_PERCENT", "50"))
 
 
 @app.middleware("http")
@@ -279,6 +287,92 @@ def track_response_source(endpoint: str, source: str) -> None:
     if len(timeline) > max(20, FALLBACK_TREND_MAX_POINTS):
         timeline = timeline[-max(20, FALLBACK_TREND_MAX_POINTS):]
     FALLBACK_TREND_HISTORY[normalized_endpoint] = timeline
+
+
+def assign_recommend_experiment_group(branch_id: str, customer_id: str | None, session_id: str | None) -> str:
+    treatment_percent = max(0, min(AI_RECOMMEND_AB_TREATMENT_PERCENT, 100))
+    if treatment_percent <= 0:
+        return "control"
+    if treatment_percent >= 100:
+        return "treatment"
+    stable_key = f"{branch_id}|{customer_id or ''}|{session_id or ''}"
+    digest = hashlib.sha1(stable_key.encode("utf-8")).hexdigest()
+    bucket = int(digest[:8], 16) % 100
+    return "treatment" if bucket < treatment_percent else "control"
+
+
+def record_recommend_ab_event(
+    *,
+    branch_id: str,
+    group: str,
+    event: str,
+    strategy: str | None = None,
+    customer_id: str | None = None,
+    session_id: str | None = None,
+) -> None:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    RECOMMEND_AB_EVENTS.append(
+        {
+            "timestamp": now_iso,
+            "branchId": branch_id,
+            "group": str(group or "unknown").lower(),
+            "event": str(event or "unknown").lower(),
+            "strategy": str(strategy or "").lower(),
+            "customerId": customer_id or "",
+            "sessionId": session_id or "",
+        }
+    )
+    if len(RECOMMEND_AB_EVENTS) > max(100, RECOMMEND_AB_EVENT_LIMIT):
+        del RECOMMEND_AB_EVENTS[:-RECOMMEND_AB_EVENT_LIMIT]
+
+
+def build_recommend_ab_summary(branch_id: str, lookback_hours: int = 24) -> dict[str, Any]:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max(1, min(lookback_hours, 24 * 14)))
+    rows: list[dict[str, Any]] = []
+    for item in RECOMMEND_AB_EVENTS:
+        if str(item.get("branchId") or "") != branch_id:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(item.get("timestamp") or ""))
+        except Exception:
+            continue
+        if ts < cutoff:
+            continue
+        rows.append(item)
+    by_group: dict[str, dict[str, int]] = {}
+    for item in rows:
+        group = str(item.get("group") or "unknown")
+        event = str(item.get("event") or "unknown")
+        bucket = by_group.get(group) or {"shown": 0, "click": 0, "add_to_cart": 0, "purchase": 0}
+        if event in bucket:
+            bucket[event] += 1
+        by_group[group] = bucket
+    groups: dict[str, Any] = {}
+    for group, values in by_group.items():
+        shown = max(1, int(values.get("shown", 0)))
+        click = int(values.get("click", 0))
+        add_to_cart = int(values.get("add_to_cart", 0))
+        purchase = int(values.get("purchase", 0))
+        groups[group] = {
+            **values,
+            "ctr": round(click / shown, 4),
+            "addToCartRate": round(add_to_cart / shown, 4),
+            "purchaseRate": round(purchase / shown, 4),
+        }
+    treatment = groups.get("treatment") or {"ctr": 0.0, "addToCartRate": 0.0, "purchaseRate": 0.0}
+    control = groups.get("control") or {"ctr": 0.0, "addToCartRate": 0.0, "purchaseRate": 0.0}
+    uplift = {
+        "ctr": round(float(treatment["ctr"]) - float(control["ctr"]), 4),
+        "addToCartRate": round(float(treatment["addToCartRate"]) - float(control["addToCartRate"]), 4),
+        "purchaseRate": round(float(treatment["purchaseRate"]) - float(control["purchaseRate"]), 4),
+    }
+    return {
+        "branchId": branch_id,
+        "lookbackHours": max(1, min(lookback_hours, 24 * 14)),
+        "events": len(rows),
+        "groups": groups,
+        "uplift": uplift,
+    }
 
 
 def build_fallback_ratio_snapshot() -> dict[str, Any]:
@@ -1371,22 +1465,38 @@ def forecast_staffing(request: Request, branchId: str) -> dict[str, Any]:
 
 @app.get("/api/ai/recommend")
 @metric_guard("recommend")
-def recommend(branchId: str, limit: int = 5, customerId: str | None = None) -> dict[str, Any]:
+def recommend(branchId: str, limit: int = 5, customerId: str | None = None, sessionId: str | None = None) -> dict[str, Any]:
     branchId = normalize_branch_id(branchId)
     safe_limit = normalize_limit(limit)
+    experiment_group = assign_recommend_experiment_group(branchId, customerId, sessionId)
     cart_seed = [customerId] if customerId else []
-    cooccurrence_items = get_cooccurrence_items(branchId, cart_seed, safe_limit) if customerId else []
+    cooccurrence_items = get_cooccurrence_items(branchId, cart_seed, safe_limit) if customerId and experiment_group == "treatment" else []
     popular_items = get_popular_items(branchId, max(safe_limit * 2, safe_limit))
     items = merge_recommendation_candidates(cooccurrence_items, popular_items, cart_seed, safe_limit)
     strategy = "hybrid-cf-popularity" if cooccurrence_items else "popularity"
+    record_recommend_ab_event(
+        branch_id=branchId,
+        group=experiment_group,
+        event="shown",
+        strategy=strategy,
+        customer_id=customerId,
+        session_id=sessionId,
+    )
     track_response_source("/api/ai/recommend", strategy)
-    log_audit("/api/ai/recommend", "recommend", True, branchId, metadata={"limit": safe_limit, "strategy": strategy})
+    log_audit(
+        "/api/ai/recommend",
+        "recommend",
+        True,
+        branchId,
+        metadata={"limit": safe_limit, "strategy": strategy, "experimentGroup": experiment_group},
+    )
     return {
         "branchId": branchId,
         "limit": safe_limit,
         "items": items,
         "recommendations": items,
         "strategy": strategy,
+        "experiment": {"group": experiment_group, "treatmentPercent": max(0, min(AI_RECOMMEND_AB_TREATMENT_PERCENT, 100))},
         "modelVersion": AI_ACTIVE_MODEL_VERSION,
     }
 
@@ -1396,12 +1506,31 @@ def recommend(branchId: str, limit: int = 5, customerId: str | None = None) -> d
 def recommend_post(payload: RecommendationPayload) -> dict[str, Any]:
     payload.branchId = normalize_branch_id(payload.branchId)
     safe_limit = normalize_limit(payload.limit)
-    cooccurrence_items = get_cooccurrence_items(payload.branchId, payload.cartItemIds, max(safe_limit * 2, safe_limit))
+    experiment_group = assign_recommend_experiment_group(payload.branchId, payload.customerId, None)
+    cooccurrence_items = (
+        get_cooccurrence_items(payload.branchId, payload.cartItemIds, max(safe_limit * 2, safe_limit))
+        if experiment_group == "treatment"
+        else []
+    )
     popular_items = get_popular_items(payload.branchId, max(safe_limit * 2, safe_limit))
     response_items = merge_recommendation_candidates(cooccurrence_items, popular_items, payload.cartItemIds, safe_limit)
     strategy = "item-based-cf+popularity" if cooccurrence_items else "popularity"
+    record_recommend_ab_event(
+        branch_id=payload.branchId,
+        group=experiment_group,
+        event="shown",
+        strategy=strategy,
+        customer_id=payload.customerId,
+        session_id=None,
+    )
     track_response_source("/api/ai/recommend_post", strategy)
-    log_audit("/api/ai/recommend", "recommend", True, payload.branchId, metadata={"limit": safe_limit, "strategy": strategy})
+    log_audit(
+        "/api/ai/recommend",
+        "recommend",
+        True,
+        payload.branchId,
+        metadata={"limit": safe_limit, "strategy": strategy, "experimentGroup": experiment_group},
+    )
     return {
         "branchId": payload.branchId,
         "limit": safe_limit,
@@ -1409,6 +1538,7 @@ def recommend_post(payload: RecommendationPayload) -> dict[str, Any]:
         "recommendations": response_items,
         "items": response_items,
         "strategy": strategy,
+        "experiment": {"group": experiment_group, "treatmentPercent": max(0, min(AI_RECOMMEND_AB_TREATMENT_PERCENT, 100))},
         "modelVersion": AI_ACTIVE_MODEL_VERSION,
     }
 
@@ -1427,8 +1557,46 @@ def recommend_popular(branchId: str, limit: int = 5) -> dict[str, Any]:
 @app.post("/api/ai/recommend/feedback")
 @metric_guard("recommend_feedback")
 def recommend_feedback(payload: RecommendationFeedback) -> dict[str, Any]:
-    log_audit("/api/ai/recommend/feedback", "feedback", True, payload.branchId, metadata={"action": payload.action})
-    return {"accepted": True, "branchId": payload.branchId, "action": payload.action, "recordedAt": datetime.now(timezone.utc).isoformat()}
+    payload.branchId = normalize_branch_id(payload.branchId)
+    event = str(payload.event or payload.action or "click").strip().lower()
+    if event not in {"shown", "click", "add_to_cart", "purchase"}:
+        event = "click"
+    group = str(payload.experimentGroup or assign_recommend_experiment_group(payload.branchId, payload.customerId, payload.sessionId)).strip().lower()
+    if group not in {"control", "treatment"}:
+        group = "control"
+    record_recommend_ab_event(
+        branch_id=payload.branchId,
+        group=group,
+        event=event,
+        strategy=None,
+        customer_id=payload.customerId,
+        session_id=payload.sessionId,
+    )
+    log_audit(
+        "/api/ai/recommend/feedback",
+        "feedback",
+        True,
+        payload.branchId,
+        metadata={"action": payload.action, "event": event, "experimentGroup": group},
+    )
+    return {
+        "accepted": True,
+        "branchId": payload.branchId,
+        "action": payload.action,
+        "event": event,
+        "experimentGroup": group,
+        "recordedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/ai/recommend/ab-summary")
+@metric_guard("recommend_ab_summary")
+def recommend_ab_summary(request: Request, branchId: str, lookbackHours: int = 24) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
+    branchId = normalize_branch_id(branchId)
+    summary = build_recommend_ab_summary(branchId, lookbackHours)
+    summary["timestamp"] = datetime.now(timezone.utc).isoformat()
+    return summary
 
 
 @app.get("/api/ai/anomalies")

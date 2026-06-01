@@ -53,12 +53,13 @@ def test_fallback_trend_summary_contract():
 
 
 def test_recommend_get_contract():
-    response = client.get('/api/ai/recommend', params={'branchId': 'branch-e2e', 'limit': 3})
+    response = client.get('/api/ai/recommend', params={'branchId': 'branch-e2e', 'limit': 3, 'sessionId': 'sess-a'})
     assert response.status_code == 200
     payload = response.json()
     assert payload['branchId'] == 'branch-e2e'
     assert len(payload['items']) == 3
     assert payload['strategy'] in ['popularity', 'hybrid-cf-popularity']
+    assert payload.get('experiment', {}).get('group') in ['control', 'treatment']
 
 
 def test_recommend_post_contract():
@@ -75,6 +76,20 @@ def test_recommend_post_contract():
     assert payload['branchId'] == 'branch-e2e'
     assert len(payload['recommendations']) == 3
     assert payload['strategy'] in ['item-based-cf+popularity', 'popularity']
+    assert payload.get('experiment', {}).get('group') in ['control', 'treatment']
+
+
+def test_recommend_ab_summary_contract():
+    client.post(
+        '/api/ai/recommend/feedback',
+        json={'branchId': 'branch-e2e', 'action': 'click', 'event': 'click', 'experimentGroup': 'treatment'},
+    )
+    response = client.get('/api/ai/recommend/ab-summary', params={'branchId': 'branch-e2e', 'lookbackHours': 24})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get('branchId') == 'branch-e2e'
+    assert 'groups' in payload
+    assert 'uplift' in payload
 
 
 def test_sentiment_analyze_contract():

@@ -192,6 +192,12 @@ interface FallbackTrendSummaryItem {
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 }
 
+interface RecommendAbSummary {
+  groups: Record<string, { shown: number; click: number; add_to_cart: number; purchase: number; ctr: number; addToCartRate: number; purchaseRate: number }>
+  uplift: { ctr: number; addToCartRate: number; purchaseRate: number }
+  events: number
+}
+
 function formatSentimentIssueLabel(issue: string): string {
   const normalized = String(issue || '').trim().toLowerCase()
   const topicMap: Record<string, string> = {
@@ -266,6 +272,7 @@ export default function Reports() {
   const [fallbackTrendSummary, setFallbackTrendSummary] = useState<FallbackTrendSummaryItem[]>([])
   const [fallbackTrendWindowMinutes, setFallbackTrendWindowMinutes] = useState(120)
   const [showOnlyHighFallback, setShowOnlyHighFallback] = useState(false)
+  const [recommendAbSummary, setRecommendAbSummary] = useState<RecommendAbSummary | null>(null)
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
@@ -312,7 +319,7 @@ export default function Reports() {
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
 
       try {
-        const [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult, qualitySummaryResult, fallbackTrendResult, fallbackSummaryResult] = await Promise.allSettled([
+        const [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult, qualitySummaryResult, fallbackTrendResult, fallbackSummaryResult, recommendAbResult] = await Promise.allSettled([
           requestAiWithRetry('/ai/forecast/revenue', { branchId: effectiveAiBranchId, days: 7 }),
           requestAiWithRetry('/ai/anomalies', { branchId: effectiveAiBranchId }),
           requestAiWithRetry('/ai/sentiment/summary', { branchId: effectiveAiBranchId }),
@@ -320,6 +327,7 @@ export default function Reports() {
           requestAiWithRetry('/ai/ops/quality-summary', { branchId: effectiveAiBranchId }),
           requestAiWithRetry('/ai/ops/fallback-trend', { branchId: effectiveAiBranchId, windowMinutes: fallbackTrendWindowMinutes }),
           requestAiWithRetry('/ai/ops/fallback-trend-summary', { branchId: effectiveAiBranchId, windowMinutes: fallbackTrendWindowMinutes, threshold: 0.2 }),
+          requestAiWithRetry('/ai/recommend/ab-summary', { branchId: effectiveAiBranchId, lookbackHours: 24 }),
         ])
 
         const forecastData = forecastResult.status === 'fulfilled' ? forecastResult.value.data : null
@@ -329,6 +337,7 @@ export default function Reports() {
         const qualityData = qualitySummaryResult.status === 'fulfilled' ? qualitySummaryResult.value.data : null
         const fallbackTrendData = fallbackTrendResult.status === 'fulfilled' ? fallbackTrendResult.value.data : null
         const fallbackSummaryData = fallbackSummaryResult.status === 'fulfilled' ? fallbackSummaryResult.value.data : null
+        const recommendAbData = recommendAbResult.status === 'fulfilled' ? recommendAbResult.value.data : null
         const aiAvailable = Boolean(forecastData || anomalyData || sentimentData || sentimentIssuesData)
         const reasons = [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult]
           .filter((item): item is PromiseRejectedResult => item.status === 'rejected')
@@ -362,6 +371,7 @@ export default function Reports() {
         setFallbackTrendSummary(
           Array.isArray(fallbackSummaryData?.items) ? (fallbackSummaryData.items as FallbackTrendSummaryItem[]) : [],
         )
+        setRecommendAbSummary((recommendAbData || null) as RecommendAbSummary | null)
       } catch (aiError: any) {
         setAiInsight({
           available: false,
@@ -376,6 +386,7 @@ export default function Reports() {
         setQualitySummary(null)
         setFallbackTrendPoints([])
         setFallbackTrendSummary([])
+        setRecommendAbSummary(null)
       }
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Không tải được dữ liệu báo cáo', 'Unable to load report data'))
@@ -855,6 +866,29 @@ export default function Reports() {
           </div>
         )}
       </Card>
+
+      {recommendAbSummary && (
+        <Card title="Recommendation A/B (24h)" subtitle="Hiệu quả control vs treatment cho gợi ý món">
+          <div className="space-y-2 text-sm">
+            <p className="text-slate-600">Tổng events: <span className="font-semibold">{recommendAbSummary.events}</span></p>
+            <p className="text-slate-700">
+              CTR uplift: <span className={`font-semibold ${recommendAbSummary.uplift.ctr >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {Math.round(recommendAbSummary.uplift.ctr * 10000) / 100}%
+              </span>
+              {' '}| Add-to-cart uplift: <span className={`font-semibold ${recommendAbSummary.uplift.addToCartRate >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {Math.round(recommendAbSummary.uplift.addToCartRate * 10000) / 100}%
+              </span>
+            </p>
+            <div className="space-y-1 text-xs text-slate-700">
+              {Object.entries(recommendAbSummary.groups || {}).map(([group, item]) => (
+                <p key={`ab-${group}`}>
+                  {group}: shown {item.shown}, click {item.click}, add_to_cart {item.add_to_cart}, purchase {item.purchase}
+                </p>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card title="Doanh thu theo thời gian (M-19)" subtitle="Ngày / tuần / tháng / năm">
