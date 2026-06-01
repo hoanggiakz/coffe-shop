@@ -10,6 +10,8 @@ import {
   Put,
   Query,
   Req,
+  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -19,12 +21,16 @@ import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import {
   CreatePurchaseOrderDto,
   InventoryAdjustDto,
+  QueryExpiryAlertDto,
+  QueryInventoryReportDto,
   QueryInventoryMovementsDto,
   QueryPurchaseOrderDto,
+  UpdateBranchInventoryPolicyDto,
   UpdatePurchaseOrderDto,
   UpsertBranchRecipeDto,
 } from './dto/spec-inventory.dto';
 import { InventoryService } from './inventory.service';
+import { Response } from 'express';
 
 @ApiTags('inventory-spec')
 @ApiBearerAuth()
@@ -234,5 +240,52 @@ export class InventorySpecController {
     this.requireRoles(req, ['ADMIN', 'MANAGER']);
     this.assertBranchScope(req, branchId);
     return this.inventoryService.adjustInventoryByBranch(branchId, dto, this.actor(req));
+  }
+
+  @Get('branches/:branchId/inventory/reports/summary')
+  async exportInventorySummary(
+    @Req() req: any,
+    @Res({ passthrough: true }) res: Response,
+    @Param('branchId') branchId: string,
+    @Query() query: QueryInventoryReportDto,
+  ) {
+    this.requireRoles(req, ['ADMIN', 'MANAGER']);
+    this.assertBranchScope(req, branchId);
+    const format = String(query.format || 'json').toLowerCase();
+    if (format === 'csv') {
+      const csv = await this.inventoryService.exportInventorySummaryCsv(branchId);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="inventory-summary-${branchId}.csv"`);
+      return new StreamableFile(Buffer.from(csv, 'utf8'));
+    }
+    if (format === 'pdf') {
+      const pdf = await this.inventoryService.exportInventorySummaryPdf(branchId);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="inventory-summary-${branchId}.pdf"`);
+      return new StreamableFile(pdf);
+    }
+    return this.inventoryService.getInventorySummary(branchId);
+  }
+
+  @Get('branches/:branchId/inventory/batches/expiry-alerts')
+  expiryAlerts(
+    @Req() req: any,
+    @Param('branchId') branchId: string,
+    @Query() query: QueryExpiryAlertDto,
+  ) {
+    this.requireRoles(req, ['ADMIN', 'MANAGER']);
+    this.assertBranchScope(req, branchId);
+    return this.inventoryService.listBatchExpiryAlerts(branchId, query.days);
+  }
+
+  @Put('branches/:branchId/inventory/policy')
+  updateInventoryPolicy(
+    @Req() req: any,
+    @Param('branchId') branchId: string,
+    @Body() dto: UpdateBranchInventoryPolicyDto,
+  ) {
+    this.requireRoles(req, ['ADMIN', 'MANAGER']);
+    this.assertBranchScope(req, branchId);
+    return this.inventoryService.upsertBranchInventoryPolicy(branchId, dto.allowNegativeStock);
   }
 }

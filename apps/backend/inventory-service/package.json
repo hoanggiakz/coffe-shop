@@ -41,6 +41,7 @@
     "joi": "^17.0.0",
     "kafkajs": "^2.2.4",
     "nodemailer": "^8.0.3",
+    "pdfkit": "^0.18.0",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
     "swagger-ui-express": "^5.0.0",

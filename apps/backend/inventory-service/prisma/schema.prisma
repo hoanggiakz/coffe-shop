@@ -20,6 +20,7 @@ model Ingredient {
   updatedAt DateTime       @updatedAt
   movements StockMovement[]
   purchaseOrderItems PurchaseOrderItem[]
+  batches    InventoryBatch[]
 
   @@map("ingredients")
   @@unique([branchId, name])
@@ -27,6 +28,16 @@ model Ingredient {
   @@index([branchId, name])
   @@index([name])
   @@index([isActive])
+}
+
+model BranchInventoryPolicy {
+  id                 String   @id @default(cuid())
+  branchId           String   @unique
+  allowNegativeStock Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("branch_inventory_policy")
 }
 
 model Recipe {
@@ -86,10 +97,33 @@ model PurchaseOrderItem {
   createdAt       DateTime      @default(now())
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   ingredient      Ingredient    @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  batches         InventoryBatch[]
 
   @@map("purchase_order_items")
   @@index([purchaseOrderId])
   @@index([ingredientId])
+}
+
+model InventoryBatch {
+  id                  String            @id @default(cuid())
+  ingredientId        String
+  purchaseOrderItemId String?
+  branchId            String?
+  batchNumber         String?
+  expiryDate          DateTime?
+  initialQty          Decimal
+  remainingQty        Decimal
+  unitPrice           Decimal           @default(0)
+  receivedAt          DateTime          @default(now())
+  status              InventoryBatchStatus @default(ACTIVE)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  ingredient          Ingredient        @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  purchaseOrderItem   PurchaseOrderItem? @relation(fields: [purchaseOrderItemId], references: [id], onDelete: SetNull)
+
+  @@map("inventory_batches")
+  @@index([ingredientId, branchId, status, expiryDate])
+  @@index([branchId, expiryDate])
 }
 
 model StockMovement {
@@ -139,4 +173,10 @@ enum PurchaseOrderStatus {
   SUBMITTED
   RECEIVED
   CANCELLED
+}
+
+enum InventoryBatchStatus {
+  ACTIVE
+  DEPLETED
+  EXPIRED
 }
