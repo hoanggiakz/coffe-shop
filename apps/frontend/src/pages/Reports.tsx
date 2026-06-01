@@ -169,6 +169,35 @@ interface QualitySummaryResponse {
   }
 }
 
+interface FallbackTrendPoint {
+  endpoint: string
+  timestamp: string
+  totalResponses: number
+  fallbackResponses: number
+  fallbackRatio: number
+}
+
+interface FallbackTrendSummaryItem {
+  endpoint: string
+  samples: number
+  totalResponses: number
+  fallbackResponses: number
+  avgFallbackRatio: number
+  maxFallbackRatio: number
+  latestFallbackRatio: number
+  trend: 'up' | 'down' | 'flat'
+  deltaRatio: number
+  highFallback: boolean
+  riskScore: number
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+}
+
+interface RecommendAbSummary {
+  groups: Record<string, { shown: number; click: number; add_to_cart: number; purchase: number; ctr: number; addToCartRate: number; purchaseRate: number }>
+  uplift: { ctr: number; addToCartRate: number; purchaseRate: number }
+  events: number
+}
+
 function formatSentimentIssueLabel(issue: string): string {
   const normalized = String(issue || '').trim().toLowerCase()
   const topicMap: Record<string, string> = {
@@ -239,6 +268,11 @@ export default function Reports() {
   const [reportChatLoading, setReportChatLoading] = useState(false)
   const [reportChatResult, setReportChatResult] = useState<ReportChatResponse | null>(null)
   const [qualitySummary, setQualitySummary] = useState<QualitySummaryResponse | null>(null)
+  const [fallbackTrendPoints, setFallbackTrendPoints] = useState<FallbackTrendPoint[]>([])
+  const [fallbackTrendSummary, setFallbackTrendSummary] = useState<FallbackTrendSummaryItem[]>([])
+  const [fallbackTrendWindowMinutes, setFallbackTrendWindowMinutes] = useState(120)
+  const [showOnlyHighFallback, setShowOnlyHighFallback] = useState(false)
+  const [recommendAbSummary, setRecommendAbSummary] = useState<RecommendAbSummary | null>(null)
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
@@ -285,12 +319,15 @@ export default function Reports() {
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
 
       try {
-        const [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult, qualitySummaryResult] = await Promise.allSettled([
+        const [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult, qualitySummaryResult, fallbackTrendResult, fallbackSummaryResult, recommendAbResult] = await Promise.allSettled([
           requestAiWithRetry('/ai/forecast/revenue', { branchId: effectiveAiBranchId, days: 7 }),
           requestAiWithRetry('/ai/anomalies', { branchId: effectiveAiBranchId }),
           requestAiWithRetry('/ai/sentiment/summary', { branchId: effectiveAiBranchId }),
           requestAiWithRetry('/ai/sentiment/issues-top', { branchId: effectiveAiBranchId, days: 7, limit: 3 }),
           requestAiWithRetry('/ai/ops/quality-summary', { branchId: effectiveAiBranchId }),
+          requestAiWithRetry('/ai/ops/fallback-trend', { branchId: effectiveAiBranchId, windowMinutes: fallbackTrendWindowMinutes }),
+          requestAiWithRetry('/ai/ops/fallback-trend-summary', { branchId: effectiveAiBranchId, windowMinutes: fallbackTrendWindowMinutes, threshold: 0.2 }),
+          requestAiWithRetry('/ai/recommend/ab-summary', { branchId: effectiveAiBranchId, lookbackHours: 24 }),
         ])
 
         const forecastData = forecastResult.status === 'fulfilled' ? forecastResult.value.data : null
@@ -298,6 +335,9 @@ export default function Reports() {
         const sentimentData = sentimentResult.status === 'fulfilled' ? sentimentResult.value.data : null
         const sentimentIssuesData = sentimentIssuesResult.status === 'fulfilled' ? sentimentIssuesResult.value.data : null
         const qualityData = qualitySummaryResult.status === 'fulfilled' ? qualitySummaryResult.value.data : null
+        const fallbackTrendData = fallbackTrendResult.status === 'fulfilled' ? fallbackTrendResult.value.data : null
+        const fallbackSummaryData = fallbackSummaryResult.status === 'fulfilled' ? fallbackSummaryResult.value.data : null
+        const recommendAbData = recommendAbResult.status === 'fulfilled' ? recommendAbResult.value.data : null
         const aiAvailable = Boolean(forecastData || anomalyData || sentimentData || sentimentIssuesData)
         const reasons = [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult]
           .filter((item): item is PromiseRejectedResult => item.status === 'rejected')
@@ -327,6 +367,11 @@ export default function Reports() {
           fallbackReason: reasons.length ? reasons.join('; ') : undefined,
         })
         setQualitySummary((qualityData || null) as QualitySummaryResponse | null)
+        setFallbackTrendPoints(Array.isArray(fallbackTrendData?.points) ? (fallbackTrendData.points as FallbackTrendPoint[]) : [])
+        setFallbackTrendSummary(
+          Array.isArray(fallbackSummaryData?.items) ? (fallbackSummaryData.items as FallbackTrendSummaryItem[]) : [],
+        )
+        setRecommendAbSummary((recommendAbData || null) as RecommendAbSummary | null)
       } catch (aiError: any) {
         setAiInsight({
           available: false,
@@ -339,6 +384,9 @@ export default function Reports() {
           fallbackReason: aiError?.response?.data?.message || 'AI service unavailable',
         })
         setQualitySummary(null)
+        setFallbackTrendPoints([])
+        setFallbackTrendSummary([])
+        setRecommendAbSummary(null)
       }
     } catch (error: any) {
       toast.error(error.response?.data?.message || tv('Không tải được dữ liệu báo cáo', 'Unable to load report data'))
@@ -349,14 +397,14 @@ export default function Reports() {
 
   useEffect(() => {
     void loadReports()
-  }, [dateFrom, dateTo, groupBy, selectedBranchId])
+  }, [dateFrom, dateTo, groupBy, selectedBranchId, fallbackTrendWindowMinutes])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       void loadReports()
     }, 30000)
     return () => window.clearInterval(timer)
-  }, [dateFrom, dateTo, groupBy, selectedBranchId])
+  }, [dateFrom, dateTo, groupBy, selectedBranchId, fallbackTrendWindowMinutes])
 
   const revenueChartData = useMemo(
     () =>
@@ -409,6 +457,62 @@ export default function Reports() {
 
     return noRevenue && noOrders && noTransactions && noTopItems && noStaffStats
   }, [dashboard, selectedBranchId, staffItems, topItems])
+
+  const fallbackRows = useMemo(() => {
+    if (!qualitySummary) return []
+    const entries = Object.entries(qualitySummary.fallbackRatios || {})
+    const baseRows = entries.map(([endpoint, row]) => ({
+      endpoint,
+      totalResponses: Number(row.totalResponses || 0),
+      fallbackResponses: Number(row.fallbackResponses || 0),
+      fallbackRatio: Number(row.fallbackRatio || 0),
+    }))
+    if (!showOnlyHighFallback) return baseRows
+    return baseRows.filter((item) => item.fallbackRatio >= 0.2)
+  }, [qualitySummary, showOnlyHighFallback])
+
+  const fallbackTrendChartData = useMemo(() => {
+    if (!fallbackTrendPoints.length) return []
+    const endpointFilter = new Set(
+      showOnlyHighFallback && qualitySummary
+        ? Object.keys(qualitySummary.attention?.highFallbackEndpoints || {})
+        : [],
+    )
+    return fallbackTrendPoints
+      .filter((point) => (!showOnlyHighFallback ? true : endpointFilter.has(point.endpoint)))
+      .map((point) => ({
+        time: formatHourLabel(point.timestamp),
+        endpoint: point.endpoint,
+        fallbackRatioPct: Math.round((Number(point.fallbackRatio || 0) * 100) * 100) / 100,
+      }))
+  }, [fallbackTrendPoints, showOnlyHighFallback, qualitySummary])
+
+  const selectedFallbackEndpoints = useMemo(() => {
+    const allEndpoints = Array.from(new Set(fallbackTrendChartData.map((item) => item.endpoint)))
+    return allEndpoints.slice(0, 4)
+  }, [fallbackTrendChartData])
+
+  const fallbackTrendPivot = useMemo(() => {
+    const byTime = new Map<string, Record<string, number | string>>()
+    fallbackTrendChartData.forEach((point) => {
+      const row = byTime.get(point.time) || { time: point.time }
+      row[point.endpoint] = point.fallbackRatioPct
+      byTime.set(point.time, row)
+    })
+    return Array.from(byTime.values())
+  }, [fallbackTrendChartData])
+
+  const fallbackSummaryRows = useMemo(() => {
+    const rows = [...fallbackTrendSummary]
+    if (!showOnlyHighFallback) return rows
+    return rows.filter((item) => item.highFallback)
+  }, [fallbackTrendSummary, showOnlyHighFallback])
+
+  const fallbackPriorityRows = useMemo(() => {
+    return fallbackSummaryRows
+      .filter((item) => item.priority === 'CRITICAL' || item.priority === 'HIGH')
+      .slice(0, 5)
+  }, [fallbackSummaryRows])
 
   const handleExport = async () => {
     try {
@@ -634,6 +738,31 @@ export default function Reports() {
         {!qualitySummary && <p className="text-sm text-slate-500">Chưa có dữ liệu quality summary.</p>}
         {qualitySummary && (
           <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <input
+                id="high-fallback-only"
+                type="checkbox"
+                checked={showOnlyHighFallback}
+                onChange={(e) => setShowOnlyHighFallback(e.target.checked)}
+              />
+              <label htmlFor="high-fallback-only" className="text-sm text-slate-700">
+                Chỉ hiện endpoint cảnh báo (fallback ratio ≥ 20%)
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="fallback-window" className="text-sm text-slate-700">Khung thời gian trend</label>
+              <select
+                id="fallback-window"
+                value={fallbackTrendWindowMinutes}
+                onChange={(e) => setFallbackTrendWindowMinutes(Number(e.target.value || 120))}
+                className="rounded border border-amber-200 bg-white px-2 py-1 text-sm text-slate-700"
+              >
+                <option value={60}>60 phút</option>
+                <option value={120}>2 giờ</option>
+                <option value={360}>6 giờ</option>
+                <option value={1440}>24 giờ</option>
+              </select>
+            </div>
             <div
               className={`rounded-xl border px-3 py-2 text-sm ${
                 qualitySummary.quality.status === 'ok'
@@ -658,6 +787,75 @@ export default function Reports() {
               </div>
             )}
 
+            {fallbackRows.length > 0 && (
+              <div className="rounded-xl border border-amber-100 bg-white/90 p-3">
+                <p className="mb-2 text-sm font-semibold text-slate-800">Fallback ratio theo endpoint</p>
+                <div className="space-y-1 text-xs">
+                  {fallbackRows.map((row) => (
+                    <p key={row.endpoint}>
+                      {row.endpoint}: <span className="font-semibold">{Math.round(row.fallbackRatio * 100)}%</span>
+                      {' '}({row.fallbackResponses}/{row.totalResponses})
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {fallbackSummaryRows.length > 0 && (
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-3">
+                <p className="mb-2 text-sm font-semibold text-indigo-900">Xu hướng fallback theo endpoint</p>
+                <div className="space-y-1 text-xs text-indigo-900">
+                  {fallbackSummaryRows.slice(0, 8).map((item) => (
+                    <p key={`summary-${item.endpoint}`}>
+                      {item.endpoint}: {Math.round(item.latestFallbackRatio * 100)}% (tb {Math.round(item.avgFallbackRatio * 100)}%)
+                      {' '}· trend {item.trend} ({item.deltaRatio >= 0 ? '+' : ''}{Math.round(item.deltaRatio * 100)}%) · risk {item.riskScore}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {fallbackPriorityRows.length > 0 && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+                <p className="mb-2 text-sm font-semibold text-rose-900">Ưu tiên xử lý ngay</p>
+                <div className="space-y-1 text-xs text-rose-900">
+                  {fallbackPriorityRows.map((item) => (
+                    <p key={`priority-${item.endpoint}`}>
+                      [{item.priority}] {item.endpoint}: {Math.round(item.latestFallbackRatio * 100)}% fallback · risk {item.riskScore}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {fallbackTrendPivot.length > 0 && (
+              <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-3">
+                <p className="mb-2 text-sm font-semibold text-slate-800">Trend fallback ratio ({fallbackTrendWindowMinutes} phút gần nhất)</p>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={fallbackTrendPivot}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="time" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} domain={[0, 100]} />
+                      <Tooltip />
+                      <Legend />
+                      {selectedFallbackEndpoints.map((endpoint, idx) => (
+                        <Line
+                          key={endpoint}
+                          type="monotone"
+                          dataKey={endpoint}
+                          name={endpoint}
+                          stroke={['#0284c7', '#f59e0b', '#ef4444', '#16a34a'][idx % 4]}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1">
               {qualitySummary.quality.checks.map((check) => (
                 <p key={check.name} className={`text-xs ${check.ok ? 'text-emerald-700' : 'text-amber-700'}`}>
@@ -668,6 +866,29 @@ export default function Reports() {
           </div>
         )}
       </Card>
+
+      {recommendAbSummary && (
+        <Card title="Recommendation A/B (24h)" subtitle="Hiệu quả control vs treatment cho gợi ý món">
+          <div className="space-y-2 text-sm">
+            <p className="text-slate-600">Tổng events: <span className="font-semibold">{recommendAbSummary.events}</span></p>
+            <p className="text-slate-700">
+              CTR uplift: <span className={`font-semibold ${recommendAbSummary.uplift.ctr >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {Math.round(recommendAbSummary.uplift.ctr * 10000) / 100}%
+              </span>
+              {' '}| Add-to-cart uplift: <span className={`font-semibold ${recommendAbSummary.uplift.addToCartRate >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {Math.round(recommendAbSummary.uplift.addToCartRate * 10000) / 100}%
+              </span>
+            </p>
+            <div className="space-y-1 text-xs text-slate-700">
+              {Object.entries(recommendAbSummary.groups || {}).map(([group, item]) => (
+                <p key={`ab-${group}`}>
+                  {group}: shown {item.shown}, click {item.click}, add_to_cart {item.add_to_cart}, purchase {item.purchase}
+                </p>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card title="Doanh thu theo thời gian (M-19)" subtitle="Ngày / tuần / tháng / năm">
