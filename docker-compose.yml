@@ -160,6 +160,7 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3001
       DATABASE_URL: ${ORDER_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/orderdb?schema=public}
+      KAFKA_REQUIRED: ${ORDER_KAFKA_REQUIRED:-false}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-}
       INVENTORY_SERVICE_URL: http://inventory-service:3005
       USER_SERVICE_URL: http://user-service:3000

@@ -31,6 +31,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
   private producer?: Producer;
   private enabled = false;
   private readonly isProduction: boolean;
+  private readonly kafkaRequired: boolean;
   private readonly configured: boolean;
   private lastError: string | null = null;
 
@@ -39,6 +40,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
     @Inject('CustomLogger') private logger: CustomLogger,
   ) {
     this.isProduction = String(this.configService.get('NODE_ENV', 'development')).toLowerCase() === 'production';
+    this.kafkaRequired = String(this.configService.get('KAFKA_REQUIRED', 'false')).toLowerCase() === 'true';
     const brokers = this.configService
       .get<string>('KAFKA_BROKERS', '')
       .split(',')
@@ -47,8 +49,8 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
 
     this.configured = brokers.length > 0;
     if (!brokers.length) {
-      if (this.isProduction) {
-        throw new Error('KAFKA_BROKERS is required in production');
+      if (this.kafkaRequired) {
+        throw new Error('KAFKA_BROKERS is required when KAFKA_REQUIRED=true');
       }
       this.logger.warn('KAFKA_BROKERS is empty, skip Kafka producer initialization');
       return;
@@ -73,7 +75,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.enabled = false;
       this.lastError = (error as Error).message;
-      if (this.isProduction) {
+      if (this.kafkaRequired) {
         throw error;
       }
       this.logger.warn(`Kafka unavailable, continue without producer: ${(error as Error).message}`);
@@ -135,7 +137,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
     return {
       configured: this.configured,
       connected: this.enabled,
-      required: this.isProduction,
+      required: this.kafkaRequired,
       lastError: this.lastError,
     };
   }
