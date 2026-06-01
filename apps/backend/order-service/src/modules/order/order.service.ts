@@ -2790,6 +2790,18 @@ export class OrderService {
     });
   }
 
+  async hasActiveOrdersForTable(tableId: string) {
+    const normalizedTableId = String(tableId || '').trim();
+    if (!normalizedTableId) {
+      throw new BadRequestException('tableId la bat buoc');
+    }
+
+    return {
+      tableId: normalizedTableId,
+      hasActiveOrders: await this.tableHasActiveOrders(normalizedTableId),
+    };
+  }
+
   async getKdsQueueByBranch(branchId: string, options?: { limit?: number }) {
     const normalizedBranchId = this.normalizeBranchId(branchId);
     if (!normalizedBranchId) {

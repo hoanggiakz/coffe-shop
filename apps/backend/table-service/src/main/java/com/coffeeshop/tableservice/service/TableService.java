@@ -310,26 +310,20 @@ public class TableService {
 
     private boolean hasActiveOrders(String tableId) {
         try {
-            String url = orderServiceUrl + "?tableId=" + URLEncoder.encode(tableId, StandardCharsets.UTF_8);
-            ResponseEntity<List> response = executeWithRetry(
-                    () -> restTemplate.getForEntity(url, List.class),
-                    "kiem tra don hang dang xu ly"
+            String url = orderServiceUrl + "/tables/"
+                    + URLEncoder.encode(tableId, StandardCharsets.UTF_8)
+                    + "/active";
+            ResponseEntity<Map> response = executeWithRetry(
+                    () -> restTemplate.getForEntity(url, Map.class),
+                    "kiem tra don hang dang xu ly cua ban"
             );
-            List<?> orders = response.getBody();
-            if (orders == null || orders.isEmpty()) {
+            Map<?, ?> body = response.getBody();
+            if (body == null) {
                 return false;
             }
 
-            Set<String> activeStatuses = Set.of("PENDING", "CONFIRMED", "PREPARING", "READY");
-            for (Object item : orders) {
-                if (item instanceof Map<?, ?> order) {
-                    Object status = order.get("status");
-                    if (status != null && activeStatuses.contains(String.valueOf(status))) {
-                        return true;
-                    }
-                }
-            }
-            return false;
+            Object hasActiveOrders = body.get("hasActiveOrders");
+            return Boolean.parseBoolean(String.valueOf(hasActiveOrders));
         } catch (Exception ex) {
             log.warn("Không kiểm tra được trạng thái đơn khi xóa bàn {}, mặc định chặn xóa", tableId, ex);
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Không thể kiểm tra trạng thái đơn của bàn");

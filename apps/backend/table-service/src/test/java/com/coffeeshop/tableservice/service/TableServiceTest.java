@@ -169,11 +169,11 @@ class TableServiceTest {
         when(tableRepository.findById("t4")).thenReturn(Optional.of(table));
 
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
-        server.expect(requestTo("http://order.local/api/orders?tableId=t4"))
+        server.expect(requestTo("http://order.local/api/orders/tables/t4/active"))
                 .andExpect(method(GET))
                 .andRespond(withStatus(HttpStatus.OK)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .body("[{\"status\":\"PREPARING\"}]"));
+                        .body("{\"tableId\":\"t4\",\"hasActiveOrders\":true}"));
 
         ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> tableService.delete("t4"));
         assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
@@ -186,11 +186,11 @@ class TableServiceTest {
         when(tableRepository.findById("t5")).thenReturn(Optional.of(table));
 
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
-        server.expect(requestTo("http://order.local/api/orders?tableId=t5"))
+        server.expect(requestTo("http://order.local/api/orders/tables/t5/active"))
                 .andExpect(method(GET))
                 .andRespond(withStatus(HttpStatus.OK)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .body("[{\"status\":\"DONE\"}]"));
+                        .body("{\"tableId\":\"t5\",\"hasActiveOrders\":false}"));
 
         Map<String, Object> result = tableService.delete("t5");
         assertEquals("t5", result.get("id"));

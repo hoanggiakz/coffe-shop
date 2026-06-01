@@ -28,6 +28,7 @@ describe('OrderController', () => {
     disablePromotion: jest.fn(),
     create: jest.fn(),
     findAll: jest.fn(),
+    hasActiveOrdersForTable: jest.fn(),
     transferOrMergeTables: jest.fn(),
     findCustomerHistory: jest.fn(),
     getCustomerRecommendations: jest.fn(),
@@ -156,6 +157,7 @@ describe('OrderController', () => {
 
     controller.create(createOrderDto as any);
     controller.findAll('t1', 'PENDING', '2026-01-01', '2026-01-31', 'b1', 'MANAGER', 'b1');
+    controller.hasActiveOrdersForTable('t1');
     controller.transferOrMergeTables(tableActionDto as any);
     controller.getCustomerHistory('c1', 'e@x.com', '0909', '5');
     controller.getCustomerRecommendations('c1', 'e@x.com', '0909', 'b1', 't1', '6');
@@ -173,6 +175,7 @@ describe('OrderController', () => {
       dateTo: '2026-01-31',
       branchId: 'b1',
     });
+    expect(orderService.hasActiveOrdersForTable).toHaveBeenCalledWith('t1');
     expect(orderService.transferOrMergeTables).toHaveBeenCalledWith(tableActionDto);
     expect(orderService.findCustomerHistory).toHaveBeenCalledWith({
       customerId: 'c1',

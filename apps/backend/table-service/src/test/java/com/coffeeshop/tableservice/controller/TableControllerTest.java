@@ -99,7 +99,7 @@ class TableControllerTest {
     @Test
     void qrEndpoints_ShouldDelegate() {
         when(tableService.getQrCode("t1")).thenReturn("qr");
-        when(tableService.getQrBatch(List.of("t1", "t2"))).thenReturn(List.of(Map.of("id", "t1", "qrCode", "qr")));
+        when(tableService.getQrBatch(List.of("t1", "t2"), null)).thenReturn(List.of(Map.of("id", "t1", "qrCode", "qr")));
         when(tableService.callStaff("t1", null)).thenReturn(Map.of("message", "ok"));
 
         BatchQrRequest batch = new BatchQrRequest();
