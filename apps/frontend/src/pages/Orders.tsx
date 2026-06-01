@@ -260,6 +260,22 @@ export default function Orders() {
   const normalizedRole = String(user?.role || '').toUpperCase()
   const canManagePosAdvanced = normalizedRole === 'ADMIN' || normalizedRole === 'MANAGER'
   const lastPrintedPaymentRef = useRef<string | null>(null)
+  const processedRealtimeIdsRef = useRef<Record<string, number>>({})
+
+  const alreadyHandledRealtime = (id?: string) => {
+    const key = String(id || '').trim()
+    if (!key) return false
+    const now = Date.now()
+    const cache = processedRealtimeIdsRef.current
+    for (const cacheKey of Object.keys(cache)) {
+      if (now - cache[cacheKey] > 5 * 60 * 1000) {
+        delete cache[cacheKey]
+      }
+    }
+    if (cache[key]) return true
+    cache[key] = now
+    return false
+  }
 
   const printCurrentView = () => {
     if (typeof window === 'undefined') return
@@ -533,6 +549,9 @@ export default function Orders() {
       if (payload.branchId && selectedBranchId && payload.branchId !== selectedBranchId) {
         return
       }
+      if (alreadyHandledRealtime(payload.id)) {
+        return
+      }
       if (
         payload.type === 'KDS_ORDER_READY' ||
         payload.type === 'ORDER_NEW' ||
@@ -569,7 +588,25 @@ export default function Orders() {
       }
     }
 
-    const onOrderItemReady = () => {
+    const onOrderItemReady = (payload?: Partial<StaffNotificationPayload>) => {
+      if (payload?.branchId && selectedBranchId && payload.branchId !== selectedBranchId) {
+        return
+      }
+      const type = String(payload?.type || '').toUpperCase()
+      if (!alreadyHandledRealtime(payload?.id) && (type === 'KDS_ORDER_READY' || type === 'ORDER_NEW' || type === 'KDS_ITEM_STATUS' || type === 'CART_UPDATED')) {
+        showRealtimeNotification(
+          String(payload?.title || 'Thông báo'),
+          String(payload?.message || 'Có cập nhật mới'),
+          type === 'ORDER_NEW'
+            ? 'NEW_ORDER'
+            : type === 'CART_UPDATED'
+              ? 'CART_UPDATED'
+              : 'ITEM_READY',
+        )
+        if (typeof window !== 'undefined' && payload?.createdAt) {
+          localStorage.setItem(notifSyncKey, payload.createdAt)
+        }
+      }
       void loadData()
     }
 
