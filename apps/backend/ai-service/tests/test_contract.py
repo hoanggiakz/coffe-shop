@@ -40,6 +40,14 @@ def test_fallback_trend_contract():
     assert isinstance(payload.get('points'), list)
 
 
+def test_fallback_trend_summary_contract():
+    response = client.get('/api/ai/ops/fallback-trend-summary', params={'windowMinutes': 120, 'threshold': 0.2})
+    assert response.status_code == 200
+    payload = response.json()
+    assert 'items' in payload
+    assert isinstance(payload.get('items'), list)
+
+
 def test_recommend_get_contract():
     response = client.get('/api/ai/recommend', params={'branchId': 'branch-e2e', 'limit': 3})
     assert response.status_code == 200

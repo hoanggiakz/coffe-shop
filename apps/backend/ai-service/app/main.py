@@ -334,6 +334,49 @@ def build_fallback_trend_snapshot(window_minutes: int = 60, endpoint: str | None
     return rows
 
 
+def build_fallback_trend_summary(window_minutes: int = 120, threshold: float = 0.2) -> list[dict[str, Any]]:
+    rows = build_fallback_trend_snapshot(window_minutes)
+    by_endpoint: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        normalized_endpoint = str(row.get("endpoint") or "").strip().lower()
+        if not normalized_endpoint:
+            continue
+        by_endpoint.setdefault(normalized_endpoint, []).append(row)
+
+    summary_rows: list[dict[str, Any]] = []
+    for endpoint, points in by_endpoint.items():
+        ordered = sorted(points, key=lambda item: str(item.get("timestamp") or ""))
+        ratios = [float(item.get("fallbackRatio") or 0.0) for item in ordered]
+        totals = [int(item.get("totalResponses") or 0) for item in ordered]
+        fallback_totals = [int(item.get("fallbackResponses") or 0) for item in ordered]
+        if not ratios:
+            continue
+        latest_ratio = ratios[-1]
+        first_ratio = ratios[0]
+        delta = latest_ratio - first_ratio
+        trend = "flat"
+        if delta >= 0.03:
+            trend = "up"
+        elif delta <= -0.03:
+            trend = "down"
+        summary_rows.append(
+            {
+                "endpoint": endpoint,
+                "samples": len(ratios),
+                "totalResponses": sum(totals),
+                "fallbackResponses": sum(fallback_totals),
+                "avgFallbackRatio": round(sum(ratios) / len(ratios), 4),
+                "maxFallbackRatio": round(max(ratios), 4),
+                "latestFallbackRatio": round(latest_ratio, 4),
+                "trend": trend,
+                "deltaRatio": round(delta, 4),
+                "highFallback": latest_ratio >= threshold,
+            }
+        )
+    summary_rows.sort(key=lambda item: (not bool(item.get("highFallback")), -float(item.get("latestFallbackRatio") or 0.0)))
+    return summary_rows
+
+
 def reload_knowledge_base(source: str = "manual") -> dict[str, Any]:
     # Phase-1 baseline: load from static defaults; ready to swap with DB/API loaders.
     global DEFAULT_MENU_KB  # pylint: disable=global-statement
@@ -1092,6 +1135,25 @@ def ai_ops_fallback_trend(
         "windowMinutes": max(5, min(windowMinutes, 24 * 60)),
         "endpoint": endpoint,
         "points": rows,
+    }
+
+
+@app.get("/api/ai/ops/fallback-trend-summary")
+def ai_ops_fallback_trend_summary(
+    request: Request,
+    branchId: str | None = None,
+    windowMinutes: int = 120,
+    threshold: float = 0.2,
+) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
+    safe_threshold = max(0.0, min(threshold, 1.0))
+    rows = build_fallback_trend_summary(window_minutes=windowMinutes, threshold=safe_threshold)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "branchId": branchId,
+        "windowMinutes": max(5, min(windowMinutes, 24 * 60)),
+        "threshold": safe_threshold,
+        "items": rows,
     }
 
 
