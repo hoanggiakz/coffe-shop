@@ -188,6 +188,8 @@ interface FallbackTrendSummaryItem {
   trend: 'up' | 'down' | 'flat'
   deltaRatio: number
   highFallback: boolean
+  riskScore: number
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 }
 
 function formatSentimentIssueLabel(issue: string): string {
@@ -495,6 +497,12 @@ export default function Reports() {
     return rows.filter((item) => item.highFallback)
   }, [fallbackTrendSummary, showOnlyHighFallback])
 
+  const fallbackPriorityRows = useMemo(() => {
+    return fallbackSummaryRows
+      .filter((item) => item.priority === 'CRITICAL' || item.priority === 'HIGH')
+      .slice(0, 5)
+  }, [fallbackSummaryRows])
+
   const handleExport = async () => {
     try {
       const response = await api.get('/reports/export', {
@@ -789,7 +797,20 @@ export default function Reports() {
                   {fallbackSummaryRows.slice(0, 8).map((item) => (
                     <p key={`summary-${item.endpoint}`}>
                       {item.endpoint}: {Math.round(item.latestFallbackRatio * 100)}% (tb {Math.round(item.avgFallbackRatio * 100)}%)
-                      {' '}· trend {item.trend} ({item.deltaRatio >= 0 ? '+' : ''}{Math.round(item.deltaRatio * 100)}%)
+                      {' '}· trend {item.trend} ({item.deltaRatio >= 0 ? '+' : ''}{Math.round(item.deltaRatio * 100)}%) · risk {item.riskScore}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {fallbackPriorityRows.length > 0 && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+                <p className="mb-2 text-sm font-semibold text-rose-900">Ưu tiên xử lý ngay</p>
+                <div className="space-y-1 text-xs text-rose-900">
+                  {fallbackPriorityRows.map((item) => (
+                    <p key={`priority-${item.endpoint}`}>
+                      [{item.priority}] {item.endpoint}: {Math.round(item.latestFallbackRatio * 100)}% fallback · risk {item.riskScore}
                     </p>
                   ))}
                 </div>

@@ -46,6 +46,10 @@ def test_fallback_trend_summary_contract():
     payload = response.json()
     assert 'items' in payload
     assert isinstance(payload.get('items'), list)
+    if payload['items']:
+        first = payload['items'][0]
+        assert 'riskScore' in first
+        assert 'priority' in first
 
 
 def test_recommend_get_contract():

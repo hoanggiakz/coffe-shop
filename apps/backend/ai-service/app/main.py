@@ -359,6 +359,17 @@ def build_fallback_trend_summary(window_minutes: int = 120, threshold: float = 0
             trend = "up"
         elif delta <= -0.03:
             trend = "down"
+        latest_pct = latest_ratio * 100.0
+        delta_pct = max(0.0, delta) * 100.0
+        sample_factor = min(1.0, len(ratios) / 8.0)
+        risk_score = min(100, int(round((latest_pct * 0.75 + delta_pct * 0.25) * sample_factor)))
+        priority = "LOW"
+        if risk_score >= 75:
+            priority = "CRITICAL"
+        elif risk_score >= 55:
+            priority = "HIGH"
+        elif risk_score >= 35:
+            priority = "MEDIUM"
         summary_rows.append(
             {
                 "endpoint": endpoint,
@@ -371,9 +382,17 @@ def build_fallback_trend_summary(window_minutes: int = 120, threshold: float = 0
                 "trend": trend,
                 "deltaRatio": round(delta, 4),
                 "highFallback": latest_ratio >= threshold,
+                "riskScore": risk_score,
+                "priority": priority,
             }
         )
-    summary_rows.sort(key=lambda item: (not bool(item.get("highFallback")), -float(item.get("latestFallbackRatio") or 0.0)))
+    summary_rows.sort(
+        key=lambda item: (
+            not bool(item.get("highFallback")),
+            -int(item.get("riskScore") or 0),
+            -float(item.get("latestFallbackRatio") or 0.0),
+        )
+    )
     return summary_rows
 
 
