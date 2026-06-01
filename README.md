@@ -354,7 +354,7 @@ sequenceDiagram
     Web (FE)-->>Khách: Hiển thị order info
 ```
 
-Ghi chú runtime: nếu `KAFKA_BROKERS` chưa cấu hình, hệ thống fallback sang thông báo realtime trực tiếp từ `order-service` qua `chat-service` để không gián đoạn luồng đang chạy.
+Ghi chú runtime: ở `NODE_ENV=production`, hệ thống chạy chế độ fail-fast realtime, bắt buộc cấu hình `KAFKA_BROKERS` và bật `SOCKET_IO_REDIS_ADAPTER=true`; nếu thiếu hoặc không kết nối được, service sẽ dừng startup.
 
 ### 5.12 Luồng Tạo Bàn Và Sinh QR
 

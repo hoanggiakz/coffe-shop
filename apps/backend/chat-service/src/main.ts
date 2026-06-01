@@ -9,10 +9,15 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
   const logger = new Logger('ChatService');
+  const nodeEnv = String(configService.get('NODE_ENV') || 'development').toLowerCase();
+  const isProduction = nodeEnv === 'production';
 
   app.enableCors({ origin: '*', credentials: true });
   app.enableShutdownHooks();
   const enableRedisAdapter = String(configService.get('SOCKET_IO_REDIS_ADAPTER') || 'false').toLowerCase() === 'true';
+  if (isProduction && !enableRedisAdapter) {
+    throw new Error('SOCKET_IO_REDIS_ADAPTER must be true in production for realtime scale-out');
+  }
   if (enableRedisAdapter) {
     try {
       const redisService = app.get(RedisService);
@@ -21,6 +26,9 @@ async function bootstrap() {
       app.useWebSocketAdapter(redisAdapter);
       logger.log('Socket.IO Redis adapter enabled');
     } catch (error: any) {
+      if (isProduction) {
+        throw error;
+      }
       logger.warn(`Cannot enable Socket.IO Redis adapter: ${error?.message || error}`);
     }
   }

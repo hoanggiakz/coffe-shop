@@ -15,11 +15,15 @@ import {
 } from './dto/menu-option.dto';
 import { CreateMenuItemManagementDto, UpdateMenuItemManagementDto } from './dto/menu-item-management.dto';
 import { CreatePromotionDto, QueryPromotionDto, UpdatePromotionDto } from './dto/promotion.dto';
+import { KafkaService } from '../../kafka/kafka.service';
 
 @Controller('api/orders')
 @UsePipes(new ValidationPipe({ transform: true }))
 export class OrderController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly kafkaService: KafkaService,
+  ) {}
 
   private normalizeRole(role?: string | null) {
     return String(role || '').trim().toUpperCase();
@@ -57,6 +61,18 @@ export class OrderController {
     return {
       service: 'order-service',
       status: 'ok',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('ready')
+  ready() {
+    const kafka = this.kafkaService.readiness();
+    const ready = kafka.required ? kafka.connected : kafka.configured ? kafka.connected : true;
+    return {
+      service: 'order-service',
+      status: ready ? 'ready' : 'not-ready',
+      checks: { kafka },
       timestamp: new Date().toISOString(),
     };
   }

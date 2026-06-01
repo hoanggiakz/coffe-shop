@@ -12,15 +12,23 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
   private kafka?: Kafka;
   private producer?: Producer;
   private consumer?: Consumer;
+  private readonly configured: boolean;
+  private lastError: string | null = null;
+  private readonly isProduction: boolean;
 
   constructor(private configService: ConfigService) {
+    this.isProduction = String(this.configService.get('NODE_ENV', 'development')).toLowerCase() === 'production';
     const brokers = this.configService
       .get<string>('KAFKA_BROKERS', '')
       .split(',')
       .map((broker) => broker.trim())
       .filter(Boolean);
 
+    this.configured = brokers.length > 0;
     if (!brokers.length) {
+      if (this.isProduction) {
+        throw new Error('KAFKA_BROKERS is required in production');
+      }
       this.logger.warn('KAFKA_BROKERS is empty, skip Kafka initialization');
       return;
     }
@@ -66,6 +74,10 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       this.connected = true;
       this.logger.log('Kafka connected successfully');
     } catch (error) {
+      this.lastError = (error as Error).message;
+      if (this.isProduction) {
+        throw error;
+      }
       this.logger.warn('Kafka is not available - running without Kafka. ' + error.message);
     }
   }
@@ -92,5 +104,14 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
 
   registerOrderCreatedHandler(handler: OrderCreatedHandler) {
     this.orderCreatedHandlers.push(handler);
+  }
+
+  readiness() {
+    return {
+      configured: this.configured,
+      connected: this.connected,
+      required: this.isProduction,
+      lastError: this.lastError,
+    };
   }
 }

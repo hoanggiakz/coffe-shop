@@ -164,8 +164,7 @@ export default function Kitchen() {
 
   useEffect(() => {
     loadData()
-    const timer = setInterval(loadData, 15000)
-    return () => clearInterval(timer)
+    return () => undefined
   }, [effectiveBranchId])
 
   useEffect(() => {

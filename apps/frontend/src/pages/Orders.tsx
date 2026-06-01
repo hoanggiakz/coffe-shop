@@ -1056,31 +1056,6 @@ export default function Orders() {
   }, [payingOrder?.id])
 
   useEffect(() => {
-    if (!payingOrder || !createdPayment) return
-    if (createdPayment.orderId !== payingOrder.id) return
-    if (createdPayment.provider !== 'SEPAY') return
-    if (!['PENDING', 'WAITING_TRANSFER'].includes(createdPayment.status)) return
-
-    const poll = () => {
-      void refreshPaymentAndCompleteIfPaid(payingOrder.id)
-    }
-    const intervalId = window.setInterval(poll, 3000)
-    const onFocus = () => poll()
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') poll()
-    }
-
-    window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', onVisibilityChange)
-
-    return () => {
-      window.clearInterval(intervalId)
-      window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-    }
-  }, [createdPayment?.orderId, createdPayment?.provider, createdPayment?.status, payingOrder?.id])
-
-  useEffect(() => {
     if (!payingOrder || !createdPayment || !sepayExpiresAt) return
     if (createdPayment.orderId !== payingOrder.id) return
     if (createdPayment.provider !== 'SEPAY') return

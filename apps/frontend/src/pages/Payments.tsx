@@ -7,6 +7,7 @@ import { cn } from '@/utils/cn'
 import { phuongThucThanhToan, trangThaiThanhToan } from '@/utils/display'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import { useAuthStore } from '@/stores/authStore'
+import { getSocket, disconnectSocket } from '@/utils/socket'
 
 interface PaymentApi {
   paymentId: string
@@ -21,7 +22,6 @@ interface PaymentApi {
   updatedAt?: string | null
 }
 
-const POLLING_INTERVAL_MS = 5000
 const DEFAULT_STATUS_CLASS = 'bg-slate-200 text-slate-700'
 
 const getStatusClass = (status: string): string => {
@@ -130,15 +130,41 @@ export default function Payments() {
 
   useEffect(() => {
     void loadPayments(true)
+  }, [effectiveBranchId])
 
-    const timerId = window.setInterval(() => {
+  useEffect(() => {
+    const socket = getSocket()
+    const onConnect = () => {
+      socket.emit('join-staff', {
+        branchId: effectiveBranchId || user?.branchId,
+        staffId: user?.id,
+        staffName: user?.name,
+      })
+    }
+    const onStaffNotification = (payload: { type?: string; branchId?: string }) => {
+      const type = String(payload?.type || '').toUpperCase()
+      if (effectiveBranchId && String(payload?.branchId || '').trim() !== effectiveBranchId) return
+      if (type === 'PAYMENT_SUCCESS') {
+        void loadPayments()
+      }
+    }
+    const onPaymentConfirmed = () => {
       void loadPayments()
-    }, POLLING_INTERVAL_MS)
+    }
+
+    socket.on('connect', onConnect)
+    socket.on('staff-notification', onStaffNotification)
+    socket.on('payment-confirmed', onPaymentConfirmed)
+    if (!socket.connected) socket.connect()
+    else onConnect()
 
     return () => {
-      window.clearInterval(timerId)
+      socket.off('connect', onConnect)
+      socket.off('staff-notification', onStaffNotification)
+      socket.off('payment-confirmed', onPaymentConfirmed)
+      disconnectSocket()
     }
-  }, [effectiveBranchId])
+  }, [effectiveBranchId, user?.branchId, user?.id, user?.name])
 
   const totalRevenue = useMemo(
     () =>

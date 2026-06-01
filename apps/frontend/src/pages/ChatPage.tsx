@@ -254,8 +254,6 @@ export default function ChatPage() {
 
   useEffect(() => {
     loadChats()
-    const timer = setInterval(loadChats, 10000)
-    return () => clearInterval(timer)
   }, [statusFilter, effectiveBranchId])
 
   useEffect(() => {

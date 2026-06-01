@@ -38,8 +38,11 @@ describe('OrderController', () => {
     updateCustomerOrderItems: jest.fn(),
     updateItemStatus: jest.fn(),
   };
+  const kafkaService = {
+    readiness: jest.fn(() => ({ configured: true, connected: true, required: false, lastError: null })),
+  };
 
-  const controller = new OrderController(orderService as any);
+  const controller = new OrderController(orderService as any, kafkaService as any);
 
   beforeEach(() => {
     jest.clearAllMocks();

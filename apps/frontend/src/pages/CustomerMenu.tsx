@@ -1524,11 +1524,23 @@ export default function CustomerMenu() {
       toast(payload.serverWins ? 'Giỏ hàng đã đồng bộ theo máy chủ (server-wins)' : 'Giỏ hàng vừa được cập nhật bởi nhân viên')
     }
 
+    const refreshCurrentOrder = () => {
+      if (!currentOrderId) return
+      void fetchOrderStatus(currentOrderId)
+      void fetchPaymentStatus(currentOrderId)
+    }
+
     socket.on('cart-updated', onCartUpdated)
+    socket.on('payment-confirmed', refreshCurrentOrder)
+    socket.on('table-status-changed', refreshCurrentOrder)
+    socket.on('order-item-ready', refreshCurrentOrder)
     return () => {
       socket.off('cart-updated', onCartUpdated)
+      socket.off('payment-confirmed', refreshCurrentOrder)
+      socket.off('table-status-changed', refreshCurrentOrder)
+      socket.off('order-item-ready', refreshCurrentOrder)
     }
-  }, [tableId])
+  }, [tableId, currentOrderId])
 
   useEffect(() => {
     flushPendingMessages()
@@ -2283,37 +2295,7 @@ export default function CustomerMenu() {
     }
     fetchOrderStatus(currentOrderId)
     fetchPaymentStatus(currentOrderId)
-    const timer = window.setInterval(() => {
-      fetchOrderStatus(currentOrderId)
-      fetchPaymentStatus(currentOrderId)
-    }, 8000)
-    return () => window.clearInterval(timer)
   }, [currentOrderId])
-
-  useEffect(() => {
-    if (!currentOrderId) return
-    if (!currentPayment || currentPayment.provider !== 'SEPAY') return
-    if (!['PENDING', 'WAITING_TRANSFER'].includes(currentPayment.status)) return
-
-    const poll = () => {
-      void fetchPaymentStatus(currentOrderId)
-    }
-
-    const intervalId = window.setInterval(poll, 3000)
-    const onFocus = () => poll()
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') poll()
-    }
-
-    window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', onVisibilityChange)
-
-    return () => {
-      window.clearInterval(intervalId)
-      window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-    }
-  }, [currentOrderId, currentPayment?.paymentId, currentPayment?.provider, currentPayment?.status])
 
   const submitOrder = async (e: FormEvent) => {
     e.preventDefault()

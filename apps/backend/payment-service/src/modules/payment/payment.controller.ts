@@ -7,11 +7,15 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ConfirmCashDto } from './dto/confirm-cash.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import type { Request } from 'express';
+import { KafkaService } from '../../kafka/kafka.service';
 
 @ApiTags('Payments')
 @Controller('payments')
 export class PaymentController {
-  constructor(private readonly paymentService: PaymentService) {}
+  constructor(
+    private readonly paymentService: PaymentService,
+    private readonly kafkaService: KafkaService,
+  ) {}
 
   @Get('health')
   @ApiOperation({ summary: 'Health check for payment service' })
@@ -74,6 +78,20 @@ export class PaymentController {
       amount: Number.isFinite(parsedAmount) ? parsedAmount : undefined,
       transferContent,
     });
+  }
+
+  @Get('ready')
+  @ApiOperation({ summary: 'Readiness check for payment service dependencies' })
+  @ApiResponse({ status: 200, description: 'Readiness payload.' })
+  ready() {
+    const kafka = this.kafkaService.readiness();
+    const ready = kafka.required ? kafka.connected : kafka.configured ? kafka.connected : true;
+    return {
+      service: 'payment-service',
+      status: ready ? 'ready' : 'not-ready',
+      checks: { kafka },
+      timestamp: new Date().toISOString(),
+    };
   }
 
   @Get(':paymentId')

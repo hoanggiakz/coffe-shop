@@ -15,18 +15,26 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
   private kafka?: Kafka;
   private producer?: Producer;
   private enabled = false;
+  private readonly isProduction: boolean;
+  private readonly configured: boolean;
+  private lastError: string | null = null;
 
   constructor(
     private configService: ConfigService,
     private logger: CustomLogger,
   ) {
+    this.isProduction = String(this.configService.get('NODE_ENV', 'development')).toLowerCase() === 'production';
     const brokers = this.configService
       .get<string>('KAFKA_BROKERS', '')
       .split(',')
       .map((broker) => broker.trim())
       .filter(Boolean);
 
+    this.configured = brokers.length > 0;
     if (brokers.length === 0) {
+      if (this.isProduction) {
+        throw new Error('KAFKA_BROKERS is required in production');
+      }
       this.logger.warn('KAFKA_BROKERS is empty, skip Kafka initialization');
       return;
     }
@@ -49,6 +57,10 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Kafka producer connected for payment-service');
     } catch (error) {
       this.enabled = false;
+      this.lastError = (error as Error).message;
+      if (this.isProduction) {
+        throw error;
+      }
       this.logger.warn(`Kafka unavailable, continue without producer: ${(error as Error).message}`);
     }
   }
@@ -70,5 +82,14 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       messages: [{ value: JSON.stringify(data) }],
     });
     this.logger.log(`Published PaymentCompleted event for payment ${data.paymentId}`);
+  }
+
+  readiness() {
+    return {
+      configured: this.configured,
+      connected: this.enabled,
+      required: this.isProduction,
+      lastError: this.lastError,
+    };
   }
 }
