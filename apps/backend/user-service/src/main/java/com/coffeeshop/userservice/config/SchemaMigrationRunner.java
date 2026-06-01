@@ -27,6 +27,21 @@ public class SchemaMigrationRunner {
                         "ADD CONSTRAINT users_role_check " +
                         "CHECK (role IN ('ADMIN','MANAGER','WAITER','BARISTA','STAFF','CUSTOMER'))"
         );
+        jdbcTemplate.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_member_tier_check");
+        jdbcTemplate.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS user_member_tier_check");
+        jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS member_tier VARCHAR(50)");
+        jdbcTemplate.execute("UPDATE users SET member_tier = 'BRONZE' WHERE member_tier IS NULL");
+        jdbcTemplate.execute(
+                "UPDATE users SET member_tier = 'BRONZE' " +
+                        "WHERE member_tier NOT IN ('BRONZE','STANDARD','SILVER','GOLD','PLATINUM')"
+        );
+        jdbcTemplate.execute("ALTER TABLE users ALTER COLUMN member_tier SET DEFAULT 'BRONZE'");
+        jdbcTemplate.execute("ALTER TABLE users ALTER COLUMN member_tier SET NOT NULL");
+        jdbcTemplate.execute(
+                "ALTER TABLE users " +
+                        "ADD CONSTRAINT users_member_tier_check " +
+                        "CHECK (member_tier IN ('BRONZE','STANDARD','SILVER','GOLD','PLATINUM'))"
+        );
 
         jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_code VARCHAR(255)");
         jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS personal_qr_code VARCHAR(255)");

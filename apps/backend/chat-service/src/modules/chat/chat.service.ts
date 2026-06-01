@@ -62,7 +62,7 @@ export class ChatService {
 
   private enforceStaffChatRole(actor: ActorContext) {
     const actorRole = String(actor.role || '').toUpperCase();
-    if (!['ADMIN', 'MANAGER', 'WAITER'].includes(actorRole)) {
+    if (!['ADMIN', 'MANAGER', 'WAITER', 'STAFF'].includes(actorRole)) {
       throw new ForbiddenException('Không có quyền truy cập module chat');
     }
   }

@@ -41,7 +41,7 @@ interface OrderApi {
   }>
 }
 
-type StaffNotificationType = 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'LOW_STOCK'
+type StaffNotificationType = 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'LOW_STOCK' | 'PAYMENT_SUCCESS'
 
 interface StaffNotificationPayload {
   id: string
@@ -178,6 +178,8 @@ export default function Dashboard() {
               ? 'NEW_MESSAGE'
               : payload.type === 'LOW_STOCK'
                 ? 'LOW_INVENTORY'
+                : payload.type === 'PAYMENT_SUCCESS'
+                  ? 'PAYMENT_SUCCESS'
                 : 'SYSTEM'
       showRealtimeNotification(payload.title, payload.message, mappedType)
     }

@@ -11,8 +11,14 @@ function readSessionToken(): string {
     const raw = sessionStorage.getItem('auth-storage')
     if (!raw) return ''
     const parsed = JSON.parse(raw)
-    const token = String(parsed?.state?.token || '').trim()
-    return token
+    const firstState = parsed?.state ?? parsed
+    const secondState = firstState?.state ?? firstState
+    const candidates = [firstState?.token, secondState?.token]
+    for (const token of candidates) {
+      const normalized = String(token || '').trim()
+      if (normalized) return normalized
+    }
+    return ''
   } catch {
     return ''
   }
@@ -35,9 +41,11 @@ export function getSocket(): Socket {
       timeout: 10000,
       autoConnect: false,
       auth: token ? { token } : undefined,
+      query: token ? { access_token: token } : undefined,
     })
   } else {
     socket.auth = token ? { token } : {}
+    socket.io.opts.query = token ? { access_token: token } : {}
   }
   return socket
 }

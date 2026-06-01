@@ -42,7 +42,7 @@ interface OrderApi {
 
 type TableActionMode = 'TRANSFER' | 'MERGE'
 type TableGridState = 'AVAILABLE' | 'OCCUPIED' | 'WAITING_PAYMENT' | 'MAINTENANCE'
-type StaffNotificationType = 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'LOW_STOCK' | 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY'
+type StaffNotificationType = 'ORDER_NEW' | 'CALL_STAFF' | 'CHAT_MESSAGE' | 'CHAT_OPENED' | 'LOW_STOCK' | 'KDS_ITEM_STATUS' | 'KDS_ORDER_READY' | 'PAYMENT_SUCCESS'
 
 interface StaffNotificationPayload {
   id: string
@@ -180,11 +180,15 @@ export default function Tables() {
       if (payload.branchId && selectedBranchId && payload.branchId !== selectedBranchId) {
         return
       }
-      if (payload.type === 'KDS_ORDER_READY' || payload.type === 'ORDER_NEW' || payload.type === 'KDS_ITEM_STATUS') {
+      if (payload.type === 'KDS_ORDER_READY' || payload.type === 'ORDER_NEW' || payload.type === 'KDS_ITEM_STATUS' || payload.type === 'PAYMENT_SUCCESS') {
         showRealtimeNotification(
           payload.title,
           payload.message,
-          payload.type === 'ORDER_NEW' ? 'NEW_ORDER' : 'ITEM_READY',
+          payload.type === 'ORDER_NEW'
+            ? 'NEW_ORDER'
+            : payload.type === 'PAYMENT_SUCCESS'
+              ? 'PAYMENT_SUCCESS'
+              : 'ITEM_READY',
         )
         void loadTables()
       }

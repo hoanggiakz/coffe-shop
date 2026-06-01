@@ -402,6 +402,11 @@ export class OrderController {
     });
   }
 
+  @Get('tables/:tableId/active')
+  hasActiveOrdersForTable(@Param('tableId') tableId: string) {
+    return this.orderService.hasActiveOrdersForTable(tableId);
+  }
+
   @Get('promotions/validate')
   validatePromotion(
     @Query('code') code?: string,

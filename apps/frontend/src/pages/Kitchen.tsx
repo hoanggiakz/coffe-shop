@@ -119,6 +119,27 @@ function orderKdsStage(order: OrderApi): KdsStage {
   return 'WAITING'
 }
 
+function readKitchenSocketToken(fallback?: string | null): string {
+  const direct = String(fallback || '').trim()
+  if (direct) return direct
+  if (typeof window === 'undefined') return ''
+  try {
+    const raw = sessionStorage.getItem('auth-storage')
+    if (!raw) return ''
+    const parsed = JSON.parse(raw)
+    const firstState = parsed?.state ?? parsed
+    const secondState = firstState?.state ?? firstState
+    const candidates = [firstState?.token, secondState?.token]
+    for (const token of candidates) {
+      const normalized = String(token || '').trim()
+      if (normalized) return normalized
+    }
+    return ''
+  } catch {
+    return ''
+  }
+}
+
 export default function Kitchen() {
   const { tv } = useI18n()
   const [orders, setOrders] = useState<OrderApi[]>([])
@@ -130,10 +151,16 @@ export default function Kitchen() {
   const soundEnabled = useUiStore((state) => state.soundEnabled)
   const setSoundEnabled = useUiStore((state) => state.setSoundEnabled)
   const currentUser = useAuthStore((state) => state.user)
+  const authToken = useAuthStore((state) => state.token)
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const effectiveBranchId = String(selectedBranchId || currentUser?.branchId || '').trim()
   const wsBaseUrl = resolveWebsocketBaseUrl()
   const kdsSocketRef = useRef<Socket | null>(null)
+  const soundEnabledRef = useRef(soundEnabled)
+
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled
+  }, [soundEnabled])
 
   const loadData = async () => {
     try {
@@ -168,23 +195,18 @@ export default function Kitchen() {
   }, [effectiveBranchId])
 
   useEffect(() => {
-    const raw = typeof window !== 'undefined' ? sessionStorage.getItem('auth-storage') : ''
-    let token = ''
-    try {
-      const parsed = raw ? JSON.parse(raw) : null
-      token = String(parsed?.state?.token || '').trim()
-    } catch {
-      token = ''
-    }
+    const token = readKitchenSocketToken(authToken)
     const socket: Socket = io(`${wsBaseUrl}/kds`, {
-      transports: ['polling', 'websocket'],
+      transports: ['websocket', 'polling'],
       upgrade: true,
+      rememberUpgrade: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 10000,
       auth: token ? { token } : undefined,
+      query: token ? { access_token: token } : undefined,
     })
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null
     kdsSocketRef.current = socket
@@ -209,6 +231,14 @@ export default function Kitchen() {
         heartbeatTimer = null
       }
     }
+    const onConnectError = (error: Error & { message?: string }) => {
+      const message = String(error?.message || '').trim()
+      if (/unauthorized|forbidden/i.test(message)) {
+        toast.error('KDS không xác thực được phiên đăng nhập. Vui lòng đăng nhập lại.')
+        return
+      }
+      toast.error(`KDS realtime lỗi kết nối: ${message || 'unknown'}`)
+    }
 
     const onRealtimeEvent = (payload: StaffNotificationPayload | KdsSocketPayload) => {
       const type = String(payload?.type || '').toUpperCase()
@@ -218,7 +248,7 @@ export default function Kitchen() {
           String(payload?.message || '') || tv('KDS vừa nhận đơn mới', 'KDS received a new order'),
           'NEW_ORDER',
         )
-        playKitchenOrderSound(soundEnabled)
+        playKitchenOrderSound(soundEnabledRef.current)
         loadData()
         return
       }
@@ -230,6 +260,7 @@ export default function Kitchen() {
 
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
+    socket.on('connect_error', onConnectError)
     socket.on('sync-response', onSync)
     socket.on('new-order', onRealtimeEvent)
     socket.on('order-confirmed', onRealtimeEvent)
@@ -239,6 +270,7 @@ export default function Kitchen() {
     return () => {
       socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
+      socket.off('connect_error', onConnectError)
       socket.off('sync-response', onSync)
       socket.off('new-order', onRealtimeEvent)
       socket.off('order-confirmed', onRealtimeEvent)
@@ -250,7 +282,31 @@ export default function Kitchen() {
         kdsSocketRef.current = null
       }
     }
-  }, [soundEnabled, currentUser?.id, effectiveBranchId, wsBaseUrl])
+  }, [currentUser?.id, effectiveBranchId, wsBaseUrl, authToken])
+
+  useEffect(() => {
+    if (socketConnected) return
+    const intervalId = window.setInterval(() => {
+      void loadData()
+    }, 5000)
+    return () => window.clearInterval(intervalId)
+  }, [socketConnected, effectiveBranchId])
+
+  const updateItemStatusFallback = async (orderId: string, itemId: string, status: 'PREPARING' | 'READY') => {
+    await api.patch(`/orders/${orderId}/items/${itemId}/status`, { status })
+  }
+
+  const updateOrderItemsBatchFallback = async (order: OrderApi, targetStatus: 'PREPARING' | 'READY') => {
+    const items = order.orderItems
+      .filter((item) =>
+        targetStatus === 'PREPARING'
+          ? item.status === 'WAITING'
+          : item.status !== 'READY',
+      )
+      .map((item) => ({ itemId: item.id, status: targetStatus }))
+    if (items.length === 0) return
+    await api.patch(`/orders/${order.id}/items/batch-status`, { items })
+  }
 
   const updateItemStatus = async (
     orderId: string,
@@ -260,10 +316,11 @@ export default function Kitchen() {
     setUpdatingId(itemId)
     try {
       const socket = kdsSocketRef.current
-      if (!socket?.connected) {
-        throw new Error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      if (socket?.connected) {
+        socket.emit(status === 'PREPARING' ? 'start-item' : 'complete-item', { orderId, itemId })
+      } else {
+        await updateItemStatusFallback(orderId, itemId, status)
       }
-      socket.emit(status === 'PREPARING' ? 'start-item' : 'complete-item', { orderId, itemId })
       await loadData()
       toast.success(tv(`Cập nhật món -> ${status}`, `Item updated -> ${status}`))
     } catch (error: any) {
@@ -283,10 +340,11 @@ export default function Kitchen() {
     setUpdatingId(`order:${order.id}`)
     try {
       const socket = kdsSocketRef.current
-      if (!socket?.connected) {
-        throw new Error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      if (socket?.connected) {
+        socket.emit('complete-order', { orderId: order.id })
+      } else {
+        await updateOrderItemsBatchFallback(order, 'READY')
       }
-      socket.emit('complete-order', { orderId: order.id })
       await loadData()
       toast.success(tv(`Đã cập nhật đơn ${maDonHangNgan(order.id)}`, `Order ${maDonHangNgan(order.id)} updated`))
     } catch (error: any) {
@@ -300,10 +358,11 @@ export default function Kitchen() {
     setUpdatingId(`order:start:${order.id}`)
     try {
       const socket = kdsSocketRef.current
-      if (!socket?.connected) {
-        throw new Error(tv('KDS realtime đang ngắt kết nối', 'KDS realtime is disconnected'))
+      if (socket?.connected) {
+        socket.emit('start-order', { orderId: order.id })
+      } else {
+        await updateOrderItemsBatchFallback(order, 'PREPARING')
       }
-      socket.emit('start-order', { orderId: order.id })
       await loadData()
       toast.success(tv(`Đã bắt đầu đơn ${maDonHangNgan(order.id)}`, `Order ${maDonHangNgan(order.id)} started`))
     } catch (error: any) {
