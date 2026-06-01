@@ -175,6 +175,8 @@ FALLBACK_TREND_MAX_POINTS = int(os.getenv("AI_FALLBACK_TREND_MAX_POINTS", "240")
 RECOMMEND_AB_EVENTS: list[dict[str, Any]] = []
 RECOMMEND_AB_EVENT_LIMIT = int(os.getenv("AI_RECOMMEND_AB_EVENT_LIMIT", "2000"))
 AI_RECOMMEND_AB_TREATMENT_PERCENT = int(os.getenv("AI_RECOMMEND_AB_TREATMENT_PERCENT", "50"))
+EMAIL_REDACT_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+PHONE_REDACT_RE = re.compile(r"(?<!\d)(?:\+?84|0)\d{8,10}(?!\d)")
 
 
 @app.middleware("http")
@@ -210,6 +212,23 @@ def json_dumps(obj: dict[str, Any]) -> str:
     import json
 
     return json.dumps(obj, ensure_ascii=False)
+
+
+def redact_pii_text(text: str | None) -> str:
+    raw = str(text or "")
+    masked = EMAIL_REDACT_RE.sub("[redacted_email]", raw)
+    masked = PHONE_REDACT_RE.sub("[redacted_phone]", masked)
+    return masked
+
+
+def redact_pii_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): redact_pii_metadata(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_pii_metadata(item) for item in value]
+    if isinstance(value, str):
+        return redact_pii_text(value)
+    return value
 
 
 def normalize_branch_id(value: str | None) -> str:
@@ -310,35 +329,31 @@ def record_recommend_ab_event(
     customer_id: str | None = None,
     session_id: str | None = None,
 ) -> None:
+    safe_customer_id = ""
+    if customer_id:
+        safe_customer_id = hashlib.sha1(str(customer_id).encode("utf-8")).hexdigest()[:16]
+    safe_session_id = ""
+    if session_id:
+        safe_session_id = hashlib.sha1(str(session_id).encode("utf-8")).hexdigest()[:16]
     now_iso = datetime.now(timezone.utc).isoformat()
-    RECOMMEND_AB_EVENTS.append(
-        {
-            "timestamp": now_iso,
-            "branchId": branch_id,
-            "group": str(group or "unknown").lower(),
-            "event": str(event or "unknown").lower(),
-            "strategy": str(strategy or "").lower(),
-            "customerId": customer_id or "",
-            "sessionId": session_id or "",
-        }
-    )
+    event_row = {
+        "timestamp": now_iso,
+        "branchId": branch_id,
+        "group": str(group or "unknown").lower(),
+        "event": str(event or "unknown").lower(),
+        "strategy": str(strategy or "").lower(),
+        "customerId": safe_customer_id,
+        "sessionId": safe_session_id,
+    }
+    RECOMMEND_AB_EVENTS.append(event_row)
     if len(RECOMMEND_AB_EVENTS) > max(100, RECOMMEND_AB_EVENT_LIMIT):
         del RECOMMEND_AB_EVENTS[:-RECOMMEND_AB_EVENT_LIMIT]
+    persist_recommend_ab_event(event_row)
 
 
 def build_recommend_ab_summary(branch_id: str, lookback_hours: int = 24) -> dict[str, Any]:
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=max(1, min(lookback_hours, 24 * 14)))
-    rows: list[dict[str, Any]] = []
-    for item in RECOMMEND_AB_EVENTS:
-        if str(item.get("branchId") or "") != branch_id:
-            continue
-        try:
-            ts = datetime.fromisoformat(str(item.get("timestamp") or ""))
-        except Exception:
-            continue
-        if ts < cutoff:
-            continue
-        rows.append(item)
+    safe_hours = max(1, min(lookback_hours, 24 * 14))
+    rows: list[dict[str, Any]] = load_recommend_ab_events(branch_id, safe_hours)
     by_group: dict[str, dict[str, int]] = {}
     for item in rows:
         group = str(item.get("group") or "unknown")
@@ -368,11 +383,106 @@ def build_recommend_ab_summary(branch_id: str, lookback_hours: int = 24) -> dict
     }
     return {
         "branchId": branch_id,
-        "lookbackHours": max(1, min(lookback_hours, 24 * 14)),
+        "lookbackHours": safe_hours,
         "events": len(rows),
         "groups": groups,
         "uplift": uplift,
     }
+
+
+def init_recommend_ab_event_store() -> None:
+    if not REPORT_DATABASE_URL:
+        return
+    try:
+        with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS recommend_ab_event (
+                        id UUID PRIMARY KEY,
+                        "branchId" VARCHAR(64) NOT NULL,
+                        "event" VARCHAR(32) NOT NULL,
+                        "group" VARCHAR(16) NOT NULL,
+                        strategy VARCHAR(64),
+                        "customerKey" VARCHAR(32),
+                        "sessionKey" VARCHAR(32),
+                        "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute('CREATE INDEX IF NOT EXISTS idx_recommend_ab_event_branch_time ON recommend_ab_event ("branchId", "createdAt" DESC)')
+    except Exception:
+        return
+
+
+def persist_recommend_ab_event(event_row: dict[str, Any]) -> None:
+    if not REPORT_DATABASE_URL:
+        return
+    try:
+        with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO recommend_ab_event (id, "branchId", "event", "group", strategy, "customerKey", "sessionKey", "createdAt")
+                    VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s::timestamptz)
+                    """,
+                    (
+                        str(uuid4()),
+                        str(event_row.get("branchId") or ""),
+                        str(event_row.get("event") or "unknown"),
+                        str(event_row.get("group") or "unknown"),
+                        str(event_row.get("strategy") or ""),
+                        str(event_row.get("customerId") or ""),
+                        str(event_row.get("sessionId") or ""),
+                        str(event_row.get("timestamp") or datetime.now(timezone.utc).isoformat()),
+                    ),
+                )
+    except Exception:
+        return
+
+
+def load_recommend_ab_events(branch_id: str, lookback_hours: int) -> list[dict[str, Any]]:
+    safe_hours = max(1, min(lookback_hours, 24 * 14))
+    if REPORT_DATABASE_URL:
+        try:
+            rows = execute_sql(
+                """
+                SELECT "branchId", "event", "group", strategy, "createdAt"
+                FROM recommend_ab_event
+                WHERE "branchId" = %s
+                  AND "createdAt" >= (NOW() - (%s::int || ' hours')::interval)
+                ORDER BY "createdAt" DESC
+                LIMIT 5000
+                """,
+                [branch_id, safe_hours],
+            )
+            if rows:
+                return [
+                    {
+                        "branchId": str(row.get("branchId") or ""),
+                        "event": str(row.get("event") or "unknown"),
+                        "group": str(row.get("group") or "unknown"),
+                        "strategy": str(row.get("strategy") or ""),
+                        "timestamp": str(row.get("createdAt") or ""),
+                    }
+                    for row in rows
+                ]
+        except Exception:
+            pass
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=safe_hours)
+    fallback_rows: list[dict[str, Any]] = []
+    for item in RECOMMEND_AB_EVENTS:
+        if str(item.get("branchId") or "") != branch_id:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(item.get("timestamp") or ""))
+        except Exception:
+            continue
+        if ts < cutoff:
+            continue
+        fallback_rows.append(item)
+    return fallback_rows
 
 
 def build_fallback_ratio_snapshot() -> dict[str, Any]:
@@ -522,6 +632,7 @@ def log_audit(
     if not REPORT_DATABASE_URL:
         return
     try:
+        safe_metadata = None if metadata is None else redact_pii_metadata(metadata)
         with psycopg.connect(REPORT_DATABASE_URL, autocommit=True) as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -536,7 +647,7 @@ def log_audit(
                         actor_id,
                         success,
                         latency_ms,
-                        "{}" if metadata is None else json_dumps(metadata),
+                        "{}" if safe_metadata is None else json_dumps(safe_metadata),
                     ),
                 )
     except Exception:
@@ -938,6 +1049,7 @@ async def forecast_cron_loop():
 @app.on_event("startup")
 async def startup_tasks():
     reload_knowledge_base(source="startup")
+    init_recommend_ab_event_store()
     if AI_FORECAST_CRON_ENABLED:
         asyncio.create_task(forecast_cron_loop())
 
@@ -1884,7 +1996,8 @@ def sentiment_issues_top(request: Request, branchId: str, days: int = 7, limit: 
 def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dict[str, Any]:
     authorize_request(request, payload.branchId, {"ADMIN", "MANAGER"})
     payload.branchId = normalize_branch_id(payload.branchId)
-    label, confidence, scores, explanation = classify_sentiment(payload.text)
+    sanitized_text = redact_pii_text(payload.text)
+    label, confidence, scores, explanation = classify_sentiment(sanitized_text)
     persisted = False
     if REPORT_DATABASE_URL:
         try:
@@ -1899,7 +2012,7 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
                             payload.branchId,
                             str(payload.sourceType or "CHAT").upper(),
                             payload.sourceId,
-                            payload.text,
+                            sanitized_text,
                             label,
                             confidence,
                             "vi_weighted_lexicon_v2",
@@ -1924,6 +2037,7 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
         "persisted": persisted,
         "reason": "vi_weighted_lexicon_v2",
         "explanation": explanation,
+        "sanitized": sanitized_text != str(payload.text or ""),
     }
 
 
@@ -1938,15 +2052,16 @@ def ai_chat(payload: ChatPayload, request: Request) -> dict[str, Any]:
     question = str(payload.message or payload.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="message/question is required")
+    sanitized_question = redact_pii_text(question)
 
-    answer, intent, confidence, escalated = answer_from_knowledge_base(question)
+    answer, intent, confidence, escalated = answer_from_knowledge_base(sanitized_question)
     generated_sql = None
     sql_result: list[dict[str, Any]] = []
     success = True
     error_message = None
 
     if intent == "ESCALATE" and REPORT_DATABASE_URL:
-        generated_sql = map_question_to_sql(question, payload.branchId)
+        generated_sql = map_question_to_sql(sanitized_question, payload.branchId)
         try:
             params = [payload.branchId] if payload.branchId and "%s" in generated_sql else []
             sql_result = execute_sql(generated_sql, params)
@@ -1965,7 +2080,7 @@ def ai_chat(payload: ChatPayload, request: Request) -> dict[str, Any]:
         "branchId": payload.branchId,
         "sessionId": payload.sessionId,
         "tableId": payload.tableId,
-        "question": question,
+        "question": sanitized_question,
         "answer": answer,
         "intent": intent,
         "confidence": round(confidence, 2),
@@ -1976,7 +2091,14 @@ def ai_chat(payload: ChatPayload, request: Request) -> dict[str, Any]:
     CHAT_HISTORY.append(record)
 
     latency_ms = int((time.perf_counter() - start) * 1000)
-    log_audit("/api/ai/chat", "chat_query", success, payload.branchId, latency_ms=latency_ms, metadata={"error": error_message, "intent": intent})
+    log_audit(
+        "/api/ai/chat",
+        "chat_query",
+        success,
+        payload.branchId,
+        latency_ms=latency_ms,
+        metadata={"error": error_message, "intent": intent, "questionPreview": sanitized_question[:120]},
+    )
 
     return {
         **record,
@@ -2012,6 +2134,7 @@ def report_chat(payload: ReportChatPayload, request: Request) -> dict[str, Any]:
     question = str(payload.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="question is required")
+    sanitized_question = redact_pii_text(question)
 
     branch_id = normalize_branch_id(payload.branchId) if payload.branchId is not None else None
     role = str(payload.role or "MANAGER").upper()
@@ -2020,8 +2143,8 @@ def report_chat(payload: ReportChatPayload, request: Request) -> dict[str, Any]:
         role = "ADMIN"
     elif actor["role"] == "MANAGER":
         role = "MANAGER"
-    intent = infer_report_intent(question)
-    sql = map_question_to_sql(question, branch_id)
+    intent = infer_report_intent(sanitized_question)
+    sql = map_question_to_sql(sanitized_question, branch_id)
 
     rows: list[dict[str, Any]] = []
     success = True
@@ -2043,7 +2166,7 @@ def report_chat(payload: ReportChatPayload, request: Request) -> dict[str, Any]:
         branch_id,
         actor_id=payload.userId,
         latency_ms=execution_ms,
-        metadata={"intent": intent, "error": error_message, "role": role},
+        metadata={"intent": intent, "error": error_message, "role": role, "questionPreview": sanitized_question[:120]},
     )
 
     return {

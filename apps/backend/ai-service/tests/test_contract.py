@@ -92,15 +92,27 @@ def test_recommend_ab_summary_contract():
     assert 'uplift' in payload
 
 
+def test_recommend_feedback_contract():
+    response = client.post(
+        '/api/ai/recommend/feedback',
+        json={'branchId': 'branch-e2e', 'action': 'click', 'event': 'add_to_cart', 'experimentGroup': 'control'},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get('event') == 'add_to_cart'
+    assert payload.get('experimentGroup') in ['control', 'treatment']
+
+
 def test_sentiment_analyze_contract():
     response = client.post(
         '/api/ai/sentiment/analyze',
-        json={'branchId': 'branch-e2e', 'text': 'Phuc vu rat te va cho lau'},
+        json={'branchId': 'branch-e2e', 'text': 'Phuc vu rat te va cho lau. Goi 0912345678'},
     )
     assert response.status_code == 200
     payload = response.json()
     assert payload['label'] in ['POSITIVE', 'NEUTRAL', 'NEGATIVE']
     assert 'scores' in payload
+    assert 'sanitized' in payload
 
 
 def test_chat_contract():
