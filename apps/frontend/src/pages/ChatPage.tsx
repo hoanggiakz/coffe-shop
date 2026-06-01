@@ -371,13 +371,13 @@ export default function ChatPage() {
     if (!messageText.trim() || !activeChat) return
     setSending(true)
     try {
+      const content = messageText.trim()
       const socket = getSocket()
-      socket.emit('send-message', {
-        sessionId: activeChat.id,
-        content: messageText.trim(),
+      await api.post(`/chats/${activeChat.id}/messages`, {
         senderType: 'STAFF',
         senderName: user?.name || 'Staff',
         senderId: user?.id,
+        content,
       })
       setMessageText('')
       socket.emit('typing', {

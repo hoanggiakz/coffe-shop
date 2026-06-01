@@ -17,7 +17,7 @@ export class StaffChatGateway implements OnGatewayInit {
     server.use((socket, next) => {
       const user = this.auth.verifyStaffFromSocket(socket);
       if (!user) return next(new Error('Unauthorized'));
-      if (!['ADMIN', 'MANAGER', 'WAITER'].includes(user.role)) return next(new Error('Forbidden'));
+      if (!['ADMIN', 'MANAGER', 'WAITER', 'STAFF'].includes(user.role)) return next(new Error('Forbidden'));
       socket.data.user = user;
       next();
     });
