@@ -24,6 +24,7 @@ REQUEST_LATENCY = Histogram("ai_request_latency_seconds", "AI request latency", 
 RESPONSE_SOURCE_COUNT = Counter("ai_response_source_total", "AI response source counter", ["endpoint", "source"])
 PREDICTION_ERROR_GAUGE = Gauge("ai_prediction_error_mape", "Latest prediction error (MAPE)")
 DATA_FRESHNESS_MINUTES = Gauge("ai_data_freshness_minutes", "Latest data freshness in minutes")
+SENTIMENT_SOURCE_COUNT = Counter("ai_sentiment_source_total", "Sentiment source usage", ["source", "status"])
 
 REPORT_DATABASE_URL = os.getenv("REPORT_DATABASE_URL", "").strip()
 CHATBOT_SQL_TIMEOUT_MS = int(os.getenv("AI_CHATBOT_SQL_TIMEOUT_MS", "2000"))
@@ -40,6 +41,9 @@ AI_ALLOW_LEGACY_NO_AUTH = os.getenv("AI_ALLOW_LEGACY_NO_AUTH", "true").strip().l
 AI_RATE_LIMIT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_PER_MINUTE", "120"))
 AI_RATE_LIMIT_REPORT_CHAT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_REPORT_CHAT_PER_MINUTE", "30"))
 AI_RATE_LIMIT_CHAT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_CHAT_PER_MINUTE", "60"))
+AI_SENTIMENT_GEMINI_API_KEY = os.getenv("AI_SENTIMENT_GEMINI_API_KEY", "").strip()
+AI_SENTIMENT_GEMINI_MODEL = os.getenv("AI_SENTIMENT_GEMINI_MODEL", "gemini-1.5-flash").strip() or "gemini-1.5-flash"
+AI_SENTIMENT_GEMINI_TIMEOUT_MS = int(os.getenv("AI_SENTIMENT_GEMINI_TIMEOUT_MS", "2500"))
 
 DEFAULT_MENU_KB = [
     {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
@@ -175,6 +179,13 @@ FALLBACK_TREND_MAX_POINTS = int(os.getenv("AI_FALLBACK_TREND_MAX_POINTS", "240")
 RECOMMEND_AB_EVENTS: list[dict[str, Any]] = []
 RECOMMEND_AB_EVENT_LIMIT = int(os.getenv("AI_RECOMMEND_AB_EVENT_LIMIT", "2000"))
 AI_RECOMMEND_AB_TREATMENT_PERCENT = int(os.getenv("AI_RECOMMEND_AB_TREATMENT_PERCENT", "50"))
+SENTIMENT_TELEMETRY: dict[str, Any] = {
+    "totals": {"requests": 0, "geminiSuccess": 0, "geminiError": 0, "fallbackLexicon": 0},
+    "confidenceSum": {"gemini": 0.0, "fallback": 0.0},
+    "confidenceCount": {"gemini": 0, "fallback": 0},
+    "lastError": None,
+    "lastUpdatedAt": None,
+}
 EMAIL_REDACT_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 PHONE_REDACT_RE = re.compile(r"(?<!\d)(?:\+?84|0)\d{8,10}(?!\d)")
 
@@ -812,6 +823,105 @@ def classify_sentiment(text: str) -> tuple[str, float, dict[str, float], dict[st
     return label, round(confidence, 2), normalized, explanation
 
 
+def classify_sentiment_with_gemini(text: str) -> tuple[str, float, dict[str, float], dict[str, Any]]:
+    if not AI_SENTIMENT_GEMINI_API_KEY:
+        raise RuntimeError("gemini_api_key_missing")
+    endpoint = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{AI_SENTIMENT_GEMINI_MODEL}:generateContent?key={AI_SENTIMENT_GEMINI_API_KEY}"
+    )
+    prompt = (
+        "Analyze Vietnamese coffee-shop feedback sentiment.\n"
+        "Return JSON only: {\"label\":\"POSITIVE|NEUTRAL|NEGATIVE\",\"confidence\":0..1,"
+        "\"scores\":{\"positive\":0..1,\"neutral\":0..1,\"negative\":0..1}}.\n"
+        f"Text: {text}"
+    )
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"},
+    }
+    req = urlrequest.Request(
+        endpoint,
+        data=json_dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    timeout_sec = max(0.5, AI_SENTIMENT_GEMINI_TIMEOUT_MS / 1000.0)
+    with urlrequest.urlopen(req, timeout=timeout_sec) as response:  # nosec B310
+        body = response.read().decode("utf-8", errors="ignore")
+    import json
+
+    parsed = json.loads(body)
+    text_out = parsed.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
+    model_json = json.loads(str(text_out or "{}"))
+    label = str(model_json.get("label") or "NEUTRAL").upper().strip()
+    if label not in {"POSITIVE", "NEUTRAL", "NEGATIVE"}:
+        label = "NEUTRAL"
+    confidence = max(0.0, min(float(model_json.get("confidence") or 0.5), 1.0))
+    scores_raw = model_json.get("scores") or {}
+    positive = max(0.0, float(scores_raw.get("positive") or 0.0))
+    neutral = max(0.0, float(scores_raw.get("neutral") or 0.0))
+    negative = max(0.0, float(scores_raw.get("negative") or 0.0))
+    total = positive + neutral + negative
+    if total <= 0:
+        normalized = {"POSITIVE": 0.0, "NEUTRAL": 1.0, "NEGATIVE": 0.0}
+    else:
+        normalized = {
+            "POSITIVE": round(positive / total, 2),
+            "NEUTRAL": round(neutral / total, 2),
+            "NEGATIVE": round(negative / total, 2),
+        }
+    explanation = {"provider": "gemini", "model": AI_SENTIMENT_GEMINI_MODEL}
+    return label, round(confidence, 2), normalized, explanation
+
+
+def record_sentiment_telemetry(source: str, success: bool, confidence: float | None = None, error: str | None = None) -> None:
+    source_key = "gemini" if str(source).lower() == "gemini" else "fallback"
+    SENTIMENT_TELEMETRY["totals"]["requests"] = int(SENTIMENT_TELEMETRY["totals"].get("requests", 0)) + 1
+    if source_key == "gemini" and success:
+        SENTIMENT_TELEMETRY["totals"]["geminiSuccess"] = int(SENTIMENT_TELEMETRY["totals"].get("geminiSuccess", 0)) + 1
+    elif source_key == "gemini":
+        SENTIMENT_TELEMETRY["totals"]["geminiError"] = int(SENTIMENT_TELEMETRY["totals"].get("geminiError", 0)) + 1
+    else:
+        SENTIMENT_TELEMETRY["totals"]["fallbackLexicon"] = int(SENTIMENT_TELEMETRY["totals"].get("fallbackLexicon", 0)) + 1
+    if isinstance(confidence, float):
+        SENTIMENT_TELEMETRY["confidenceSum"][source_key] = float(SENTIMENT_TELEMETRY["confidenceSum"].get(source_key, 0.0)) + confidence
+        SENTIMENT_TELEMETRY["confidenceCount"][source_key] = int(SENTIMENT_TELEMETRY["confidenceCount"].get(source_key, 0)) + 1
+    if error:
+        SENTIMENT_TELEMETRY["lastError"] = str(error)[:240]
+    SENTIMENT_TELEMETRY["lastUpdatedAt"] = datetime.now(timezone.utc).isoformat()
+    SENTIMENT_SOURCE_COUNT.labels(source=source_key, status="success" if success else "error").inc()
+
+
+def sentiment_model_quality_snapshot() -> dict[str, Any]:
+    totals = SENTIMENT_TELEMETRY.get("totals", {})
+    requests = max(1, int(totals.get("requests", 0)))
+    gemini_success = int(totals.get("geminiSuccess", 0))
+    gemini_error = int(totals.get("geminiError", 0))
+    fallback = int(totals.get("fallbackLexicon", 0))
+    confidence_sum = SENTIMENT_TELEMETRY.get("confidenceSum", {})
+    confidence_count = SENTIMENT_TELEMETRY.get("confidenceCount", {})
+    gemini_avg_conf = float(confidence_sum.get("gemini", 0.0)) / max(1, int(confidence_count.get("gemini", 0)))
+    fallback_avg_conf = float(confidence_sum.get("fallback", 0.0)) / max(1, int(confidence_count.get("fallback", 0)))
+    return {
+        "provider": "gemini+fallback-lexicon",
+        "geminiEnabled": bool(AI_SENTIMENT_GEMINI_API_KEY),
+        "geminiModel": AI_SENTIMENT_GEMINI_MODEL,
+        "totals": totals,
+        "ratios": {
+            "geminiSuccessRatio": round(gemini_success / requests, 4),
+            "geminiErrorRatio": round(gemini_error / requests, 4),
+            "fallbackRatio": round(fallback / requests, 4),
+        },
+        "avgConfidence": {
+            "gemini": round(gemini_avg_conf, 4),
+            "fallback": round(fallback_avg_conf, 4),
+        },
+        "lastError": SENTIMENT_TELEMETRY.get("lastError"),
+        "lastUpdatedAt": SENTIMENT_TELEMETRY.get("lastUpdatedAt"),
+    }
+
+
 def decimal_from_any(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -1337,11 +1447,22 @@ def ai_ops_quality_summary(request: Request, branchId: str | None = None) -> dic
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "branchId": branchId,
         "quality": quality,
+        "modelQuality": {"sentiment": sentiment_model_quality_snapshot()},
         "fallbackRatios": fallback_by_endpoint,
         "attention": {
             "highFallbackEndpoints": critical_ratio,
             "count": len(critical_ratio),
         },
+    }
+
+
+@app.get("/api/ai/ops/model-quality")
+def ai_ops_model_quality(request: Request, branchId: str | None = None) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "branchId": branchId,
+        "sentiment": sentiment_model_quality_snapshot(),
     }
 
 
@@ -1997,7 +2118,17 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
     authorize_request(request, payload.branchId, {"ADMIN", "MANAGER"})
     payload.branchId = normalize_branch_id(payload.branchId)
     sanitized_text = redact_pii_text(payload.text)
-    label, confidence, scores, explanation = classify_sentiment(sanitized_text)
+    sentiment_source = "fallback"
+    try:
+        label, confidence, scores, explanation = classify_sentiment_with_gemini(sanitized_text)
+        sentiment_source = "gemini"
+        record_sentiment_telemetry("gemini", True, confidence=confidence)
+    except Exception as gemini_error:  # pylint: disable=broad-except
+        label, confidence, scores, explanation = classify_sentiment(sanitized_text)
+        explanation["geminiError"] = str(gemini_error)[:160]
+        sentiment_source = "fallback"
+        record_sentiment_telemetry("gemini", False, error=str(gemini_error))
+        record_sentiment_telemetry("fallback", True, confidence=confidence)
     persisted = False
     if REPORT_DATABASE_URL:
         try:
@@ -2015,7 +2146,7 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
                             sanitized_text,
                             label,
                             confidence,
-                            "vi_weighted_lexicon_v2",
+                            "gemini_flash+fallback_lexicon_v2",
                             AI_ACTIVE_MODEL_VERSION,
                         ),
                     )
@@ -2035,7 +2166,8 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
         "confidence": confidence,
         "scores": scores,
         "persisted": persisted,
-        "reason": "vi_weighted_lexicon_v2",
+        "reason": "gemini_flash+fallback_lexicon_v2",
+        "source": sentiment_source,
         "explanation": explanation,
         "sanitized": sanitized_text != str(payload.text or ""),
     }

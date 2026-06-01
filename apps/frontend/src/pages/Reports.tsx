@@ -146,6 +146,13 @@ interface QualitySummaryResponse {
     source: string
     checks: QualityCheckItem[]
   }
+  modelQuality?: {
+    sentiment?: {
+      geminiEnabled?: boolean
+      ratios?: { geminiSuccessRatio: number; geminiErrorRatio: number; fallbackRatio: number }
+      avgConfidence?: { gemini: number; fallback: number }
+    }
+  }
   fallbackRatios: Record<
     string,
     {
@@ -772,6 +779,16 @@ export default function Reports() {
             >
               Data quality: <span className="font-semibold">{qualitySummary.quality.status.toUpperCase()}</span>
             </div>
+            {qualitySummary.modelQuality?.sentiment && (
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3 text-xs text-emerald-900">
+                <p className="font-semibold">Sentiment model quality</p>
+                <p>
+                  Gemini: {qualitySummary.modelQuality.sentiment.geminiEnabled ? 'ON' : 'OFF'} · success{' '}
+                  {Math.round(Number(qualitySummary.modelQuality.sentiment.ratios?.geminiSuccessRatio || 0) * 100)}% · fallback{' '}
+                  {Math.round(Number(qualitySummary.modelQuality.sentiment.ratios?.fallbackRatio || 0) * 100)}%
+                </p>
+              </div>
+            )}
 
             {qualitySummary.attention.count > 0 && (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">

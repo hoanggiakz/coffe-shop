@@ -30,6 +30,7 @@ def test_quality_summary_contract():
     payload = response.json()
     assert 'quality' in payload
     assert 'fallbackRatios' in payload
+    assert 'modelQuality' in payload
 
 
 def test_fallback_trend_contract():
@@ -113,6 +114,15 @@ def test_sentiment_analyze_contract():
     assert payload['label'] in ['POSITIVE', 'NEUTRAL', 'NEGATIVE']
     assert 'scores' in payload
     assert 'sanitized' in payload
+    assert payload.get('source') in ['gemini', 'fallback']
+
+
+def test_model_quality_contract():
+    response = client.get('/api/ai/ops/model-quality')
+    assert response.status_code == 200
+    payload = response.json()
+    assert 'sentiment' in payload
+    assert 'ratios' in payload.get('sentiment', {})
 
 
 def test_chat_contract():
