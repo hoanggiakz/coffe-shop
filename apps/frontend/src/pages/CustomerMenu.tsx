@@ -249,6 +249,15 @@ interface SpecMenuResponse {
   categories?: SpecMenuCategory[]
 }
 
+function extractBranchNameFromPayload(payload: any): string {
+  if (!payload || typeof payload !== 'object') return ''
+  const direct = String(payload?.branchName || payload?.branch_name || '').trim()
+  if (direct) return normalizeVietnameseText(direct)
+  const nested = String(payload?.branch?.name || '').trim()
+  if (nested) return normalizeVietnameseText(nested)
+  return ''
+}
+
 interface PublicInvoiceLinkResponse {
   invoiceId: string
   invoiceNumber: string
@@ -730,6 +739,7 @@ export default function CustomerMenu() {
 
   const [tableId, setTableId] = useState('')
   const [tableName, setTableName] = useState('Chưa xác định')
+  const [branchName, setBranchName] = useState('')
   const [resolvingTable, setResolvingTable] = useState(true)
 
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
@@ -869,6 +879,7 @@ export default function CustomerMenu() {
           if (!ignore) {
             setTableId(String(data.id))
             setTableName(`Bàn ${data.number ?? qrTableNumber ?? qrTableId}`)
+            setBranchName(normalizeVietnameseText(data?.branchName || data?.branch?.name || ''))
           }
         } catch (error: any) {
           if (!ignore) {
@@ -902,6 +913,7 @@ export default function CustomerMenu() {
         if (!ignore) {
           setTableId(matched.id)
           setTableName(`Bàn ${matched.number}`)
+          setBranchName(normalizeVietnameseText(matched?.branchName || matched?.branch?.name || ''))
         }
       } catch (error: any) {
         toast.error(error.response?.data?.message || 'Không xác định được bàn')
@@ -998,6 +1010,10 @@ export default function CustomerMenu() {
               },
             })
         const { data } = await request
+        const resolvedBranchName = extractBranchNameFromPayload(data)
+        if (resolvedBranchName) {
+          setBranchName(resolvedBranchName)
+        }
         const normalized = normalizeMenuPayload(data)
         setMenuItems(normalized)
       } catch (error: any) {
@@ -2684,7 +2700,9 @@ export default function CustomerMenu() {
           <div className="flex items-center justify-between gap-2">
             <div>
               <p className="text-base font-bold text-[#3d1f00]">{resolvingTable ? 'Đang xác định bàn...' : `🪑 ${tableName}`}</p>
-              <p className="text-xs text-slate-500">{String(qrBranchId || '').trim() ? `Chi nhánh ${qrBranchId}` : 'Chi nhánh đang phục vụ'}</p>
+              <p className="text-xs text-slate-500">
+                {branchName || 'Chi nhánh đang phục vụ'}
+              </p>
             </div>
             <button
               type="button"
