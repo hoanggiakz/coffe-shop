@@ -318,6 +318,7 @@ services:
       INVENTORY_DATABASE_URL: ${INVENTORY_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/inventorydb?schema=public}
       PAYMENT_DATABASE_URL: ${PAYMENT_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/paymentdb?schema=public}
       USER_DATABASE_URL: ${REPORT_USER_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/userdb?schema=public}
+      KAFKA_REQUIRED: ${REPORT_KAFKA_REQUIRED:-false}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-}
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
     depends_on:
