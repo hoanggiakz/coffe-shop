@@ -278,12 +278,33 @@ interface MenuRecommendation extends MenuItem {
 }
 
 function fallbackMenuImage(name?: string | null, size = '400x280'): string {
-  return `https://placehold.co/${size}?text=${encodeURIComponent(String(name || 'Mon'))}`
+  return `https://placehold.co/${size}?text=${encodeURIComponent(String(name || 'Món'))}`
 }
 
 function resolvePublicMenuImage(image?: string | null, name?: string | null): string {
   const raw = String(image || '').trim()
-  if (!raw) return fallbackMenuImage(name)
+  const normalizedName = String(name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  const localImageMap: Record<string, string> = {
+    'bac-xiu': '/menu-images/bac-xiu.jpg',
+    'ca-phe-den': '/menu-images/ca-phe-den.jpg',
+    'ca-phe-sua': '/menu-images/ca-phe-sua.jpg',
+    cappuccino: '/menu-images/cappuccino.jpg',
+    croissant: '/menu-images/croissant.jpg',
+    espresso: '/menu-images/espresso.jpg',
+    latte: '/menu-images/latte.jpg',
+    'matcha-latte': '/menu-images/matcha-latte.jpg',
+    'sinh-to-bo': '/menu-images/sinh-to-bo.jpg',
+    'tra-dao': '/menu-images/tra-dao.jpg',
+  }
+  const localImage = localImageMap[normalizedName]
+
+  if (!raw) return localImage || fallbackMenuImage(name)
+  if (raw.startsWith('/menu-images/')) return raw
   const normalized = raw.toLowerCase()
   const isProtectedIngredientPath =
     /(^|\/)api\/v1\/ingredients(\/|$)/.test(normalized) ||
@@ -293,7 +314,7 @@ function resolvePublicMenuImage(image?: string | null, name?: string | null): st
   if (
     isProtectedIngredientPath
   ) {
-    return fallbackMenuImage(name)
+    return localImage || fallbackMenuImage(name)
   }
   return raw
 }
@@ -605,8 +626,33 @@ function normalizeVietnameseText(input: unknown): string {
     'ca phe sua da': 'Cà phê sữa đá',
     'ca phe sua nhieu sua': 'Cà phê sữa nhiều sữa',
     'ca phe den truyen thong': 'Cà phê đen truyền thống',
+    'espresso dam dac': 'Espresso đậm đà',
+    'cappuccino kem sua': 'Cappuccino kem sữa',
+    'cafe latte min mang': 'Cà phê latte mịn màng',
+    'tra dao cam sa': 'Trà đào cam sả',
+    'tra xanh nhat ban': 'Trà xanh Nhật Bản',
+    'sinh to bo beo ngay': 'Sinh tố bơ béo ngậy',
+    'croissant bo phap': 'Croissant bơ Pháp',
   }
   return map[lower] || raw
+}
+
+function normalizeCategoryLabel(input: unknown): string {
+  const raw = String(input || '').trim()
+  if (!raw) return 'Khác'
+  const key = raw.toLowerCase()
+  const map: Record<string, string> = {
+    coffee: '☕ Cà phê',
+    tea: '🍵 Trà',
+    smoothie: '🥤 Sinh tố',
+    food: '🥐 Bánh & Ăn nhẹ',
+    'ca phe': '☕ Cà phê',
+    'trà': '🍵 Trà',
+    tra: '🍵 Trà',
+    'sinh to': '🥤 Sinh tố',
+    'banh va mon an': '🥐 Bánh & Ăn nhẹ',
+  }
+  return map[key] || raw
 }
 
 function inferSelectedOptions(menuItem: MenuItem | undefined, selections: CartSelections, note: string) {
@@ -888,7 +934,7 @@ export default function CustomerMenu() {
         image: item.image || item.image_url || null,
         price: normalizeVndAmount(item.price),
         available: item.available ?? item.is_available,
-        category: item.category || item.category_name || 'Khac',
+        category: normalizeCategoryLabel(item.category || item.category_name || 'Khac'),
         badges: Array.isArray(item.badges) ? item.badges.map((entry: any) => String(entry || '').trim()).filter(Boolean) : [],
         quickNotes: Array.isArray(item.quickNotes)
           ? item.quickNotes.map((entry: any) => String(entry || '').trim()).filter(Boolean)
@@ -910,7 +956,7 @@ export default function CustomerMenu() {
           image: item.image || item.imageUrl || item.image_url || null,
           price: normalizeVndAmount(item.price),
           available: item.available ?? item.isAvailable ?? item.is_available,
-          category: category.name || 'Khac',
+          category: normalizeCategoryLabel(category.name || 'Khac'),
           badges: Array.isArray(item.badges) ? item.badges.map((entry: any) => String(entry || '').trim()).filter(Boolean) : [],
           quickNotes: Array.isArray(item?.options?.quickNotes)
             ? item.options.quickNotes.map((entry: any) => String(entry || '').trim()).filter(Boolean)
@@ -1261,7 +1307,7 @@ export default function CustomerMenu() {
   const requestCustomerOtp = async () => {
     const phone = authPhone.trim()
     if (!phone) {
-      toast.error('Nhap so dien thoai truoc khi lay OTP')
+      toast.error('Nhập số điện thoại trước khi lấy OTP')
       return
     }
     setRequestingOtp(true)
@@ -1269,7 +1315,7 @@ export default function CustomerMenu() {
       await api.post('/auth/otp/request', { phone, purpose: customerAuthTab })
       toast.success('OTP da duoc gui (hieu luc 5 phut)')
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Khong gui duoc OTP')
+      toast.error(error.response?.data?.message || 'Không gửi được OTP')
     } finally {
       setRequestingOtp(false)
     }
@@ -1284,7 +1330,7 @@ export default function CustomerMenu() {
         const passwordPattern = /^(?=.*[A-Z])(?=.*\d).{8,}$/
         if (customerAuthTab === 'REGISTER') {
           if (!authName.trim()) {
-            toast.error('Vui long nhap ho ten')
+            toast.error('Vui lòng nhập họ tên')
             return
           }
           if (!passwordPattern.test(authPassword)) {
@@ -2240,7 +2286,7 @@ export default function CustomerMenu() {
         setCurrentPayment(null)
         setPublicInvoiceUrl('')
       } else {
-        toast.error(error.response?.data?.message || 'Khong tai duoc trang thai thanh toan')
+      toast.error(error.response?.data?.message || 'Không tải được trạng thái thanh toán')
       }
     } finally {
       setLoadingPaymentStatus(false)
@@ -2254,7 +2300,7 @@ export default function CustomerMenu() {
       return
     }
     if (cartTotal <= 0) {
-      toast.error('Vui long co it nhat 1 mon truoc khi ap ma')
+      toast.error('Vui lòng có ít nhất 1 món trước khi áp mã')
       return
     }
 
@@ -2287,7 +2333,7 @@ export default function CustomerMenu() {
         branchId: qrBranchId || undefined,
       })
       if (!data?.valid) {
-        throw new Error(String(data?.message || 'Ma khuyen mai khong hop le'))
+        throw new Error(String(data?.message || 'Mã khuyến mãi không hợp lệ'))
       }
       setPromoPreview({
         code: String(data?.code || code).toUpperCase(),
@@ -2310,7 +2356,7 @@ export default function CustomerMenu() {
       toast.success('Đã áp dụng mã khuyến mãi')
     } catch (error: any) {
       setPromoPreview(null)
-      toast.error(error.response?.data?.message || 'Ma khuyen mai khong hop le')
+      toast.error(error.response?.data?.message || 'Mã khuyến mãi không hợp lệ')
     } finally {
       setApplyingPromo(false)
     }
@@ -2333,10 +2379,10 @@ export default function CustomerMenu() {
         customerToken ? { headers: { Authorization: `Bearer ${customerToken}` } } : undefined,
       )
       setCurrentPayment(data)
-      toast.success('Da gui yeu cau thanh toan tien mat cho nhan vien')
+      toast.success('Đã gửi yêu cầu thanh toán tiền mặt cho nhân viên')
       await fetchPaymentStatus(currentOrder.id)
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Khong tao duoc yeu cau tien mat')
+      toast.error(error.response?.data?.message || 'Không tạo được yêu cầu tiền mặt')
     } finally {
       setRequestingCashPayment(false)
     }
@@ -2483,7 +2529,7 @@ export default function CustomerMenu() {
       return
     }
     if (chatNeedProfile || !chatCustomerName.trim()) {
-      toast.error('Vui long nhap ten de bat dau chat')
+      toast.error('Vui lòng nhập tên để bắt đầu chat')
       setChatNeedProfile(true)
       return
     }
@@ -2531,7 +2577,7 @@ export default function CustomerMenu() {
 
   const toggleChatWidget = () => {
     if (!tableId) {
-      toast.error('Chua xac dinh duoc ban')
+      toast.error('Chưa xác định được bàn')
       return
     }
     setChatOpen((prev) => {
@@ -2548,7 +2594,7 @@ export default function CustomerMenu() {
     const customerName = chatCustomerName.trim()
     const customerPhone = chatCustomerPhone.trim()
     if (!customerName) {
-      toast.error('Vui long nhap ten truoc khi chat')
+      toast.error('Vui lòng nhập tên trước khi chat')
       return
     }
     if (chatProfileStorageKey) {
@@ -2831,7 +2877,7 @@ export default function CustomerMenu() {
           <div className="space-y-4">
           <div className={panelClass}>
             <div className="flex items-center justify-between">
-              <p className="font-semibold text-slate-900">Tai khoan thanh vien</p>
+            <p className="font-semibold text-slate-900">Tài khoản thành viên</p>
               {!customerSession ? (
                 <button
                   type="button"
@@ -2846,7 +2892,7 @@ export default function CustomerMenu() {
                   onClick={clearCustomerSession}
                   className="rounded-xl border border-red-200 px-3 py-1 text-xs text-red-600"
                 >
-                  Dang xuat
+                  Đăng xuất
                 </button>
               )}
             </div>
@@ -2895,10 +2941,10 @@ export default function CustomerMenu() {
                     </Link>
                   </div>
                 </div>
-                {loadingCustomerData && <p className="text-xs text-gray-500">Dang tai du lieu thanh vien...</p>}
+                {loadingCustomerData && <p className="text-xs text-gray-500">Đang tải dữ liệu thành viên...</p>}
                 {!loadingCustomerData && customerOffers.length > 0 && (
                   <div className="rounded border border-gray-100 p-2 text-xs">
-                    <p className="font-semibold text-gray-700">Uu dai cua ban</p>
+                    <p className="font-semibold text-gray-700">Ưu đãi của bạn</p>
                     {customerOffers.slice(0, 3).map((offer, idx) => (
                       <p key={`${offer}-${idx}`} className="mt-1 text-gray-600">
                         - {offer}
@@ -2909,13 +2955,13 @@ export default function CustomerMenu() {
                 {!loadingCustomerData && customerOrderHistory.length > 0 && (
                   <div className="rounded border border-gray-100 p-2 text-xs">
                     <div className="flex items-center justify-between">
-                      <p className="font-semibold text-gray-700">Lich su don gan day</p>
+                      <p className="font-semibold text-gray-700">Lịch sử đơn gần đây</p>
                       <button
                         type="button"
                         onClick={() => setCustomerHistoryOpen(true)}
                         className="rounded border border-sky-200 px-2 py-1 text-[11px] font-medium text-sky-700"
                       >
-                        Xem chi tiet
+                        Xem chi tiết
                       </button>
                     </div>
                     <div className="mt-1 space-y-1">
@@ -3140,7 +3186,7 @@ export default function CustomerMenu() {
                     }
                   }}
                   className={`${fieldClass} flex-1`}
-                  placeholder="Nhap ma giam gia"
+                  placeholder="Nhập mã giảm giá"
                 />
                 <button
                   type="button"
@@ -3498,7 +3544,7 @@ export default function CustomerMenu() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-lg font-bold text-slate-900">{customizeMenuItem.name}</p>
-                <p className="mt-1 text-xs text-slate-500">{customizeMenuItem.description || 'Tuỳ chỉnh món theo nhu cầu của bạn'}</p>
+                <p className="mt-1 text-xs text-slate-500">{customizeMenuItem.description || 'Tùy chỉnh món theo nhu cầu của bạn'}</p>
                 <p className="mt-1 text-sm font-semibold text-sky-700">Giá gốc: {formatVnd(customizeMenuItem.price)}</p>
               </div>
               <button
@@ -3563,7 +3609,7 @@ export default function CustomerMenu() {
                       value={String(customizeSelections[group.id] || '')}
                       onChange={(e) => setCustomizeSelections((prev) => ({ ...prev, [group.id]: e.target.value }))}
                       className={fieldClass}
-                      placeholder={group.placeholder || 'Nhap yeu cau'}
+                      placeholder={group.placeholder || 'Nhập yêu cầu'}
                     />
                   )}
                 </div>
@@ -3591,7 +3637,7 @@ export default function CustomerMenu() {
                   value={customizeNote}
                   onChange={(e) => setCustomizeNote(e.target.value)}
                   className={`${fieldClass} min-h-20`}
-                  placeholder="Vi du: It da, khong duong"
+                  placeholder="Ví dụ: Ít đá, không đường"
                 />
               </div>
             </div>
@@ -3632,13 +3678,13 @@ export default function CustomerMenu() {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:p-4">
           <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5">
             <div className="flex items-center justify-between">
-              <p className="text-lg font-bold text-slate-900">Lich su don hang chi tiet</p>
+              <p className="text-lg font-bold text-slate-900">Lịch sử đơn hàng chi tiết</p>
               <button
                 type="button"
                 onClick={() => setCustomerHistoryOpen(false)}
                 className="rounded-xl border border-sky-200 px-2 py-1 text-xs"
               >
-                Dong
+                Đóng
               </button>
             </div>
 
@@ -3655,13 +3701,13 @@ export default function CustomerMenu() {
                 }}
                 className="rounded border border-sky-200 px-2 py-1 font-medium text-sky-700"
               >
-                Lam moi
+                Làm mới
               </button>
             </div>
 
-            {loadingCustomerData && <p className="mt-3 text-sm text-gray-500">Dang tai lich su don...</p>}
+            {loadingCustomerData && <p className="mt-3 text-sm text-gray-500">Đang tải lịch sử đơn...</p>}
             {!loadingCustomerData && customerOrderHistory.length === 0 && (
-              <p className="mt-3 text-sm text-gray-500">Chua co don hang nao.</p>
+              <p className="mt-3 text-sm text-gray-500">Chưa có đơn hàng nào.</p>
             )}
 
             {!loadingCustomerData && customerOrderHistory.length > 0 && (
@@ -3684,13 +3730,13 @@ export default function CustomerMenu() {
                       </div>
 
                       <div className="mt-2 flex items-center justify-between text-xs">
-                        <p className="text-gray-500">{historyOrder.orderItems.length} mon</p>
+                        <p className="text-gray-500">{historyOrder.orderItems.length} món</p>
                         <button
                           type="button"
                           onClick={() => toggleHistoryOrderDetails(historyOrder.id)}
                           className="rounded border border-sky-200 px-2 py-1 font-medium text-sky-700"
                         >
-                          {isExpanded ? 'Thu gon' : 'Xem chi tiet mon'}
+                          {isExpanded ? 'Thu gọn' : 'Xem chi tiết món'}
                         </button>
                       </div>
 
@@ -3708,13 +3754,13 @@ export default function CustomerMenu() {
                                 <div className="flex items-center justify-between gap-2">
                                   <p className="font-medium text-slate-800">
                                     {item.quantity}x{' '}
-                                    {item.menuItemName || menuMap.get(item.menuItemId)?.name || 'Mon khong xac dinh'}
+                                    {item.menuItemName || menuMap.get(item.menuItemId)?.name || 'Món không xác định'}
                                   </p>
                                   <p className="font-semibold text-slate-700">{trangThaiMonTrongDon(item.status)}</p>
                                 </div>
                                 {!!item.note && <p className="mt-1 text-gray-600">Ghi chu: {item.note}</p>}
                                 {optionValues.length > 0 && (
-                                  <p className="mt-1 text-gray-600">Tuy chon: {optionValues.join(', ')}</p>
+                                  <p className="mt-1 text-gray-600">Tùy chọn: {optionValues.join(', ')}</p>
                                 )}
                               </div>
                             )
@@ -3740,7 +3786,7 @@ export default function CustomerMenu() {
                 onClick={() => setCustomerAuthOpen(false)}
                 className="rounded-xl border border-sky-200 px-2 py-1 text-xs"
               >
-                Dong
+                Đóng
               </button>
             </div>
 
@@ -3911,13 +3957,13 @@ export default function CustomerMenu() {
                     value={chatCustomerName}
                     onChange={(e) => setChatCustomerName(e.target.value)}
                     className={fieldClass}
-                    placeholder="Nhap ten cua ban"
+                    placeholder="Nhập tên của bạn"
                   />
                   <input
                     value={chatCustomerPhone}
                     onChange={(e) => setChatCustomerPhone(e.target.value)}
                     className={fieldClass}
-                    placeholder="Nhap so dien thoai (tuy chon)"
+                    placeholder="Nhập số điện thoại (tùy chọn)"
                   />
                   <button type="submit" className="w-full rounded-xl bg-sky-700 px-3 py-2 text-sm text-white">
                     Bat dau chat
