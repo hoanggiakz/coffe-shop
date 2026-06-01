@@ -119,6 +119,10 @@ export class ProxyController {
   }
 
   private async enforceActiveStaffAccount(req: Request) {
+    if (this.isPublicGatewayRequest(req.path, req.method.toUpperCase())) {
+      return;
+    }
+
     const authHeader = String(req.headers.authorization || '').trim();
     if (!authHeader.startsWith('Bearer ')) {
       return;
@@ -467,6 +471,52 @@ export class ProxyController {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
       return;
     }
+  }
+
+  private isPublicGatewayRequest(path: string, method: string) {
+    const normalizedMethod = method.toUpperCase();
+    const isPaymentWebhookPath =
+      /^\/api\/v1\/payments\/webhook(?:\/|$)/.test(path) ||
+      /^\/api\/payment\/webhook(?:\/|$)/.test(path);
+    const isBranchMenuPath = /^\/api\/branches\/[^/]+\/menu(\/|$)/.test(path);
+    const isBranchCartValidatePath = /^\/api\/branches\/[^/]+\/cart\/validate(\/|$)/.test(path);
+    const isPublicInvoicePath = /^\/api\/public\/invoices\/[^/]+(\/|$)/.test(path);
+    const isPublicOrderInvoiceLinkPath = /^\/api\/public\/orders\/[^/]+\/invoice-link(\/|$)/.test(path);
+    const isPublicTableRead =
+      normalizedMethod === 'GET' &&
+      path.startsWith('/api/tables') &&
+      (
+        path === '/api/tables' ||
+        /^\/api\/tables\/[^/]+$/.test(path) ||
+        /^\/api\/tables\/[^/]+\/qr$/.test(path)
+      );
+    const isPublicCallStaff =
+      normalizedMethod === 'POST' &&
+      (
+        /^\/api\/tables\/[^/]+\/call-staff$/.test(path) ||
+        /^\/api\/tables\/[^/]+\/call-waiter$/.test(path)
+      );
+
+    return (
+      path === '/api/users/login' ||
+      path.startsWith('/api/users/customer/') ||
+      path === '/api/auth/login' ||
+      path === '/api/auth/register' ||
+      path === '/api/auth/refresh' ||
+      path === '/api/auth/forgot-password' ||
+      path === '/api/auth/reset-password' ||
+      path === '/api/auth/otp/request' ||
+      path === '/api/auth/otp/verify' ||
+      path.startsWith('/api/auth/google/') ||
+      isPublicInvoicePath ||
+      isPublicOrderInvoiceLinkPath ||
+      isPaymentWebhookPath ||
+      (normalizedMethod === 'GET' && isBranchMenuPath) ||
+      (normalizedMethod === 'POST' && isBranchCartValidatePath) ||
+      (normalizedMethod === 'GET' && path === '/api/orders/menu') ||
+      isPublicTableRead ||
+      isPublicCallStaff
+    );
   }
 
   private requireRoles(req: Request, allowedRoles: StaffRole[]) {

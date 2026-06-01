@@ -82,6 +82,31 @@ const hasNonEmptyTableId = (params: any): boolean => {
   return false
 }
 
+const isAuthEndpointRequest = (path: string): boolean => {
+  return (
+    path === '/users/login' ||
+    path === '/api/users/login' ||
+    path.startsWith('/users/customer/') ||
+    path.startsWith('/api/users/customer/') ||
+    path === '/auth/login' ||
+    path === '/api/auth/login' ||
+    path === '/auth/register' ||
+    path === '/api/auth/register' ||
+    path === '/auth/refresh' ||
+    path === '/api/auth/refresh' ||
+    path === '/auth/forgot-password' ||
+    path === '/api/auth/forgot-password' ||
+    path === '/auth/reset-password' ||
+    path === '/api/auth/reset-password' ||
+    path === '/auth/otp/request' ||
+    path === '/api/auth/otp/request' ||
+    path === '/auth/otp/verify' ||
+    path === '/api/auth/otp/verify' ||
+    path.startsWith('/auth/google/') ||
+    path.startsWith('/api/auth/google/')
+  )
+}
+
 api.interceptors.request.use((config) => {
   const method = String(config.method || 'get').toUpperCase()
   const requestPath = normalizeRequestPath(config.url)
@@ -94,7 +119,7 @@ api.interceptors.request.use((config) => {
   const explicitAuthHeader = (config.headers as any)?.Authorization ?? (config.headers as any)?.authorization
   const hasAuthorizationHeader = typeof explicitAuthHeader === 'string' && explicitAuthHeader.trim().length > 0
   const isCustomerMenuRoute = isPublicCustomerRoute()
-  if (token && !hasAuthorizationHeader && !isCustomerMenuRoute) {
+  if (token && !hasAuthorizationHeader && !isCustomerMenuRoute && !isAuthEndpointRequest(requestPath)) {
     config.headers.Authorization = `Bearer ${token}`
   }
   return config
@@ -104,8 +129,9 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      const requestPath = normalizeRequestPath(error.config?.url)
       const { logout } = useAuthStore.getState()
-      if (!isPublicCustomerRoute()) {
+      if (!isPublicCustomerRoute() && !isAuthEndpointRequest(requestPath)) {
         logout()
         if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
           window.location.href = '/login'

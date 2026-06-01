@@ -107,6 +107,26 @@ describe('ProxyController QR menu validation', () => {
     ).not.toThrow();
   });
 
+  it('does not validate stale bearer tokens on public login', async () => {
+    (jwtServiceMock.verify as any).mockImplementation(() => {
+      throw new Error('expired');
+    });
+
+    let thrown: unknown;
+    try {
+      await (controller as any).enforceActiveStaffAccount({
+        method: 'POST',
+        path: '/api/users/login',
+        headers: { authorization: 'Bearer expired-token' },
+        query: {},
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(undefined);
+  });
+
   it('allows barista to read branch KDS queue through gateway', () => {
     (jwtServiceMock.verify as any).mockReturnValue({
       sub: 'barista-1',
