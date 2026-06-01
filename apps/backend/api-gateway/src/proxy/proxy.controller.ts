@@ -13,6 +13,7 @@ export class ProxyController {
   private proxies = new Map<string, RequestHandler>();
   private inventoryCompatProxy: RequestHandler;
   private readonly staffRoles = new Set<StaffRole>(['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF', 'CUSTOMER']);
+  private readonly activeStaffRoles = new Set<StaffRole>(['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
   private readonly jwtSecretKey: Buffer;
 
   constructor(
@@ -71,6 +72,7 @@ export class ProxyController {
   @All('api/*path')
   async handleProxy(@Req() req: Request, @Res() res: Response) {
     this.attachBearerFromQueryForRealtime(req);
+    await this.enforceActiveStaffAccount(req);
     const isBranchOrdersPath = /^\/api\/branches\/[^/]+\/orders(\/|$)/.test(req.path);
     const isBranchCartValidatePath = /^\/api\/branches\/[^/]+\/cart\/validate(\/|$)/.test(req.path);
     const isBranchInvoicesPath = /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(req.path);
@@ -112,6 +114,48 @@ export class ProxyController {
         }
       }
     });
+  }
+
+  private async enforceActiveStaffAccount(req: Request) {
+    const authHeader = String(req.headers.authorization || '').trim();
+    if (!authHeader.startsWith('Bearer ')) {
+      return;
+    }
+
+    const payload = this.parseTokenPayload(req);
+    const roles = this.extractRolesFromPayload(payload);
+    const isStaffToken = roles.some((role) => this.activeStaffRoles.has(role));
+    if (!isStaffToken) {
+      return;
+    }
+
+    const userId = String(payload?.sub || payload?.userId || '').trim();
+    if (!userId) {
+      throw new UnauthorizedException('Invalid token payload');
+    }
+
+    const userServiceUrl = this.configService.get<string>('USER_SERVICE_URL') || 'http://user-service:3000';
+    let response: globalThis.Response;
+    try {
+      response = await fetch(`${userServiceUrl}/api/staff/${encodeURIComponent(userId)}`, {
+        method: 'GET',
+        headers: {
+          Authorization: authHeader,
+        },
+      });
+    } catch (error) {
+      this.logger.error(`Cannot validate staff session: ${(error as Error).message}`);
+      throw new UnauthorizedException('Cannot validate account status');
+    }
+
+    if (response.status === 401 || response.status === 403 || response.status === 404) {
+      throw new UnauthorizedException('Account is disabled or session has been revoked');
+    }
+
+    if (!response.ok) {
+      this.logger.error(`Staff session validation failed with status ${response.status}`);
+      throw new UnauthorizedException('Cannot validate account status');
+    }
   }
 
   private authorizeRequest(req: Request) {
@@ -390,21 +434,25 @@ export class ProxyController {
 
   private parseRolesFromToken(req: Request): StaffRole[] {
     const payload = this.parseTokenPayload(req);
-    const rawRoles = Array.isArray(payload?.roles)
-      ? payload.roles
-      : payload?.role
-        ? [payload.role]
-        : [];
-
-    const normalized = rawRoles
-      .map((role) => String(role).toUpperCase())
-      .filter((role): role is StaffRole => this.staffRoles.has(role as StaffRole));
+    const normalized = this.extractRolesFromPayload(payload);
 
     if (!normalized.length) {
       throw new ForbiddenException('Insufficient permissions');
     }
 
     return normalized;
+  }
+
+  private extractRolesFromPayload(payload: Record<string, any>): StaffRole[] {
+    const rawRoles = Array.isArray(payload?.roles)
+      ? payload.roles
+      : payload?.role
+        ? [payload.role]
+        : [];
+
+    return rawRoles
+      .map((role) => String(role || '').toUpperCase().trim())
+      .filter((role): role is StaffRole => this.staffRoles.has(role as StaffRole));
   }
 
   private isInventoryCompatPath(path: string): boolean {

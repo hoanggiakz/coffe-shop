@@ -190,6 +190,7 @@ public class UserService {
         if (Boolean.FALSE.equals(user.getIsActive())) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Tai khoan da bi vo hieu hoa");
         }
+        restoreStaffSessions(user.getId());
 
         String token = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getBranchId());
         return new AuthResponse(token, UserProfile.from(user));
@@ -1285,6 +1286,8 @@ public class UserService {
             user.setIsActive(req.getIsActive());
             if (Boolean.FALSE.equals(req.getIsActive())) {
                 revokeStaffSessions(user.getId());
+            } else {
+                restoreStaffSessions(user.getId());
             }
         }
         if (req.getHireDate() != null) {
@@ -1328,6 +1331,7 @@ public class UserService {
         assertCanManageTargetStaff(actor, user);
 
         user.setIsActive(false);
+        revokeStaffSessions(user.getId());
 
         user = userRepository.save(user);
         return toStaffResponse(user, true, resolveBranchName(user.getBranchId()));
@@ -2154,6 +2158,17 @@ public class UserService {
                     "1",
                     Duration.ofMillis(Math.max(jwtExpirationMillis, 60_000L))
             );
+        } catch (Exception ignored) {
+            // best effort
+        }
+    }
+
+    private void restoreStaffSessions(String userId) {
+        if (!useRedis() || userId == null || userId.isBlank()) {
+            return;
+        }
+        try {
+            redisTemplate.delete(REDIS_KEY_PREFIX_STAFF_REVOKE + userId);
         } catch (Exception ignored) {
             // best effort
         }
