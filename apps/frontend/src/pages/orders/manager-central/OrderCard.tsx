@@ -37,12 +37,14 @@ export default function OrderCard({
   onMarkReady,
   onOpenPayment,
 }: OrderCardProps) {
-  const borderTone = order.status === 'COMPLETED'
+  const isPaid = payment?.status === 'PAID'
+  const isCompleted = order.status === 'COMPLETED' || isPaid
+  const borderTone = isCompleted
     ? 'border-l-emerald-500'
     : order.status === 'PENDING'
       ? 'border-l-red-500'
       : 'border-l-[#5e604d]'
-  const cardBg = order.status === 'COMPLETED' ? 'bg-[#faf2ee]/80' : 'bg-white'
+  const cardBg = isCompleted ? 'bg-[#faf2ee]/80' : 'bg-white'
   const actionPrimaryClass = order.status === 'PENDING'
     ? 'bg-[#33210d] text-white hover:bg-[#4b3621]'
     : order.status === 'READY'
@@ -59,10 +61,12 @@ export default function OrderCard({
             <span>{formatDateTime(order.createdAt)}</span>
           </div>
         </div>
-        <span className="rounded-full bg-[#e8e1dd] px-2.5 py-1 text-xs font-semibold text-[#4e453d]">{trangThaiDonHang(order.status)}</span>
+        <span className="rounded-full bg-[#e8e1dd] px-2.5 py-1 text-xs font-semibold text-[#4e453d]">
+          {isPaid ? 'Đã thanh toán' : trangThaiDonHang(order.status)}
+        </span>
       </div>
 
-      {order.status !== 'COMPLETED' && (
+      {!isCompleted && (
         <p className={`mt-2 text-xs ${tone === 'danger' ? 'font-semibold text-red-700' : tone === 'warning' ? 'text-amber-700' : 'text-[#4e453d]'}`}>
           ⏱ Đã chờ: {ageMinutes} phút
         </p>
@@ -89,7 +93,7 @@ export default function OrderCard({
           <p className="text-sm text-[#4e453d]">{itemCount} món</p>
           <p className="text-[34px] font-semibold leading-none text-[#33210d]">{Number(order.totalAmount || 0).toLocaleString('vi-VN')}đ</p>
         </div>
-        {order.status === 'COMPLETED' && (
+        {isCompleted && (
           <p className="text-right text-sm font-semibold text-emerald-700">
             ✓ {payment ? phuongThucThanhToan(payment.provider) : 'Đã hoàn thành'}
           </p>
@@ -97,7 +101,7 @@ export default function OrderCard({
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
-        {order.status === 'PENDING' && (
+        {order.status === 'PENDING' && !isCompleted && (
           <>
             <Button size="sm" variant="secondary" className="min-h-12 rounded-xl border border-[#80756c] bg-white text-[#33210d]" onClick={() => (canManagePosAdvanced ? onOpenEdit(order) : onOpenDetail(order))}>
               {canManagePosAdvanced ? 'Sửa món' : 'Chi tiết'}
@@ -108,7 +112,7 @@ export default function OrderCard({
           </>
         )}
 
-        {(order.status === 'CONFIRMED' || order.status === 'PREPARING') && (
+        {(order.status === 'CONFIRMED' || order.status === 'PREPARING') && !isCompleted && (
           <>
             <Button size="sm" variant="secondary" className="min-h-12 rounded-xl border border-[#80756c] bg-white text-[#33210d]" onClick={() => onOpenDetail(order)}>
               Chi tiết
@@ -121,7 +125,7 @@ export default function OrderCard({
           </>
         )}
 
-        {order.status === 'READY' && (
+        {order.status === 'READY' && !isCompleted && (
           <>
             <Button size="sm" variant="secondary" className="min-h-12 rounded-xl border border-[#80756c] bg-white text-[#33210d]" onClick={() => onOpenDetail(order)}>
               Chi tiết
@@ -132,7 +136,7 @@ export default function OrderCard({
           </>
         )}
 
-        {order.status === 'COMPLETED' && (
+        {isCompleted && (
           <Button size="sm" variant="secondary" className="col-span-2 min-h-12 rounded-xl border border-[#80756c] bg-white text-[#33210d]" onClick={() => onOpenDetail(order)}>
             Chi tiết
           </Button>

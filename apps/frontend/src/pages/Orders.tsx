@@ -1245,13 +1245,6 @@ export default function Orders() {
     return Math.max(payingOrder.totalAmount - paid, 0)
   }, [cashReceived, payingOrder, selectedMethod])
 
-  const lockedProvider = payingOrder && createdPayment?.orderId === payingOrder.id ? createdPayment.provider : null
-  const posBoardOrders = useMemo(() => ({
-    pending: orders.filter((order) => order.status === 'PENDING'),
-    working: orders.filter((order) => ['CONFIRMED', 'PREPARING', 'READY'].includes(order.status)),
-    completed: orders.filter((order) => order.status === 'COMPLETED'),
-  }), [orders])
-
   const paymentByOrderId = useMemo(() => {
     const byOrderId: Record<string, PaymentApi> = {}
     for (const payment of paymentHistory) {
@@ -1265,6 +1258,16 @@ export default function Orders() {
     }
     return byOrderId
   }, [paymentHistory])
+
+  const lockedProvider = payingOrder && createdPayment?.orderId === payingOrder.id ? createdPayment.provider : null
+  const posBoardOrders = useMemo(() => {
+    const isPaid = (order: OrderApi) => paymentByOrderId[order.id]?.status === 'PAID'
+    return {
+      pending: orders.filter((order) => order.status === 'PENDING' && !isPaid(order)),
+      working: orders.filter((order) => ['CONFIRMED', 'PREPARING', 'READY'].includes(order.status) && !isPaid(order)),
+      completed: orders.filter((order) => order.status === 'COMPLETED' || isPaid(order)),
+    }
+  }, [orders, paymentByOrderId])
 
   const boardColumns: ManagerBoardColumn[] = useMemo(
     () => [

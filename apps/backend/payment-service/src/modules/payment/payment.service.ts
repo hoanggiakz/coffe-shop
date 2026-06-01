@@ -893,6 +893,41 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async completeOrderAfterPaymentSuccess(payment: any, metadata?: Record<string, any>) {
+    const orderId = String(payment?.orderId || '').trim();
+    if (!orderId) return;
+
+    try {
+      const branchId = String(metadata?.branchId || '').trim();
+      const response = await this.fetchWithRetry(
+        `${this.orderServiceUrl}/api/orders/${encodeURIComponent(orderId)}/payment`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-actor-role': 'ADMIN',
+            ...(branchId ? { 'x-actor-branch-id': branchId } : {}),
+          },
+          body: JSON.stringify({
+            method: payment?.provider || 'SEPAY',
+            amount: Number(payment?.amount || 0),
+          }),
+        },
+        { attempts: 2 },
+      );
+
+      if (!response.ok) {
+        const body = await response.text();
+        if (response.status === 400 && body.includes('ORDER_ALREADY_PAID')) {
+          return;
+        }
+        this.logger.warn(`Cannot complete paid order ${orderId}: ${response.status} ${body}`);
+      }
+    } catch (error) {
+      this.logger.warn(`Complete paid order ${orderId} failed: ${(error as Error).message}`);
+    }
+  }
+
   private async sendChatPaymentMessage(tableId: string, content: string) {
     if (!tableId) return;
 
@@ -1563,11 +1598,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     });
 
     if (statusChanged && targetStatus === PaymentStatus.PAID) {
+      const mergedMetadata = (nextMetadata && typeof nextMetadata === 'object' ? nextMetadata : {}) as Record<string, any>;
       await this.emitPaymentCompleted(updated);
-      await this.emitStaffPaymentSuccessNotification(
-        updated,
-        (nextMetadata && typeof nextMetadata === 'object' ? nextMetadata : {}) as Record<string, any>,
-      );
+      await this.completeOrderAfterPaymentSuccess(updated, mergedMetadata);
+      await this.emitStaffPaymentSuccessNotification(updated, mergedMetadata);
       try {
         await this.ensureInvoiceForPayment(updated, String((nextMetadata as any)?.confirmedBy || 'system'));
       } catch (error) {
