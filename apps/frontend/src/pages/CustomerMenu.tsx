@@ -5,7 +5,7 @@ import api from '@/utils/api'
 import { getSocket, disconnectSocket } from '@/utils/socket'
 import { showRealtimeNotification } from '@/utils/notifications'
 import { maDonHangNgan, phuongThucThanhToan, trangThaiDonHang, trangThaiThanhToan } from '@/utils/display'
-import { ChatBubbleLeftRightIcon, ShoppingBagIcon, XMarkIcon, MinusIcon } from '@heroicons/react/24/outline'
+import { ChatBubbleLeftRightIcon, XMarkIcon, MinusIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 
 type PaymentMode = 'POST_PAY' | 'ONLINE_PAY'
 type PaymentProvider = 'SEPAY'
@@ -558,18 +558,24 @@ const fieldClass =
   'min-h-11 w-full rounded-xl border border-sky-100/80 bg-white/95 px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:ring-2 focus:ring-sky-300/60'
 
 const panelClass = 'rounded-2xl border border-sky-100 bg-white/92 p-4 shadow-sm'
-const subtleActionButtonClass =
-  'inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100'
 
 function normalizeVndAmount(value: unknown): number {
   const amount = Number(value || 0)
   if (!Number.isFinite(amount)) return 0
-  if (amount > 0 && amount < 1000 && Number.isInteger(amount)) return amount * 1000
-  return amount
+  if (amount === 0) return 0
+  if (Math.abs(amount) > 0 && Math.abs(amount) < 1000) {
+    if (Number.isInteger(amount)) return amount * 1000
+    return Math.round(amount * 1000 / 1000) * 1000
+  }
+  return Math.round(amount)
 }
 
 function formatVnd(value: unknown): string {
-  return `${normalizeVndAmount(value).toLocaleString('vi-VN')}đ`
+  const amount = normalizeVndAmount(value)
+  if (amount === 0) return '0đ'
+  const sign = amount < 0 ? '-' : ''
+  const absValue = Math.abs(amount)
+  return `${sign}${String(absValue).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}đ`
 }
 
 function parseCartVersion(version: string): { orderId: string; revision: number } {
@@ -711,6 +717,9 @@ export default function CustomerMenu() {
   const [staffReason, setStaffReason] = useState('Cần hỗ trợ')
   const [customReason, setCustomReason] = useState('')
   const [callingStaff, setCallingStaff] = useState(false)
+  const [callWaiterCooldownUntil, setCallWaiterCooldownUntil] = useState(0)
+  const [callWaiterAckUntil, setCallWaiterAckUntil] = useState(0)
+  const [callWaiterSecondsLeft, setCallWaiterSecondsLeft] = useState(0)
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatText, setChatText] = useState('')
@@ -962,6 +971,7 @@ export default function CustomerMenu() {
   const cartSessionFallbackKey = useMemo(() => (cartStorageKey ? `session_fallback_${cartStorageKey}` : ''), [cartStorageKey])
   const orderStorageKey = useMemo(() => (tableId ? `customer-last-order:${tableId}` : ''), [tableId])
   const chatProfileStorageKey = useMemo(() => (tableId ? `customer-chat-profile:${tableId}` : ''), [tableId])
+  const callWaiterCooldownKey = useMemo(() => (tableId ? `customer-call-waiter-cooldown:${tableId}` : ''), [tableId])
   const customerAuthStorageKey = 'customer-auth-session'
 
   useEffect(() => {
@@ -1063,6 +1073,29 @@ export default function CustomerMenu() {
     setOrderCustomerPhone(customerSession?.phone || '')
     setMessages([])
   }, [chatProfileStorageKey, customerSession?.id])
+
+  useEffect(() => {
+    if (!callWaiterCooldownKey) {
+      setCallWaiterCooldownUntil(0)
+      return
+    }
+    try {
+      const raw = Number(localStorage.getItem(callWaiterCooldownKey) || 0)
+      setCallWaiterCooldownUntil(Number.isFinite(raw) ? raw : 0)
+    } catch {
+      setCallWaiterCooldownUntil(0)
+    }
+  }, [callWaiterCooldownKey])
+
+  useEffect(() => {
+    const updateCountdown = () => {
+      const left = Math.max(0, Math.ceil((callWaiterCooldownUntil - Date.now()) / 1000))
+      setCallWaiterSecondsLeft(left)
+    }
+    updateCountdown()
+    const intervalId = window.setInterval(updateCountdown, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [callWaiterCooldownUntil])
 
   useEffect(() => {
     if (!tableId || currentOrderId) return
@@ -1711,6 +1744,16 @@ export default function CustomerMenu() {
     }, new Map<string, number>())
   }, [cartLines])
 
+  const categoryResultCountMap = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const item of filteredItems) {
+      const key = String(item.category || 'Khac')
+      map.set(key, (map.get(key) || 0) + 1)
+    }
+    map.set('ALL', filteredItems.length)
+    return map
+  }, [filteredItems])
+
   const estimatedPrepMinutes = useMemo(() => {
     if (cartLines.length === 0) return 0
     return cartLines.reduce((sum, line) => {
@@ -1985,13 +2028,26 @@ export default function CustomerMenu() {
 
     setCart((prev) => {
       const current = prev[preferredKey]
-      if (!current) return prev
-      if (current.quantity <= 1) {
+      let targetKey = preferredKey
+      let target = current
+      if (!target) {
+        const fallbackEntry = Object.entries(prev).find(([, line]) => line.menuItemId === menuItemId && Number(line.quantity || 0) > 0)
+        if (!fallbackEntry) return prev
+        targetKey = fallbackEntry[0]
+        target = fallbackEntry[1]
+      }
+      if (Number(target.quantity || 0) <= 1) {
         const next = { ...prev }
-        delete next[preferredKey]
+        delete next[targetKey]
         return next
       }
-      return { ...prev, [preferredKey]: { ...current, quantity: current.quantity - 1 } }
+      return {
+        ...prev,
+        [targetKey]: {
+          ...target,
+          quantity: Number(target.quantity || 0) - 1,
+        },
+      }
     })
   }
 
@@ -2297,8 +2353,8 @@ export default function CustomerMenu() {
     fetchPaymentStatus(currentOrderId)
   }, [currentOrderId])
 
-  const submitOrder = async (e: FormEvent) => {
-    e.preventDefault()
+  const submitOrder = async (e?: FormEvent) => {
+    e?.preventDefault()
     if (!tableId) {
       toast.error('Thiếu thông tin bàn từ QR')
       return
@@ -2504,10 +2560,32 @@ export default function CustomerMenu() {
 
   const callStaff = async () => {
     if (!tableId) return
-    const reason = staffReason === 'Khác' ? customReason.trim() || 'Cần hỗ trợ tại bàn' : staffReason
+    if (callWaiterSecondsLeft > 0) return
+    const reason =
+      staffReason === 'Cần tính tiền'
+        ? 'bill'
+        : staffReason === 'Cần thêm nước/đá'
+          ? 'support'
+          : 'general'
     setCallingStaff(true)
     try {
-      await api.post(`/tables/${tableId}/call-staff`, { reason })
+      try {
+        await api.post(`/tables/${tableId}/call-waiter`, { reason })
+      } catch {
+        const fallbackReason = staffReason === 'Khác' ? customReason.trim() || 'Cần hỗ trợ tại bàn' : staffReason
+        await api.post(`/tables/${tableId}/call-staff`, { reason: fallbackReason })
+      }
+      const now = Date.now()
+      const nextCooldown = now + 60_000
+      setCallWaiterAckUntil(now + 5_000)
+      setCallWaiterCooldownUntil(nextCooldown)
+      if (callWaiterCooldownKey) {
+        try {
+          localStorage.setItem(callWaiterCooldownKey, String(nextCooldown))
+        } catch {
+          // ignore local storage errors
+        }
+      }
       toast.success('Đã gửi yêu cầu gọi phục vụ')
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Gọi phục vụ thất bại')
@@ -2521,84 +2599,134 @@ export default function CustomerMenu() {
     cartPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  return (
-    <div className="mx-auto max-w-7xl px-3 pb-36 pt-4 sm:px-6 sm:pb-28 sm:pt-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">{resolvingTable ? 'Đang xác định bàn...' : `Thực đơn ${tableName}`}</h1>
-          <p className="mt-1 text-sm text-slate-500">Đặt món qua QR, theo dõi trạng thái và gọi nhân viên.</p>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-800">
-            {cartItemCount} món trong giỏ
-          </span>
-            <span className="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
-              Tạm tính {formatVnd(payableCartTotal)}
-            </span>
-          {currentOrder && (
-            <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-700">
-              Đơn hiện tại: {trangThaiDonHang(currentOrder.status)}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => setCartDrawerOpen(true)}
-            className="fixed right-4 top-4 z-40 hidden h-12 w-12 items-center justify-center rounded-full bg-amber-600 text-white shadow-md lg:inline-flex"
-            aria-label="Mở giỏ hàng"
-          >
-            <ShoppingBagIcon className="h-5 w-5" />
-            {cartItemCount > 0 && (
-              <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                {cartItemCount}
-              </span>
-            )}
-          </button>
-        </div>
-      </div>
+  const handleQuickAdd = (item: MenuItem) => {
+    const requiresSelection = (item.customizations || []).some(
+      (group) => group.type === 'single' && (group.options?.length || 0) > 0,
+    )
+    if (requiresSelection) {
+      openCustomizeModal(item.id)
+      return
+    }
+    increase(item.id)
+  }
 
-      <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-sky-100 bg-white/92 p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-4 sm:p-4">
-        <input
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          className={fieldClass}
-          placeholder="Tìm món theo tên hoặc mô tả"
-        />
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className={fieldClass}
-        >
-          {categories.map((category) => (
-            <option key={category} value={category}>
-              {category === 'ALL' ? 'Tất cả danh mục' : category}
-            </option>
-          ))}
-        </select>
-        <div className="flex items-center justify-start text-sm text-slate-500">{filteredItems.length} món hiển thị</div>
-        <div className="hidden items-center justify-end text-xs text-slate-500 lg:flex">Chọn danh mục để lọc nhanh</div>
-      </div>
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {categories.map((category) => (
+  const waiterJustCalled = callWaiterAckUntil > Date.now()
+  const canCallWaiter = !callingStaff && !resolvingTable && callWaiterSecondsLeft === 0
+  const cartHasItems = cartItemCount > 0
+  const hasPendingAddOn = Boolean(currentOrder && cartHasItems)
+  const baseOrderSent = Boolean(currentOrder && currentOrder.status !== 'CANCELLED')
+  const orderStatusLabel =
+    !currentOrder
+      ? 'Chưa gửi'
+      : currentOrder.status === 'COMPLETED'
+        ? '✅ Đơn hoàn thành'
+        : currentOrder.status === 'CANCELLED'
+          ? '❌ Đơn đã hủy'
+          : '⏳ Đang xử lý'
+  const showOrderCartBar = cartHasItems || Boolean(currentOrder)
+  const orderBarToneClass =
+    currentOrder?.status === 'COMPLETED'
+      ? 'border-emerald-200 bg-emerald-50'
+      : cartHasItems
+        ? 'border-amber-200 bg-amber-50'
+        : 'border-emerald-200 bg-emerald-50'
+
+  return (
+    <div className="mx-auto max-w-7xl px-3 pb-44 pt-3 sm:px-6 sm:pb-36 sm:pt-5">
+      <div className="sticky top-0 z-30 space-y-2 bg-gradient-to-b from-[#fff8e7] via-[#fff8e7] to-transparent pb-2">
+        <div className="rounded-2xl border border-amber-200 bg-white/95 px-3 py-2.5 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-base font-bold text-[#3d1f00]">{resolvingTable ? 'Đang xác định bàn...' : `🪑 ${tableName}`}</p>
+              <p className="text-xs text-slate-500">{String(qrBranchId || '').trim() ? `Chi nhánh ${qrBranchId}` : 'Chi nhánh đang phục vụ'}</p>
+            </div>
             <button
-              key={`chip-${category}`}
               type="button"
-              onClick={() => {
-                setSelectedCategory(category)
-                if (category === 'ALL') {
-                  window.scrollTo({ top: 0, behavior: 'smooth' })
-                  return
-                }
-                categorySectionRefs.current[category]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              }}
-              className={`whitespace-nowrap rounded-full px-3 py-2 text-sm ${
-                selectedCategory === category
-                  ? 'bg-sky-600 text-white'
-                  : 'border border-sky-100 bg-white text-slate-700'
+              onClick={callStaff}
+              disabled={!canCallWaiter}
+              className={`inline-flex min-h-10 items-center justify-center rounded-full px-3.5 text-xs font-semibold text-white transition ${
+                waiterJustCalled
+                  ? 'bg-emerald-600'
+                  : canCallWaiter
+                    ? 'bg-orange-500 hover:bg-orange-600'
+                    : 'bg-slate-300'
               }`}
-          >
-            {category === 'ALL' ? 'Tất cả' : category}
-          </button>
-        ))}
+            >
+              {callingStaff
+                ? 'Đang gửi...'
+                : waiterJustCalled
+                  ? '✅ Đã gọi'
+                  : callWaiterSecondsLeft > 0
+                    ? `🔔 Gọi lại (${callWaiterSecondsLeft}s)`
+                    : '🔔 Gọi nhân viên'}
+            </button>
+          </div>
+        </div>
+
+        {showOrderCartBar && (
+          <div className={`rounded-2xl border px-3 py-2 text-sm shadow-sm ${orderBarToneClass}`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                {hasPendingAddOn ? (
+                  <p className="truncate font-semibold text-amber-800">🛒 +{cartItemCount} món mới · Đơn cũ: Đã gửi</p>
+                ) : cartHasItems ? (
+                  <p className="truncate font-semibold text-amber-800">🛒 {cartItemCount} món · {formatVnd(payableCartTotal)}</p>
+                ) : (
+                  <p className="truncate font-semibold text-emerald-700">{orderStatusLabel}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={scrollToCart}
+                disabled={!cartHasItems && !currentOrder}
+                className="shrink-0 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-800 disabled:opacity-50"
+              >
+                Xem giỏ →
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-600">{baseOrderSent ? orderStatusLabel : 'Chưa gửi'}</p>
+          </div>
+        )}
+
+        <div className="rounded-2xl border border-amber-100 bg-white/95 p-2.5 shadow-sm">
+          <label className="relative block">
+            <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              className="min-h-11 w-full rounded-xl border border-amber-100 bg-white pl-9 pr-3 text-sm text-slate-800 focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60"
+              placeholder="Tìm tên món..."
+            />
+          </label>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {categories.map((category) => {
+            const count = categoryResultCountMap.get(category) || 0
+            const active = selectedCategory === category
+            return (
+              <button
+                key={`chip-${category}`}
+                type="button"
+                onClick={() => {
+                  setSelectedCategory(category)
+                  if (category === 'ALL') {
+                    window.scrollTo({ top: 0, behavior: 'smooth' })
+                    return
+                  }
+                  categorySectionRefs.current[category]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }}
+                className={`whitespace-nowrap rounded-full border px-4 py-2 text-sm font-medium transition ${
+                  active
+                    ? 'border-[#78350f] bg-[#78350f] text-white'
+                    : 'border-amber-200 bg-white text-amber-900 hover:bg-amber-100'
+                }`}
+              >
+                {category === 'ALL' ? `Tất cả ${count}` : `${category} ${count}`}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -2612,101 +2740,68 @@ export default function CustomerMenu() {
                   ref={(node) => {
                     categorySectionRefs.current[category] = node
                   }}
+                  className="scroll-mt-48"
                 >
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="text-base font-bold text-slate-900">{category}</h3>
                     <span className="text-xs text-slate-500">{items.length} món</span>
                   </div>
-                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+                  <div className="space-y-2.5">
               {items.map((item) => {
                 const selectedCount = cartCountByMenuItem.get(item.id) || 0
                 return (
-                  <div key={item.id} className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-md shadow-slate-100">
-                    <img
-                      src={resolvePublicMenuImage(item.image, item.name)}
-                      alt={item.name}
-                      className="h-36 w-full cursor-pointer rounded-xl object-cover sm:h-32"
-                      onClick={() => openCustomizeModal(item.id)}
-                      onError={(event) => {
-                        event.currentTarget.src = fallbackMenuImage(item.name)
-                      }}
-                    />
-                    <div className="mt-2 flex items-start justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openCustomizeModal(item.id)}
-                        className="line-clamp-2 text-left text-sm font-semibold text-slate-900 hover:text-sky-700"
-                      >
-                        {item.name}
-                      </button>
-                      <span className="shrink-0 text-sm font-bold text-sky-700">{formatVnd(item.price)}</span>
-                    </div>
-                    {(item.badges || []).length > 0 && (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {item.badges?.slice(0, 3).map((badge) => (
-                          <span
-                            key={`${item.id}-${badge}`}
-                            className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
-                          >
-                            {badge === 'HOT' ? '🔥 Bán chạy' : badge === 'NEW' ? '🆕 Mới' : badge === 'RECOMMEND' ? '⭐ Đề xuất' : badge}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <p className="mt-1 line-clamp-2 text-xs text-slate-500">{item.description || '---'}</p>
-                    {item.available === false && (
-                      <p className="mt-1 text-xs font-semibold text-slate-500">⚫ Tạm hết</p>
-                    )}
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if ((item.customizations || []).length > 0) {
-                            openCustomizeModal(item.id)
-                            return
-                          }
-                          increase(item.id)
-                        }}
-                        className={`${subtleActionButtonClass} min-w-20 px-3 py-2 text-xs disabled:opacity-60`}
-                        disabled={!item.available}
-                      >
-                        Thêm
-                      </button>
-                      <div className="ml-auto flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => decrease(item.id)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-base text-slate-700"
-                        >
-                          <MinusIcon className="h-4 w-4" />
-                        </button>
-                        <span className="w-7 text-center text-sm font-semibold">{selectedCount}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if ((item.customizations || []).length > 0) {
-                              openCustomizeModal(item.id)
-                              return
-                            }
-                            increase(item.id)
+                  <article key={item.id} className="relative rounded-2xl border border-amber-200 bg-white p-2.5 shadow-sm">
+                    <div className="flex items-start gap-2.5">
+                      <div className="relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded-lg border border-amber-100 bg-amber-50">
+                        <img
+                          src={resolvePublicMenuImage(item.image, item.name)}
+                          alt={item.name}
+                          className="h-full w-full cursor-pointer object-cover"
+                          onClick={() => openCustomizeModal(item.id)}
+                          onError={(event) => {
+                            event.currentTarget.src = fallbackMenuImage(item.name)
                           }}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-base text-slate-700"
-                          disabled={!item.available}
-                        >
-                          +
-                        </button>
+                        />
+                        {(item.badges || []).some((badge) => String(badge || '').toUpperCase() === 'HOT') && (
+                          <span className="absolute right-1 top-1 rounded-full bg-red-500 px-1.5 py-0.5 text-[9px] font-bold text-white">🔥 HOT</span>
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openCustomizeModal(item.id)}
+                            className="line-clamp-1 text-left text-sm font-semibold text-[#3d1f00]"
+                          >
+                            {item.name}
+                          </button>
+                          <span className="shrink-0 text-sm font-bold text-[#78350f]">{formatVnd(item.price)}</span>
+                        </div>
+                        <p className="mt-0.5 line-clamp-2 text-[13px] text-slate-500">{item.description || 'Đang cập nhật mô tả món'}</p>
+                        {item.available === false && <p className="mt-1 text-[11px] font-semibold text-slate-500">⚫ Tạm hết món</p>}
+                        <div className="mt-2 flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => decrease(item.id)}
+                            disabled={selectedCount === 0}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-amber-200 bg-white text-sm font-semibold text-[#78350f] disabled:pointer-events-none disabled:opacity-30"
+                          >
+                            <MinusIcon className="h-3.5 w-3.5" />
+                          </button>
+                          <span className="w-6 text-center text-sm font-bold text-slate-800">{selectedCount}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickAdd(item)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#78350f] bg-[#78350f] text-sm font-semibold text-white disabled:opacity-50"
+                            disabled={!item.available}
+                          >
+                            +
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    {(item.customizations || []).length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => openCustomizeModal(item.id)}
-                        className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700"
-                      >
-                        Tùy chỉnh món
-                      </button>
-                    )}
-                  </div>
+                  </article>
                 )
               })}
                   </div>
@@ -2887,12 +2982,14 @@ export default function CustomerMenu() {
             <p className="font-semibold text-slate-900">Giỏ hàng</p>
             <div className="mt-3 space-y-2 text-sm">
               {cartLines.length === 0 && (
-                <div className="rounded-xl border border-dashed border-sky-200 bg-sky-50/30 px-3 py-5 text-center">
-                  <p className="text-gray-500">Giỏ hàng trống. Hãy thêm món từ thực đơn.</p>
+                <div className="rounded-xl border-[1.5px] border-dashed border-amber-500 bg-[#fffbf0] px-3 py-6 text-center">
+                  <p className="text-2xl">🛒</p>
+                  <p className="mt-2 font-semibold text-[#3d1f00]">Giỏ hàng của bạn đang trống</p>
+                  <p className="mt-1 text-xs text-slate-500">Hãy chọn món bên trên để bắt đầu</p>
                   <button
                     type="button"
                     onClick={() => setCartDrawerOpen(false)}
-                    className="mt-2 rounded-lg border border-sky-200 bg-white px-3 py-1.5 text-xs font-medium text-sky-700"
+                    className="mt-3 rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-medium text-amber-700"
                   >
                     Tiếp tục chọn món
                   </button>
@@ -3362,35 +3459,27 @@ export default function CustomerMenu() {
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-sky-100 bg-white/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 backdrop-blur lg:hidden">
         <div className="mx-auto max-w-7xl">
-          {cartItemCount > 0 ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs text-slate-500">{cartItemCount} món trong giỏ</p>
-                  <p className="truncate text-sm font-bold text-slate-900">Tạm tính {formatVnd(payableCartTotal)}</p>
-                </div>
-                <p className="text-xs font-medium text-emerald-700">Sẵn sàng gửi đơn</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCartDrawerOpen(true)}
-                className="inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white"
-              >
-                Xem giỏ hàng →
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-2 rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2">
-              <p className="text-xs text-slate-600">Giỏ đang trống, hãy thêm món để bắt đầu.</p>
-              <button
-                type="button"
-                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                className="shrink-0 rounded-lg border border-sky-200 bg-white px-2 py-1 text-xs font-semibold text-sky-700"
-              >
-                Chọn món
-              </button>
-            </div>
-          )}
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setCartDrawerOpen(true)}
+              disabled={!cartHasItems}
+              className="inline-flex min-h-11 w-full items-center justify-between rounded-xl border border-[#78350f] bg-white px-4 text-sm font-semibold text-[#78350f] disabled:pointer-events-none disabled:opacity-40"
+            >
+              <span>🛒 Xem giỏ hàng ({cartItemCount} món)</span>
+              <span>→</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void submitOrder()}
+              disabled={!cartHasItems || submitting || resolvingTable}
+              className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#78350f] to-[#b45309] px-4 text-sm font-bold text-white disabled:pointer-events-none disabled:opacity-40"
+            >
+              {submitting
+                ? 'Đang gửi...'
+                : `${currentOrder ? '📤 Gửi thêm' : '📤 Gửi đơn'} · ${formatVnd(payableCartTotal)}`}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -3790,9 +3879,7 @@ export default function CustomerMenu() {
 
       {chatOpen && (
         <div
-          className={`fixed inset-x-3 z-40 rounded-2xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-x-auto sm:right-4 sm:w-[calc(100vw-2rem)] sm:max-w-sm lg:bottom-6 ${
-            cartItemCount > 0 ? 'bottom-36 sm:bottom-24' : 'bottom-20 sm:bottom-24'
-          }`}
+          className="fixed inset-x-3 bottom-36 z-40 rounded-2xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-x-auto sm:bottom-24 sm:right-4 sm:w-[calc(100vw-2rem)] sm:max-w-sm lg:bottom-6"
         >
           <div className="flex items-center justify-between">
             <p className="font-semibold text-slate-900">Chat hỗ trợ - {tableName}</p>
@@ -3878,9 +3965,7 @@ export default function CustomerMenu() {
       <button
         type="button"
         onClick={toggleChatWidget}
-        className={`fixed right-4 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-sky-700 text-white shadow-lg lg:bottom-6 ${
-          cartItemCount > 0 ? 'bottom-32' : 'bottom-6'
-        }`}
+        className="fixed bottom-32 right-4 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-sky-700 text-white shadow-lg lg:bottom-6"
         aria-label="Mở chat hỗ trợ"
       >
         <ChatBubbleLeftRightIcon className="h-6 w-6" />
