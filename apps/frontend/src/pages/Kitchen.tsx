@@ -119,6 +119,27 @@ function orderKdsStage(order: OrderApi): KdsStage {
   return 'WAITING'
 }
 
+function readKitchenSocketToken(fallback?: string | null): string {
+  const direct = String(fallback || '').trim()
+  if (direct) return direct
+  if (typeof window === 'undefined') return ''
+  try {
+    const raw = sessionStorage.getItem('auth-storage')
+    if (!raw) return ''
+    const parsed = JSON.parse(raw)
+    const firstState = parsed?.state ?? parsed
+    const secondState = firstState?.state ?? firstState
+    const candidates = [firstState?.token, secondState?.token]
+    for (const token of candidates) {
+      const normalized = String(token || '').trim()
+      if (normalized) return normalized
+    }
+    return ''
+  } catch {
+    return ''
+  }
+}
+
 export default function Kitchen() {
   const { tv } = useI18n()
   const [orders, setOrders] = useState<OrderApi[]>([])
@@ -130,6 +151,7 @@ export default function Kitchen() {
   const soundEnabled = useUiStore((state) => state.soundEnabled)
   const setSoundEnabled = useUiStore((state) => state.setSoundEnabled)
   const currentUser = useAuthStore((state) => state.user)
+  const authToken = useAuthStore((state) => state.token)
   const selectedBranchId = useBranchScopeStore((state) => state.selectedBranchId)
   const effectiveBranchId = String(selectedBranchId || currentUser?.branchId || '').trim()
   const wsBaseUrl = resolveWebsocketBaseUrl()
@@ -168,17 +190,11 @@ export default function Kitchen() {
   }, [effectiveBranchId])
 
   useEffect(() => {
-    const raw = typeof window !== 'undefined' ? sessionStorage.getItem('auth-storage') : ''
-    let token = ''
-    try {
-      const parsed = raw ? JSON.parse(raw) : null
-      token = String(parsed?.state?.token || '').trim()
-    } catch {
-      token = ''
-    }
+    const token = readKitchenSocketToken(authToken)
     const socket: Socket = io(`${wsBaseUrl}/kds`, {
-      transports: ['polling', 'websocket'],
+      transports: ['websocket', 'polling'],
       upgrade: true,
+      rememberUpgrade: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -209,6 +225,14 @@ export default function Kitchen() {
         heartbeatTimer = null
       }
     }
+    const onConnectError = (error: Error & { message?: string }) => {
+      const message = String(error?.message || '').trim()
+      if (/unauthorized|forbidden/i.test(message)) {
+        toast.error(tv('KDS không xác thực được phiên đăng nhập. Vui lòng đăng nhập lại.', 'KDS socket unauthorized. Please login again.'))
+        return
+      }
+      toast.error(tv(`KDS realtime lỗi kết nối: ${message || 'unknown'}`, `KDS realtime connection error: ${message || 'unknown'}`))
+    }
 
     const onRealtimeEvent = (payload: StaffNotificationPayload | KdsSocketPayload) => {
       const type = String(payload?.type || '').toUpperCase()
@@ -230,6 +254,7 @@ export default function Kitchen() {
 
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
+    socket.on('connect_error', onConnectError)
     socket.on('sync-response', onSync)
     socket.on('new-order', onRealtimeEvent)
     socket.on('order-confirmed', onRealtimeEvent)
@@ -239,6 +264,7 @@ export default function Kitchen() {
     return () => {
       socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
+      socket.off('connect_error', onConnectError)
       socket.off('sync-response', onSync)
       socket.off('new-order', onRealtimeEvent)
       socket.off('order-confirmed', onRealtimeEvent)
@@ -250,7 +276,7 @@ export default function Kitchen() {
         kdsSocketRef.current = null
       }
     }
-  }, [soundEnabled, currentUser?.id, effectiveBranchId, wsBaseUrl])
+  }, [soundEnabled, currentUser?.id, effectiveBranchId, wsBaseUrl, authToken, tv])
 
   const updateItemStatus = async (
     orderId: string,
