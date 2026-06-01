@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, Res, Sse, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, Res, Sse, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { ReportsService } from './reports.service';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -105,6 +105,11 @@ export class ReportsController {
   @Get('realtime/metrics')
   realtimeMetrics() {
     return this.reportsRealtimeService.metrics();
+  }
+
+  @Post('realtime/lag-sample')
+  ingestLagSample(@Body() body: { lagMs?: number }) {
+    return this.reportsRealtimeService.ingestLagSample(Number(body?.lagMs || 0));
   }
 
   @Get('export')

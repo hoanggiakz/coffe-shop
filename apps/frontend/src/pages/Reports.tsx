@@ -220,6 +220,18 @@ interface RecommendAbSummary {
   }
 }
 
+interface RealtimeTelemetry {
+  subscribers: number
+  peakSubscribers: number
+  emitted: number
+  connections: number
+  disconnects: number
+  subscriberDrops: number
+  disconnectRate: number
+  lag: { samples: number; p95Ms: number }
+  alerts: { p95LagHigh: boolean; subscriberDropHigh: boolean; disconnectRateHigh: boolean }
+}
+
 function formatSentimentIssueLabel(issue: string): string {
   const normalized = String(issue || '').trim().toLowerCase()
   const topicMap: Record<string, string> = {
@@ -296,6 +308,7 @@ export default function Reports() {
   const [showOnlyHighFallback, setShowOnlyHighFallback] = useState(false)
   const [recommendAbSummary, setRecommendAbSummary] = useState<RecommendAbSummary | null>(null)
   const [realtimeLagMs, setRealtimeLagMs] = useState<number>(0)
+  const [realtimeTelemetry, setRealtimeTelemetry] = useState<RealtimeTelemetry | null>(null)
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
@@ -317,7 +330,7 @@ export default function Reports() {
   const loadReports = async () => {
     setLoading(true)
     try {
-      const [dashboardRes, revenueRes, topRes, inventoryRes, staffRes] = await Promise.all([
+      const [dashboardRes, revenueRes, topRes, inventoryRes, staffRes, realtimeMetricsRes] = await Promise.all([
         api.get('/reports/dashboard', {
           params: { dateFrom, dateTo, groupBy, branchId: selectedBranchId || undefined },
         }),
@@ -333,6 +346,7 @@ export default function Reports() {
         api.get('/reports/staff-performance', {
           params: { dateFrom, dateTo, branchId: selectedBranchId || undefined, limit: 10 },
         }),
+        api.get('/reports/realtime/metrics'),
       ])
 
       setDashboard((dashboardRes.data || null) as DashboardResponse | null)
@@ -340,6 +354,7 @@ export default function Reports() {
       setTopItems(Array.isArray(topRes.data) ? (topRes.data as TopItem[]) : [])
       setInventory((inventoryRes.data || null) as InventoryReportResponse | null)
       setStaffItems(Array.isArray(staffRes.data?.items) ? (staffRes.data.items as StaffPerformanceItem[]) : [])
+      setRealtimeTelemetry((realtimeMetricsRes.data || null) as RealtimeTelemetry | null)
 
       try {
         const [forecastResult, anomalyResult, sentimentResult, sentimentIssuesResult, qualitySummaryResult, fallbackTrendResult, fallbackSummaryResult, recommendAbResult] = await Promise.allSettled([
@@ -412,6 +427,7 @@ export default function Reports() {
         setRecommendAbSummary(null)
       }
     } catch (error: any) {
+      setRealtimeTelemetry(null)
       toast.error(error.response?.data?.message || tv('Không tải được dữ liệu báo cáo', 'Unable to load report data'))
     } finally {
       setLoading(false)
@@ -432,13 +448,20 @@ export default function Reports() {
       withCredentials: false,
     } as EventSourceInit)
     let lastReloadAt = 0
+    let lastLagPostAt = 0
     es.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data)
         const emittedAt = String(payload?.emittedAt || '')
         if (emittedAt) {
           const lag = Date.now() - new Date(emittedAt).getTime()
-          setRealtimeLagMs(Number.isFinite(lag) ? Math.max(0, lag) : 0)
+          const normalizedLag = Number.isFinite(lag) ? Math.max(0, lag) : 0
+          setRealtimeLagMs(normalizedLag)
+          const now = Date.now()
+          if (now - lastLagPostAt >= 15000) {
+            lastLagPostAt = now
+            void api.post('/reports/realtime/lag-sample', { lagMs: normalizedLag }).catch(() => undefined)
+          }
         }
       } catch {
         // ignore payload parse errors
@@ -944,6 +967,50 @@ export default function Reports() {
                   {check.ok ? '✓' : '⚠'} {check.name}
                 </p>
               ))}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card title="Realtime Telemetry Alerts" subtitle="Cảnh báo vận hành backend stream">
+        {!realtimeTelemetry && <p className="text-sm text-slate-500">Chưa có dữ liệu telemetry.</p>}
+        {realtimeTelemetry && (
+          <div className="space-y-3">
+            {(realtimeTelemetry.alerts.p95LagHigh || realtimeTelemetry.alerts.subscriberDropHigh || realtimeTelemetry.alerts.disconnectRateHigh) && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                <p className="font-semibold">Có cảnh báo vận hành cần xử lý</p>
+                <p className="text-xs">
+                  p95 lag {Math.round(realtimeTelemetry.lag.p95Ms)}ms · drops {realtimeTelemetry.subscriberDrops} · disconnect rate {Math.round(realtimeTelemetry.disconnectRate * 100)}%
+                </p>
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-sky-100 bg-sky-50/60 p-3">
+                <p className="text-xs text-slate-600">Subscribers</p>
+                <p className="text-lg font-semibold text-slate-900">{realtimeTelemetry.subscribers}</p>
+                <p className="text-xs text-slate-500">Peak: {realtimeTelemetry.peakSubscribers}</p>
+              </div>
+              <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
+                <p className="text-xs text-slate-600">p95 Lag</p>
+                <p className={`text-lg font-semibold ${realtimeTelemetry.alerts.p95LagHigh ? 'text-rose-700' : 'text-slate-900'}`}>
+                  {Math.round(realtimeTelemetry.lag.p95Ms)} ms
+                </p>
+                <p className="text-xs text-slate-500">Samples: {realtimeTelemetry.lag.samples}</p>
+              </div>
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                <p className="text-xs text-slate-600">Subscriber Drops</p>
+                <p className={`text-lg font-semibold ${realtimeTelemetry.alerts.subscriberDropHigh ? 'text-rose-700' : 'text-slate-900'}`}>
+                  {realtimeTelemetry.subscriberDrops}
+                </p>
+                <p className="text-xs text-slate-500">Connections: {realtimeTelemetry.connections}</p>
+              </div>
+              <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-3">
+                <p className="text-xs text-slate-600">Disconnect Rate</p>
+                <p className={`text-lg font-semibold ${realtimeTelemetry.alerts.disconnectRateHigh ? 'text-rose-700' : 'text-slate-900'}`}>
+                  {Math.round(realtimeTelemetry.disconnectRate * 100)}%
+                </p>
+                <p className="text-xs text-slate-500">Disconnects: {realtimeTelemetry.disconnects}</p>
+              </div>
             </div>
           </div>
         )}
