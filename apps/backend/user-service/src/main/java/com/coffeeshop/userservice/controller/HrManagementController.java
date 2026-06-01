@@ -17,6 +17,7 @@ import com.coffeeshop.userservice.entity.HrShift;
 import com.coffeeshop.userservice.entity.Payroll;
 import com.coffeeshop.userservice.entity.PayrollDetail;
 import com.coffeeshop.userservice.entity.SalaryHistory;
+import com.coffeeshop.userservice.entity.SalaryAdvance;
 import com.coffeeshop.userservice.entity.SalaryComponent;
 import com.coffeeshop.userservice.service.HrManagementService;
 import jakarta.validation.Valid;
@@ -438,6 +439,40 @@ public class HrManagementController {
             @RequestParam(value = "format", required = false, defaultValue = "pdf") String format
     ) {
         return ResponseEntity.ok(hrManagementService.exportPayroll(extractToken(authHeader), payrollId, format));
+    }
+
+    @PostMapping("/staff/{userId}/salary-advances")
+    public ResponseEntity<Map<String, Object>> createSalaryAdvance(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String userId,
+            @RequestBody Map<String, Object> payload
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(hrManagementService.createSalaryAdvance(extractToken(authHeader), userId, payload));
+    }
+
+    @GetMapping("/staff/{userId}/salary-advances")
+    public ResponseEntity<List<SalaryAdvance>> listSalaryAdvances(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String userId
+    ) {
+        return ResponseEntity.ok(hrManagementService.listSalaryAdvances(extractToken(authHeader), userId));
+    }
+
+    @PutMapping("/salary-advances/{advanceId}/approve")
+    public ResponseEntity<SalaryAdvance> approveSalaryAdvance(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String advanceId
+    ) {
+        return ResponseEntity.ok(hrManagementService.approveSalaryAdvance(extractToken(authHeader), advanceId, true));
+    }
+
+    @PutMapping("/salary-advances/{advanceId}/reject")
+    public ResponseEntity<SalaryAdvance> rejectSalaryAdvance(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String advanceId
+    ) {
+        return ResponseEntity.ok(hrManagementService.approveSalaryAdvance(extractToken(authHeader), advanceId, false));
     }
 
     private String extractToken(String authHeader) {

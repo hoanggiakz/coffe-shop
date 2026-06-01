@@ -22,6 +22,7 @@ import com.coffeeshop.userservice.entity.Payroll;
 import com.coffeeshop.userservice.entity.PayrollDetail;
 import com.coffeeshop.userservice.entity.SalaryHistory;
 import com.coffeeshop.userservice.entity.SalaryComponent;
+import com.coffeeshop.userservice.entity.SalaryAdvance;
 import com.coffeeshop.userservice.entity.User;
 import com.coffeeshop.userservice.entity.WorkSchedule;
 import com.coffeeshop.userservice.repository.BranchRepository;
@@ -32,6 +33,7 @@ import com.coffeeshop.userservice.repository.LeaveRequestRepository;
 import com.coffeeshop.userservice.repository.PayrollDetailRepository;
 import com.coffeeshop.userservice.repository.PayrollRepository;
 import com.coffeeshop.userservice.repository.SalaryComponentRepository;
+import com.coffeeshop.userservice.repository.SalaryAdvanceRepository;
 import com.coffeeshop.userservice.repository.UserRepository;
 import com.coffeeshop.userservice.repository.WorkScheduleRepository;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +44,9 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -80,6 +85,7 @@ public class HrManagementService {
     private final HrAttendanceRepository hrAttendanceRepository;
     private final LeaveRequestRepository leaveRequestRepository;
     private final SalaryComponentRepository salaryComponentRepository;
+    private final SalaryAdvanceRepository salaryAdvanceRepository;
     private final EmployeeSalaryComponentRepository employeeSalaryComponentRepository;
     private final PayrollRepository payrollRepository;
     private final PayrollDetailRepository payrollDetailRepository;
@@ -624,10 +630,20 @@ public class HrManagementService {
         }
 
         if ("excel".equals(format)) {
+            byte[] xlsx = createXlsx(
+                    "payroll_detail",
+                    List.of("componentName", "componentType", "amount", "note"),
+                    details.stream().map(detail -> List.of(
+                            nullableString(detail.getComponentName()),
+                            nullableString(detail.getComponentType() == null ? null : detail.getComponentType().name()),
+                            valueOf(detail.getAmount()),
+                            nullableString(detail.getNote())
+                    )).toList()
+            );
             return encodeFilePayload(
-                    "payroll-" + payroll.getId() + ".csv",
-                    "text/csv; charset=utf-8",
-                    csv.toString().getBytes(StandardCharsets.UTF_8),
+                    "payroll-" + payroll.getId() + ".xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    xlsx,
                     Map.of("payroll", payroll, "detailsCount", details.size())
             );
         }
@@ -662,10 +678,26 @@ public class HrManagementService {
         }
 
         if ("excel".equals(format)) {
+            byte[] xlsx = createXlsx(
+                    "attendance",
+                    List.of("date", "userName", "userId", "checkInTime", "checkOutTime", "status", "workedMinutes", "overtimeMinutes", "checkInNote", "checkOutNote"),
+                    rows.stream().map(row -> List.of(
+                            nullableString(row.get("date")),
+                            nullableString(row.get("userName")),
+                            nullableString(row.get("userId")),
+                            nullableString(row.get("checkInTime")),
+                            nullableString(row.get("checkOutTime")),
+                            nullableString(row.get("status")),
+                            nullableString(row.get("workedMinutes")),
+                            nullableString(row.get("overtimeMinutes")),
+                            nullableString(row.get("checkInNote")),
+                            nullableString(row.get("checkOutNote"))
+                    )).toList()
+            );
             return encodeFilePayload(
-                    "attendance-" + branchId + ".csv",
-                    "text/csv; charset=utf-8",
-                    csv.toString().getBytes(StandardCharsets.UTF_8),
+                    "attendance-" + branchId + ".xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    xlsx,
                     Map.of("count", rows.size(), "branchId", branchId)
             );
         }
@@ -755,10 +787,25 @@ public class HrManagementService {
                     .append(csvCell(nullableString(row.get("createdAt"))))
                     .append('\n');
         }
+        byte[] xlsx = createXlsx(
+                "leave_requests",
+                List.of("id", "userName", "startDate", "endDate", "leaveType", "status", "reason", "approvedBy", "createdAt"),
+                rows.stream().map(row -> List.of(
+                        nullableString(row.get("id")),
+                        nullableString(row.get("userName")),
+                        nullableString(row.get("startDate")),
+                        nullableString(row.get("endDate")),
+                        nullableString(row.get("leaveType")),
+                        nullableString(row.get("status")),
+                        nullableString(row.get("reason")),
+                        nullableString(row.get("approvedBy")),
+                        nullableString(row.get("createdAt"))
+                )).toList()
+        );
         return encodeFilePayload(
-                "leave-requests-" + branchId + ".csv",
-                "text/csv; charset=utf-8",
-                csv.toString().getBytes(StandardCharsets.UTF_8),
+                "leave-requests-" + branchId + ".xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                xlsx,
                 Map.of("count", rows.size(), "branchId", branchId)
         );
     }
@@ -786,10 +833,27 @@ public class HrManagementService {
         }
 
         if ("excel".equals(format)) {
+            byte[] xlsx = createXlsx(
+                    "payroll_branch",
+                    List.of("payrollId", "userId", "month", "totalWorkedHours", "totalWorkedDays", "baseSalaryEarned", "totalAllowances", "totalBonus", "totalDeductions", "netSalary", "status"),
+                    items.stream().map(payroll -> List.of(
+                            nullableString(payroll.getId()),
+                            nullableString(payroll.getUserId()),
+                            nullableString(payroll.getMonth()),
+                            valueOf(payroll.getTotalWorkedHours()),
+                            valueOf(payroll.getTotalWorkedDays()),
+                            valueOf(payroll.getBaseSalaryEarned()),
+                            valueOf(payroll.getTotalAllowances()),
+                            valueOf(payroll.getTotalBonus()),
+                            valueOf(payroll.getTotalDeductions()),
+                            valueOf(payroll.getNetSalary()),
+                            nullableString(payroll.getStatus() == null ? null : payroll.getStatus().name())
+                    )).toList()
+            );
             return encodeFilePayload(
-                    "payroll-branch-" + branchId + ".csv",
-                    "text/csv; charset=utf-8",
-                    csv.toString().getBytes(StandardCharsets.UTF_8),
+                    "payroll-branch-" + branchId + ".xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    xlsx,
                     Map.of("count", items.size(), "branchId", branchId)
             );
         }
@@ -815,6 +879,62 @@ public class HrManagementService {
                 createPdf("Payroll monthly report", lines),
                 Map.of("count", items.size(), "branchId", branchId)
         );
+    }
+
+    public Map<String, Object> createSalaryAdvance(String token, String userId, Map<String, Object> payload) {
+        User actor = requireAnyStaff(token);
+        User target = requireUser(userId);
+        if (actor.getRole() != User.Role.ADMIN && actor.getRole() != User.Role.MANAGER && !Objects.equals(actor.getId(), target.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Khong co quyen tao tam ung");
+        }
+        if (actor.getRole() == User.Role.MANAGER) {
+            assertCanAccessBranch(actor, target.getBranchId());
+        }
+        BigDecimal amount = parseDecimal(payload == null ? null : payload.get("amount"));
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount phai > 0");
+        }
+        LocalDate requestDate = parseDateOrDefault(payload == null ? null : nullableString(payload.get("requestDate")), LocalDate.now());
+        LocalDate deductMonth = parsePayrollMonth(payload == null ? null : nullableString(payload.get("deductMonth")));
+        String notes = payload == null ? null : normalizeText(nullableString(payload.get("notes")));
+
+        SalaryAdvance advance = SalaryAdvance.builder()
+                .userId(target.getId())
+                .amount(amount)
+                .requestDate(requestDate)
+                .deductMonth(deductMonth)
+                .notes(notes)
+                .status(actor.getRole() == User.Role.STAFF ? SalaryAdvance.SalaryAdvanceStatus.PENDING : SalaryAdvance.SalaryAdvanceStatus.APPROVED)
+                .approvedBy(actor.getRole() == User.Role.STAFF ? null : actor.getId())
+                .build();
+        SalaryAdvance saved = salaryAdvanceRepository.save(advance);
+        return Map.of("id", saved.getId(), "status", saved.getStatus().name());
+    }
+
+    public List<SalaryAdvance> listSalaryAdvances(String token, String userId) {
+        User actor = requireAnyStaff(token);
+        User target = requireUser(userId);
+        if (actor.getRole() != User.Role.ADMIN && actor.getRole() != User.Role.MANAGER && !Objects.equals(actor.getId(), target.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Khong co quyen xem tam ung");
+        }
+        if (actor.getRole() == User.Role.MANAGER) {
+            assertCanAccessBranch(actor, target.getBranchId());
+        }
+        return salaryAdvanceRepository.findByUserIdOrderByRequestDateDesc(target.getId());
+    }
+
+    public SalaryAdvance approveSalaryAdvance(String token, String advanceId, boolean approved) {
+        User actor = requireManagerOrAdmin(token);
+        SalaryAdvance advance = salaryAdvanceRepository.findById(advanceId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay tam ung"));
+        User target = requireUser(advance.getUserId());
+        assertCanAccessBranch(actor, target.getBranchId());
+        if (advance.getStatus() != SalaryAdvance.SalaryAdvanceStatus.PENDING) {
+            return advance;
+        }
+        advance.setStatus(approved ? SalaryAdvance.SalaryAdvanceStatus.APPROVED : SalaryAdvance.SalaryAdvanceStatus.REJECTED);
+        advance.setApprovedBy(actor.getId());
+        return salaryAdvanceRepository.save(advance);
     }
 
     private Payroll buildPayrollForUser(User user, LocalDate from, LocalDate to, LocalDate month, User actor) {
@@ -874,6 +994,25 @@ public class HrManagementService {
                     .build());
         }
 
+        List<SalaryAdvance> advances = salaryAdvanceRepository.findByUserIdAndDeductMonthAndStatusIn(
+                user.getId(),
+                month,
+                List.of(SalaryAdvance.SalaryAdvanceStatus.APPROVED, SalaryAdvance.SalaryAdvanceStatus.PENDING)
+        );
+        BigDecimal advanceDeduction = advances.stream()
+                .map(SalaryAdvance::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (advanceDeduction.compareTo(BigDecimal.ZERO) > 0) {
+            deduction = deduction.add(advanceDeduction);
+            details.add(PayrollDetail.builder()
+                    .componentName("Salary advance deduction")
+                    .componentType(PayrollDetail.ComponentType.DEDUCTION)
+                    .amount(advanceDeduction)
+                    .note("Auto from salary_advance")
+                    .build());
+        }
+
         BigDecimal net = baseEarned.add(allowance).add(bonus).subtract(deduction).max(BigDecimal.ZERO);
         Payroll payroll = payrollRepository.findByUserIdAndMonth(user.getId(), month).orElse(Payroll.builder()
                 .userId(user.getId())
@@ -896,6 +1035,15 @@ public class HrManagementService {
             detail.setPayrollId(saved.getId());
         }
         payrollDetailRepository.saveAll(details);
+        for (SalaryAdvance advance : advances) {
+            if (advance.getStatus() == SalaryAdvance.SalaryAdvanceStatus.APPROVED
+                    || advance.getStatus() == SalaryAdvance.SalaryAdvanceStatus.PENDING) {
+                advance.setStatus(SalaryAdvance.SalaryAdvanceStatus.DEDUCTED);
+            }
+        }
+        if (!advances.isEmpty()) {
+            salaryAdvanceRepository.saveAll(advances);
+        }
         return saved;
     }
 
@@ -1231,5 +1379,38 @@ public class HrManagementService {
             return "\"" + escaped + "\"";
         }
         return escaped;
+    }
+
+    private BigDecimal parseDecimal(Object value) {
+        if (value == null) return BigDecimal.ZERO;
+        try {
+            return new BigDecimal(String.valueOf(value).trim());
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Gia tri so khong hop le");
+        }
+    }
+
+    private byte[] createXlsx(String sheetName, List<String> headers, List<List<String>> rows) {
+        try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XSSFSheet sheet = workbook.createSheet(sheetName);
+            int rowIndex = 0;
+            Row headerRow = sheet.createRow(rowIndex++);
+            for (int index = 0; index < headers.size(); index++) {
+                headerRow.createCell(index).setCellValue(headers.get(index));
+            }
+            for (List<String> row : rows) {
+                Row dataRow = sheet.createRow(rowIndex++);
+                for (int index = 0; index < row.size(); index++) {
+                    dataRow.createCell(index).setCellValue(row.get(index) == null ? "" : row.get(index));
+                }
+            }
+            for (int index = 0; index < headers.size(); index++) {
+                sheet.autoSizeColumn(index);
+            }
+            workbook.write(output);
+            return output.toByteArray();
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Khong tao duoc file XLSX");
+        }
     }
 }
