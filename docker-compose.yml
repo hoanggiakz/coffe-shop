@@ -191,10 +191,11 @@ services:
     ports:
       - "${DOCKER_BIND_IP:-127.0.0.1}:${CHAT_SERVICE_HOST_PORT:-3007}:3007"
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
+      NODE_ENV: ${CHAT_NODE_ENV:-production}
       PORT: 3007
       DATABASE_URL: ${CHAT_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/chatdb?schema=public}
       REDIS_URL: redis://redis:6379
+      SOCKET_IO_REDIS_ADAPTER: ${SOCKET_IO_REDIS_ADAPTER:-true}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-}
     depends_on:
       postgres:
@@ -217,7 +218,7 @@ services:
     expose:
       - "3005"
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
+      NODE_ENV: ${INVENTORY_NODE_ENV:-development}
       PORT: 3005
       DATABASE_URL: ${INVENTORY_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/inventorydb?schema=public}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-}
