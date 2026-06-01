@@ -61,6 +61,9 @@ interface KdsSocketPayload {
   type?: string
   title?: string
   message?: string
+  orderId?: string
+  itemId?: string
+  status?: string
 }
 
 type KdsStage = 'WAITING' | 'PREPARING' | 'READY'
@@ -254,9 +257,18 @@ export default function Kitchen() {
       }
       if (type === 'KDS_ITEM_STATUS' || type === 'KDS_ORDER_READY') {
         loadData()
+        return
+      }
+      if ((payload as KdsSocketPayload)?.orderId || (payload as KdsSocketPayload)?.itemId || (payload as KdsSocketPayload)?.status) {
+        loadData()
       }
     }
     const onSync = () => loadData()
+    const onKdsError = (payload?: { message?: string }) => {
+      const message = String(payload?.message || '').trim()
+      toast.error(message || tv('KDS cập nhật thất bại', 'KDS update failed'))
+      void loadData()
+    }
 
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
@@ -266,6 +278,7 @@ export default function Kitchen() {
     socket.on('order-confirmed', onRealtimeEvent)
     socket.on('item-updated', onRealtimeEvent)
     socket.on('order-status-updated', onRealtimeEvent)
+    socket.on('kds:error', onKdsError)
 
     return () => {
       socket.off('connect', onConnect)
@@ -276,6 +289,7 @@ export default function Kitchen() {
       socket.off('order-confirmed', onRealtimeEvent)
       socket.off('item-updated', onRealtimeEvent)
       socket.off('order-status-updated', onRealtimeEvent)
+      socket.off('kds:error', onKdsError)
       if (heartbeatTimer) clearInterval(heartbeatTimer)
       socket.disconnect()
       if (kdsSocketRef.current === socket) {
@@ -294,6 +308,28 @@ export default function Kitchen() {
 
   const updateItemStatusFallback = async (orderId: string, itemId: string, status: 'PREPARING' | 'READY') => {
     await api.patch(`/orders/${orderId}/items/${itemId}/status`, { status })
+  }
+
+  const applyLocalItemStatus = (
+    orderId: string,
+    predicate: (item: OrderItemApi) => boolean,
+    status: 'PREPARING' | 'READY',
+  ) => {
+    setOrders((prev) =>
+      prev.map((order) => {
+        if (order.id !== orderId) return order
+        const orderItems = order.orderItems.map((item) =>
+          predicate(item) ? { ...item, status } : item,
+        )
+        const allReady = orderItems.length > 0 && orderItems.every((item) => item.status === 'READY')
+        const anyPreparing = orderItems.some((item) => item.status === 'PREPARING')
+        return {
+          ...order,
+          status: allReady ? 'READY' : anyPreparing ? 'PREPARING' : order.status,
+          orderItems,
+        }
+      }),
+    )
   }
 
   const updateOrderItemsBatchFallback = async (order: OrderApi, targetStatus: 'PREPARING' | 'READY') => {
@@ -318,6 +354,7 @@ export default function Kitchen() {
       const socket = kdsSocketRef.current
       if (socket?.connected) {
         socket.emit(status === 'PREPARING' ? 'start-item' : 'complete-item', { orderId, itemId })
+        applyLocalItemStatus(orderId, (item) => item.id === itemId, status)
       } else {
         await updateItemStatusFallback(orderId, itemId, status)
       }
@@ -342,6 +379,7 @@ export default function Kitchen() {
       const socket = kdsSocketRef.current
       if (socket?.connected) {
         socket.emit('complete-order', { orderId: order.id })
+        applyLocalItemStatus(order.id, (item) => item.status !== 'READY', 'READY')
       } else {
         await updateOrderItemsBatchFallback(order, 'READY')
       }
@@ -360,6 +398,7 @@ export default function Kitchen() {
       const socket = kdsSocketRef.current
       if (socket?.connected) {
         socket.emit('start-order', { orderId: order.id })
+        applyLocalItemStatus(order.id, (item) => item.status === 'WAITING', 'PREPARING')
       } else {
         await updateOrderItemsBatchFallback(order, 'PREPARING')
       }

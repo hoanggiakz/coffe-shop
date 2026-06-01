@@ -23,6 +23,7 @@ export class KdsOrderSyncService {
       ...init,
       headers: {
         'content-type': 'application/json',
+        'x-actor-role': 'ADMIN',
         ...(init?.headers || {}),
       },
     });
@@ -70,4 +71,3 @@ export class KdsOrderSyncService {
     }));
   }
 }
-
