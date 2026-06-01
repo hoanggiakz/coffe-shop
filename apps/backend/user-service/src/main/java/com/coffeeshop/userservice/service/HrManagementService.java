@@ -38,7 +38,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.DayOfWeek;
@@ -56,6 +62,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
+import java.util.Base64;
 import java.util.stream.Collectors;
 
 @Service
@@ -576,13 +583,238 @@ public class HrManagementService {
     }
 
     public Map<String, Object> exportPayroll(String token, String payrollId) {
+        return exportPayroll(token, payrollId, "pdf");
+    }
+
+    public Map<String, Object> exportPayroll(String token, String payrollId, String formatRaw) {
         User actor = requireManagerOrAdmin(token);
         Payroll payroll = payrollRepository.findById(payrollId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay bang luong"));
         User user = requireUser(payroll.getUserId());
         assertCanAccessBranch(actor, user.getBranchId());
         List<PayrollDetail> details = payrollDetailRepository.findByPayrollIdOrderByIdAsc(payrollId);
-        return Map.of("payroll", payroll, "details", details, "exportedAt", LocalDateTime.now().toString());
+        String format = normalizeExportFormat(formatRaw);
+        StringBuilder csv = new StringBuilder();
+        csv.append("componentName,componentType,amount,note\n");
+        for (PayrollDetail detail : details) {
+            csv.append(csvCell(detail.getComponentName())).append(',')
+                    .append(csvCell(detail.getComponentType().name())).append(',')
+                    .append(csvCell(detail.getAmount() == null ? "0" : detail.getAmount().toPlainString())).append(',')
+                    .append(csvCell(detail.getNote()))
+                    .append('\n');
+        }
+
+        String title = "Payroll slip - " + user.getName() + " - " + payroll.getMonth();
+        List<String> lines = new ArrayList<>();
+        lines.add("Staff: " + user.getName() + " (" + (user.getEmployeeCode() == null ? "-" : user.getEmployeeCode()) + ")");
+        lines.add("Branch: " + (resolveBranchName(user.getBranchId()) == null ? "-" : resolveBranchName(user.getBranchId())));
+        lines.add("Month: " + payroll.getMonth());
+        lines.add("Status: " + payroll.getStatus().name());
+        lines.add("Worked hours: " + valueOf(payroll.getTotalWorkedHours()));
+        lines.add("Worked days: " + valueOf(payroll.getTotalWorkedDays()));
+        lines.add("Base salary earned: " + valueOf(payroll.getBaseSalaryEarned()));
+        lines.add("Allowances: " + valueOf(payroll.getTotalAllowances()));
+        lines.add("Bonus: " + valueOf(payroll.getTotalBonus()));
+        lines.add("Deductions: " + valueOf(payroll.getTotalDeductions()));
+        lines.add("Net salary: " + valueOf(payroll.getNetSalary()));
+        lines.add("");
+        lines.add("Details:");
+        for (PayrollDetail detail : details) {
+            lines.add("- " + detail.getComponentName() + " | " + detail.getComponentType().name() + " | " + valueOf(detail.getAmount()));
+        }
+
+        if ("excel".equals(format)) {
+            return encodeFilePayload(
+                    "payroll-" + payroll.getId() + ".csv",
+                    "text/csv; charset=utf-8",
+                    csv.toString().getBytes(StandardCharsets.UTF_8),
+                    Map.of("payroll", payroll, "detailsCount", details.size())
+            );
+        }
+        return encodeFilePayload(
+                "payroll-" + payroll.getId() + ".pdf",
+                "application/pdf",
+                createPdf(title, lines),
+                Map.of("payroll", payroll, "detailsCount", details.size())
+        );
+    }
+
+    public Map<String, Object> exportAttendance(String token, String branchId, String from, String to, String formatRaw) {
+        User actor = requireManagerOrAdmin(token);
+        assertCanAccessBranch(actor, branchId);
+        List<Map<String, Object>> rows = listAttendance(token, branchId, from, to);
+        String format = normalizeExportFormat(formatRaw);
+
+        StringBuilder csv = new StringBuilder();
+        csv.append("date,userName,userId,checkInTime,checkOutTime,status,workedMinutes,overtimeMinutes,checkInNote,checkOutNote\n");
+        for (Map<String, Object> row : rows) {
+            csv.append(csvCell(String.valueOf(row.get("date")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("userName")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("userId")))).append(',')
+                    .append(csvCell(nullableString(row.get("checkInTime")))).append(',')
+                    .append(csvCell(nullableString(row.get("checkOutTime")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("status")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("workedMinutes")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("overtimeMinutes")))).append(',')
+                    .append(csvCell(nullableString(row.get("checkInNote")))).append(',')
+                    .append(csvCell(nullableString(row.get("checkOutNote"))))
+                    .append('\n');
+        }
+
+        if ("excel".equals(format)) {
+            return encodeFilePayload(
+                    "attendance-" + branchId + ".csv",
+                    "text/csv; charset=utf-8",
+                    csv.toString().getBytes(StandardCharsets.UTF_8),
+                    Map.of("count", rows.size(), "branchId", branchId)
+            );
+        }
+
+        List<String> lines = new ArrayList<>();
+        lines.add("Branch: " + (resolveBranchName(branchId) == null ? branchId : resolveBranchName(branchId)));
+        lines.add("Range: " + (from == null ? "-" : from) + " -> " + (to == null ? "-" : to));
+        lines.add("Total rows: " + rows.size());
+        lines.add("");
+        for (Map<String, Object> row : rows) {
+            lines.add(String.format(
+                    "%s | %s | IN %s | OUT %s | %s | work=%s min",
+                    String.valueOf(row.get("date")),
+                    String.valueOf(row.get("userName")),
+                    nullableString(row.get("checkInTime")),
+                    nullableString(row.get("checkOutTime")),
+                    String.valueOf(row.get("status")),
+                    String.valueOf(row.get("workedMinutes"))
+            ));
+        }
+        return encodeFilePayload(
+                "attendance-" + branchId + ".pdf",
+                "application/pdf",
+                createPdf("Attendance report", lines),
+                Map.of("count", rows.size(), "branchId", branchId)
+        );
+    }
+
+    public Map<String, Object> attendanceMonthlySummary(String token, String branchId, String monthRaw) {
+        User actor = requireManagerOrAdmin(token);
+        assertCanAccessBranch(actor, branchId);
+        LocalDate month = parsePayrollMonth(monthRaw);
+        LocalDate from = month.withDayOfMonth(1);
+        LocalDate to = from.withDayOfMonth(from.lengthOfMonth());
+        List<Map<String, Object>> rows = listAttendance(token, branchId, from.toString(), to.toString());
+
+        Map<String, Map<String, Object>> byUser = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            String userId = String.valueOf(row.get("userId"));
+            Map<String, Object> agg = byUser.computeIfAbsent(userId, key -> {
+                Map<String, Object> value = new HashMap<>();
+                value.put("userId", userId);
+                value.put("userName", String.valueOf(row.get("userName")));
+                value.put("present", 0);
+                value.put("late", 0);
+                value.put("halfDay", 0);
+                value.put("absent", 0);
+                value.put("workedMinutes", 0);
+                return value;
+            });
+            String status = String.valueOf(row.get("status"));
+            if ("PRESENT".equals(status)) agg.put("present", ((int) agg.get("present")) + 1);
+            if ("LATE".equals(status)) agg.put("late", ((int) agg.get("late")) + 1);
+            if ("HALF_DAY".equals(status)) agg.put("halfDay", ((int) agg.get("halfDay")) + 1);
+            if ("ABSENT".equals(status)) agg.put("absent", ((int) agg.get("absent")) + 1);
+            int worked = safeInt(row.get("workedMinutes"));
+            agg.put("workedMinutes", ((int) agg.get("workedMinutes")) + worked);
+        }
+
+        List<Map<String, Object>> items = new ArrayList<>(byUser.values());
+        items.sort((a, b) -> String.valueOf(a.get("userName")).compareToIgnoreCase(String.valueOf(b.get("userName"))));
+        return Map.of(
+                "branchId", branchId,
+                "month", month.toString(),
+                "from", from.toString(),
+                "to", to.toString(),
+                "items", items,
+                "count", items.size()
+        );
+    }
+
+    public Map<String, Object> exportLeaveRequests(String token, String branchId) {
+        User actor = requireManagerOrAdmin(token);
+        assertCanAccessBranch(actor, branchId);
+        List<Map<String, Object>> rows = branchLeaveRequests(token, branchId);
+        StringBuilder csv = new StringBuilder();
+        csv.append("id,userName,startDate,endDate,leaveType,status,reason,approvedBy,createdAt\n");
+        for (Map<String, Object> row : rows) {
+            csv.append(csvCell(String.valueOf(row.get("id")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("userName")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("startDate")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("endDate")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("leaveType")))).append(',')
+                    .append(csvCell(String.valueOf(row.get("status")))).append(',')
+                    .append(csvCell(nullableString(row.get("reason")))).append(',')
+                    .append(csvCell(nullableString(row.get("approvedBy")))).append(',')
+                    .append(csvCell(nullableString(row.get("createdAt"))))
+                    .append('\n');
+        }
+        return encodeFilePayload(
+                "leave-requests-" + branchId + ".csv",
+                "text/csv; charset=utf-8",
+                csv.toString().getBytes(StandardCharsets.UTF_8),
+                Map.of("count", rows.size(), "branchId", branchId)
+        );
+    }
+
+    public Map<String, Object> exportBranchPayroll(String token, String branchId, String monthRaw, String formatRaw) {
+        User actor = requireManagerOrAdmin(token);
+        assertCanAccessBranch(actor, branchId);
+        List<Payroll> items = listBranchPayroll(token, branchId, monthRaw);
+        String format = normalizeExportFormat(formatRaw);
+        StringBuilder csv = new StringBuilder();
+        csv.append("payrollId,userId,month,totalWorkedHours,totalWorkedDays,baseSalaryEarned,totalAllowances,totalBonus,totalDeductions,netSalary,status\n");
+        for (Payroll payroll : items) {
+            csv.append(csvCell(payroll.getId())).append(',')
+                    .append(csvCell(payroll.getUserId())).append(',')
+                    .append(csvCell(payroll.getMonth() == null ? null : payroll.getMonth().toString())).append(',')
+                    .append(csvCell(valueOf(payroll.getTotalWorkedHours()))).append(',')
+                    .append(csvCell(valueOf(payroll.getTotalWorkedDays()))).append(',')
+                    .append(csvCell(valueOf(payroll.getBaseSalaryEarned()))).append(',')
+                    .append(csvCell(valueOf(payroll.getTotalAllowances()))).append(',')
+                    .append(csvCell(valueOf(payroll.getTotalBonus()))).append(',')
+                    .append(csvCell(valueOf(payroll.getTotalDeductions()))).append(',')
+                    .append(csvCell(valueOf(payroll.getNetSalary()))).append(',')
+                    .append(csvCell(payroll.getStatus() == null ? null : payroll.getStatus().name()))
+                    .append('\n');
+        }
+
+        if ("excel".equals(format)) {
+            return encodeFilePayload(
+                    "payroll-branch-" + branchId + ".csv",
+                    "text/csv; charset=utf-8",
+                    csv.toString().getBytes(StandardCharsets.UTF_8),
+                    Map.of("count", items.size(), "branchId", branchId)
+            );
+        }
+
+        List<String> lines = new ArrayList<>();
+        lines.add("Branch: " + (resolveBranchName(branchId) == null ? branchId : resolveBranchName(branchId)));
+        lines.add("Month: " + (monthRaw == null ? "-" : monthRaw));
+        lines.add("Total payroll rows: " + items.size());
+        lines.add("");
+        for (Payroll payroll : items) {
+            User staff = requireUser(payroll.getUserId());
+            lines.add(String.format(
+                    "%s | %s | net=%s | status=%s",
+                    staff.getName(),
+                    payroll.getMonth() == null ? "-" : payroll.getMonth(),
+                    valueOf(payroll.getNetSalary()),
+                    payroll.getStatus() == null ? "-" : payroll.getStatus().name()
+            ));
+        }
+        return encodeFilePayload(
+                "payroll-branch-" + branchId + ".pdf",
+                "application/pdf",
+                createPdf("Payroll monthly report", lines),
+                Map.of("count", items.size(), "branchId", branchId)
+        );
     }
 
     private Payroll buildPayrollForUser(User user, LocalDate from, LocalDate to, LocalDate month, User actor) {
@@ -918,5 +1150,86 @@ public class HrManagementService {
     private String resolveBranchName(String branchId) {
         if (branchId == null) return null;
         return branchRepository.findById(branchId).map(Branch::getName).orElse(null);
+    }
+
+    private Map<String, Object> encodeFilePayload(
+            String filename,
+            String contentType,
+            byte[] bytes,
+            Map<String, Object> extra
+    ) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("filename", filename);
+        response.put("contentType", contentType);
+        response.put("contentBase64", Base64.getEncoder().encodeToString(bytes));
+        response.put("size", bytes.length);
+        response.putAll(extra);
+        return response;
+    }
+
+    private byte[] createPdf(String title, List<String> lines) {
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            PDPage page = new PDPage();
+            document.addPage(page);
+            try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+                content.beginText();
+                content.setFont(PDType1Font.HELVETICA_BOLD, 14);
+                content.newLineAtOffset(40, 760);
+                content.showText(sanitizePdfText(title));
+                content.setFont(PDType1Font.HELVETICA, 10);
+                int maxLines = 48;
+                int written = 0;
+                for (String line : lines) {
+                    if (written >= maxLines) break;
+                    content.newLineAtOffset(0, -14);
+                    content.showText(sanitizePdfText(line));
+                    written++;
+                }
+                content.endText();
+            }
+            document.save(output);
+            return output.toByteArray();
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Khong tao duoc file PDF");
+        }
+    }
+
+    private String sanitizePdfText(String text) {
+        String value = text == null ? "" : text;
+        return value.replaceAll("[\\r\\n]+", " ");
+    }
+
+    private String normalizeExportFormat(String formatRaw) {
+        String format = normalizeUpper(formatRaw, "EXCEL");
+        if (!"EXCEL".equals(format) && !"PDF".equals(format)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "format chi ho tro excel/pdf");
+        }
+        return "PDF".equals(format) ? "pdf" : "excel";
+    }
+
+    private String nullableString(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private int safeInt(Object value) {
+        if (value == null) return 0;
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private String valueOf(BigDecimal value) {
+        return value == null ? "0" : value.toPlainString();
+    }
+
+    private String csvCell(String value) {
+        if (value == null) return "";
+        String escaped = value.replace("\"", "\"\"");
+        if (escaped.contains(",") || escaped.contains("\n") || escaped.contains("\r")) {
+            return "\"" + escaped + "\"";
+        }
+        return escaped;
     }
 }
