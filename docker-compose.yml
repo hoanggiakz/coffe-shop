@@ -255,6 +255,7 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3004
       DATABASE_URL: ${PAYMENT_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/paymentdb?schema=public}
+      KAFKA_REQUIRED: ${PAYMENT_KAFKA_REQUIRED:-false}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-}
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-token}
