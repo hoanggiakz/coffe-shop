@@ -196,6 +196,15 @@ public class UserService {
         return new AuthResponse(token, UserProfile.from(user));
     }
 
+    public Map<String, Object> validateStaffSession(String token) {
+        User actor = requireAnyStaff(token);
+        return Map.of(
+                "userId", actor.getId(),
+                "role", actor.getRole().name(),
+                "isActive", !Boolean.FALSE.equals(actor.getIsActive())
+        );
+    }
+
     public UserProfile getProfile(String userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Khong tim thay nguoi dung"));

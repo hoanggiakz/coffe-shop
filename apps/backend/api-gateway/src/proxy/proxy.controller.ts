@@ -129,15 +129,10 @@ export class ProxyController {
       return;
     }
 
-    const userId = String(payload?.sub || payload?.userId || '').trim();
-    if (!userId) {
-      throw new UnauthorizedException('Invalid token payload');
-    }
-
     const userServiceUrl = this.configService.get<string>('USER_SERVICE_URL') || 'http://user-service:3000';
     let response: globalThis.Response;
     try {
-      response = await fetch(`${userServiceUrl}/api/staff/${encodeURIComponent(userId)}`, {
+      response = await fetch(`${userServiceUrl}/api/users/session/validate`, {
         method: 'GET',
         headers: {
           Authorization: authHeader,
