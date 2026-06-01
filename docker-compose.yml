@@ -198,6 +198,8 @@ services:
       PORT: 3007
       DATABASE_URL: ${CHAT_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/chatdb?schema=public}
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
+      ORDER_SERVICE_URL: http://order-service:3001
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-token}
       REDIS_URL: redis://redis:6379
       SOCKET_IO_REDIS_ADAPTER: ${SOCKET_IO_REDIS_ADAPTER:-true}
       KAFKA_REQUIRED: ${CHAT_KAFKA_REQUIRED:-false}

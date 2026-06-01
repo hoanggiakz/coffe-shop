@@ -8,6 +8,9 @@ services:
     environment:
       - NODE_ENV=development
       - DATABASE_URL=postgresql://postgres:password@db:5432/chatdb?schema=public
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-me}
+      - ORDER_SERVICE_URL=${ORDER_SERVICE_URL:-http://host.docker.internal:3001}
+      - INTERNAL_SERVICE_TOKEN=${INTERNAL_SERVICE_TOKEN:-dev-internal-token}
       - REDIS_URL=redis://redis:6379
     depends_on:
       - db
