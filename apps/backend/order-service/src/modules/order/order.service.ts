@@ -18,6 +18,7 @@ import { Prisma, PromotionScope } from '@prisma/client';
 import { KafkaService } from '../../kafka/kafka.service';
 
 const ACTIVE_ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY'] as const;
+const KDS_ORDER_STATUSES = ['CONFIRMED', 'PREPARING', 'READY'] as const;
 
 type MenuAdminListQuery = {
   keyword?: string;
@@ -2787,6 +2788,80 @@ export class OrderService {
       ...params,
       branchId,
     });
+  }
+
+  async getKdsQueueByBranch(branchId: string, options?: { limit?: number }) {
+    const normalizedBranchId = this.normalizeBranchId(branchId);
+    if (!normalizedBranchId) {
+      throw new BadRequestException('branchId khong hop le');
+    }
+    const maxDisplay = Math.max(Number(process.env.KDS_MAX_ORDERS_DISPLAY || 12), 1);
+    const warningThreshold = Math.max(Number(process.env.KDS_WARNING_THRESHOLD_MINUTES || 10), 1);
+    const criticalThreshold = Math.max(Number(process.env.KDS_CRITICAL_THRESHOLD_MINUTES || 20), warningThreshold + 1);
+    const requestedLimit = Number(options?.limit || maxDisplay);
+    const limit = Math.max(1, Math.min(requestedLimit, maxDisplay));
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        branchId: normalizedBranchId,
+        status: { in: KDS_ORDER_STATUSES as any },
+      },
+      include: {
+        orderItems: true,
+      },
+      orderBy: [
+        { status: 'asc' },
+        { createdAt: 'asc' },
+      ],
+      take: limit,
+    });
+    const enriched = await this.enrichOrders(orders as any[]);
+    const nowMs = Date.now();
+    const mapped = (enriched as any[]).map((order) => {
+      const createdAtMs = new Date(order.createdAt).getTime();
+      const agingMinutes = Math.max(0, Math.floor((nowMs - createdAtMs) / 60000));
+      const priority =
+        agingMinutes >= criticalThreshold
+          ? 'CRITICAL'
+          : agingMinutes >= warningThreshold
+            ? 'WARNING'
+            : 'NORMAL';
+      const kitchenItems = Array.isArray(order.orderItems)
+        ? order.orderItems
+            .filter((item: any) => ['WAITING', 'PREPARING', 'DONE'].includes(String(item.status || '').toUpperCase()))
+            .map((item: any) => ({
+              itemId: item.id,
+              menuItemId: item.menuItemId,
+              quantity: item.quantity,
+              note: item.note,
+              status: this.toKitchenItemStatus(String(item.status || 'WAITING')),
+              startedAt: item.startedAt,
+              completedAt: item.completedAt,
+            }))
+        : [];
+      return {
+        orderId: order.id,
+        tableId: order.tableId,
+        tableNumber: order.tableNumber ?? null,
+        status: order.status,
+        createdAt: order.createdAt,
+        agingMinutes,
+        priority,
+        itemCount: kitchenItems.length,
+        items: kitchenItems,
+      };
+    });
+    return {
+      branchId: normalizedBranchId,
+      generatedAt: new Date().toISOString(),
+      thresholds: {
+        warningMinutes: warningThreshold,
+        criticalMinutes: criticalThreshold,
+      },
+      maxDisplay,
+      total: mapped.length,
+      orders: mapped,
+    };
   }
 
   async findOneByBranch(branchId: string, orderId: string) {

@@ -32,6 +32,16 @@ export class BranchMenuController {
     return this.orderService.findOneByBranch(branchId, orderId);
   }
 
+  @Get(':branchId/kds')
+  getKdsQueue(
+    @Param('branchId') branchId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.orderService.getKdsQueueByBranch(branchId, {
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
   @Post(':branchId/cart/validate')
   @HttpCode(HttpStatus.OK)
   validateBranchCart(
