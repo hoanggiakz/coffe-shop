@@ -260,6 +260,34 @@ export class ProxyController {
       return
     }
 
+    // Table operations: QR/read/call-staff are public customer flows; writes are staff/admin flows.
+    if (path.startsWith('/api/tables')) {
+      const isPublicTableRead =
+        method === 'GET' &&
+        (
+          path === '/api/tables' ||
+          /^\/api\/tables\/[^/]+$/.test(path) ||
+          /^\/api\/tables\/[^/]+\/qr$/.test(path)
+        );
+      const isPublicCallStaff =
+        method === 'POST' &&
+        (
+          /^\/api\/tables\/[^/]+\/call-staff$/.test(path) ||
+          /^\/api\/tables\/[^/]+\/call-waiter$/.test(path)
+        );
+      if (isPublicTableRead || isPublicCallStaff) {
+        return;
+      }
+      if (method === 'POST' && (path === '/api/tables' || path === '/api/tables/qr/batch' || path === '/api/tables/qr/batch/download')) {
+        this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+        return;
+      }
+      if ((method === 'PATCH' || method === 'DELETE') && /^\/api\/tables\/[^/]+/.test(path)) {
+        this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+        return;
+      }
+    }
+
     // Branch management write actions (admin only)
     if (path.startsWith('/api/users/admin/branches')) {
       this.requireRoles(req, ['ADMIN']);
@@ -412,6 +440,10 @@ export class ProxyController {
     }
 
     // Staff-only payment confirmation actions
+    if (method === 'GET' && path === '/api/v1/payments') {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
+      return;
+    }
     if (method === 'POST' && /^\/api\/v1\/payments\/[^/]+\/confirm-cash$/.test(path)) {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
       return;

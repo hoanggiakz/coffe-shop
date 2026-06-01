@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Get, Param, Query, Req } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Get, Param, Query, Req, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -43,11 +43,13 @@ export class PaymentController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   findRecent(
+    @Req() req: Request,
     @Query('limit') limit?: string,
     @Query('provider') provider?: string,
     @Query('status') status?: string,
     @Query('reconcileOnline') reconcileOnline?: string,
   ) {
+    this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF', 'INTERNAL_SERVICE']);
     return this.paymentService.listRecentPayments({
       limit,
       provider,
@@ -171,8 +173,17 @@ export class PaymentController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  confirmCash(@Param('paymentId') paymentId: string, @Body() dto: ConfirmCashDto) {
+  confirmCash(@Req() req: Request, @Param('paymentId') paymentId: string, @Body() dto: ConfirmCashDto) {
+    this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF', 'INTERNAL_SERVICE']);
     return this.paymentService.confirmCashPayment(paymentId, dto.confirmedBy, dto.amountReceived);
+  }
+
+  private requireRoles(req: Request, allowed: string[]) {
+    const roles = Array.isArray((req as any).user?.roles) ? (req as any).user.roles : [];
+    const normalized = roles.map((role: unknown) => String(role || '').trim().toUpperCase());
+    if (!allowed.some((role) => normalized.includes(role))) {
+      throw new ForbiddenException('FORBIDDEN_ROLE');
+    }
   }
 
 }
