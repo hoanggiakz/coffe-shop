@@ -252,6 +252,7 @@ export class KdsGateway implements OnGatewayInit, OnGatewayConnection, OnGateway
       const orderStatus = this.kdsOrderSyncService.resolveOrderStatus(order);
 
       this.server.to(`kds:${branchId}`).emit('item-updated', {
+        type: 'KDS_ITEM_STATUS',
         orderId,
         itemId,
         status,
@@ -259,6 +260,7 @@ export class KdsGateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         ts: new Date().toISOString(),
       });
       this.server.to(`kds:${branchId}`).emit('order-status-updated', {
+        type: orderStatus === 'READY' ? 'KDS_ORDER_READY' : 'KDS_ITEM_STATUS',
         orderId,
         status: orderStatus,
         completedItems,
@@ -305,6 +307,7 @@ export class KdsGateway implements OnGatewayInit, OnGatewayConnection, OnGateway
       const totalItems = updatedItems.length;
       const orderStatus = this.kdsOrderSyncService.resolveOrderStatus(updatedOrder);
       this.server.to(`kds:${branchId}`).emit('order-status-updated', {
+        type: orderStatus === 'READY' ? 'KDS_ORDER_READY' : 'KDS_ITEM_STATUS',
         orderId,
         status: orderStatus,
         completedItems,

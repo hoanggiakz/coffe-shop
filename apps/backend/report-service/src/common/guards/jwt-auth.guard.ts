@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 
@@ -14,6 +14,10 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     request.user = this.verifyJwt(token);
+    const roles = Array.isArray(request.user?.roles) ? request.user.roles : [];
+    if (!roles.some((role: string) => role === 'ADMIN' || role === 'MANAGER')) {
+      throw new ForbiddenException('FORBIDDEN_ROLE');
+    }
     return true;
   }
 

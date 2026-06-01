@@ -451,7 +451,7 @@ export class OrderController {
     @Headers('x-actor-role') actorRole?: string,
     @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
-    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER']);
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
     await this.assertOrderScope(role, actorBranchId, id);
     return this.orderService.updateStatus(id, dto);
   }
@@ -634,7 +634,7 @@ export class OrderController {
     @Headers('x-actor-role') actorRole?: string,
     @Headers('x-actor-branch-id') actorBranchId?: string,
   ) {
-    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER']);
+    const role = this.assertRoleAllowed(actorRole, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
     await this.assertOrderScope(role, actorBranchId, orderId);
     return this.orderService.confirmOrderPayment(orderId, payload);
   }

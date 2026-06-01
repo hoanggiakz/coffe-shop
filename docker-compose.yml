@@ -136,6 +136,8 @@ services:
       APP_CHAT_SERVICE_URL: http://chat-service:3007/api/chats
       APP_ORDER_SERVICE_URL: http://order-service:3001/api/orders
       SEED_TABLES_ON_STARTUP: ${SEED_TABLES_ON_STARTUP:-false}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-token}
     depends_on:
       postgres:
         condition: service_healthy
