@@ -195,6 +195,7 @@ services:
       NODE_ENV: ${CHAT_NODE_ENV:-production}
       PORT: 3007
       DATABASE_URL: ${CHAT_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/chatdb?schema=public}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
       REDIS_URL: redis://redis:6379
       SOCKET_IO_REDIS_ADAPTER: ${SOCKET_IO_REDIS_ADAPTER:-true}
       KAFKA_REQUIRED: ${CHAT_KAFKA_REQUIRED:-false}

@@ -41,9 +41,11 @@ export function getSocket(): Socket {
       timeout: 10000,
       autoConnect: false,
       auth: token ? { token } : undefined,
+      query: token ? { access_token: token } : undefined,
     })
   } else {
     socket.auth = token ? { token } : {}
+    socket.io.opts.query = token ? { access_token: token } : {}
   }
   return socket
 }

@@ -206,6 +206,7 @@ export default function Kitchen() {
       reconnectionDelayMax: 5000,
       timeout: 10000,
       auth: token ? { token } : undefined,
+      query: token ? { access_token: token } : undefined,
     })
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null
     kdsSocketRef.current = socket

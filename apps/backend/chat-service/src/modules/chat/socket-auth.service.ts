@@ -13,10 +13,19 @@ export type SocketUser = {
 export class SocketAuthService {
   constructor(private readonly configService: ConfigService) {}
 
+  private normalizeToken(rawToken: unknown): string {
+    const raw = String(rawToken || '').trim();
+    if (!raw) return '';
+    return raw.replace(/^Bearer\s+/i, '').trim();
+  }
+
   verifyStaffFromSocket(socket: Socket): SocketUser | null {
     const token =
-      String(socket.handshake.auth?.token || '').trim() ||
-      String(socket.handshake.headers?.authorization || '').replace(/^Bearer\s+/i, '').trim();
+      this.normalizeToken(socket.handshake.auth?.token) ||
+      this.normalizeToken(socket.handshake.auth?.access_token) ||
+      this.normalizeToken(socket.handshake.query?.access_token) ||
+      this.normalizeToken(socket.handshake.query?.token) ||
+      this.normalizeToken(socket.handshake.headers?.authorization);
     if (!token) return null;
 
     const secretRaw = String(this.configService.get<string>('JWT_SECRET') || '');
@@ -36,4 +45,3 @@ export class SocketAuthService {
     }
   }
 }
-
