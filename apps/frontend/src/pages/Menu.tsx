@@ -350,7 +350,6 @@ export default function Menu() {
         setIsUploadingImage(false)
       })
     // Reset input value to allow selecting same file again
-    // eslint-disable-next-line no-param-reassign
     ;(document.activeElement as HTMLInputElement | null)?.blur()
   }
 
