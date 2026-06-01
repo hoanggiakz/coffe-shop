@@ -32,6 +32,14 @@ def test_quality_summary_contract():
     assert 'fallbackRatios' in payload
 
 
+def test_fallback_trend_contract():
+    response = client.get('/api/ai/ops/fallback-trend', params={'windowMinutes': 60})
+    assert response.status_code == 200
+    payload = response.json()
+    assert 'points' in payload
+    assert isinstance(payload.get('points'), list)
+
+
 def test_recommend_get_contract():
     response = client.get('/api/ai/recommend', params={'branchId': 'branch-e2e', 'limit': 3})
     assert response.status_code == 200

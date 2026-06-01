@@ -165,6 +165,8 @@ KB_STATE: dict[str, Any] = {
 FORECAST_CRON_STATE: dict[str, Any] = {"running": False, "lastRunAt": None}
 RATE_LIMIT_COUNTERS: dict[str, dict[str, int]] = {}
 SOURCE_TRACKING: dict[str, dict[str, int]] = {}
+FALLBACK_TREND_HISTORY: dict[str, list[dict[str, Any]]] = {}
+FALLBACK_TREND_MAX_POINTS = int(os.getenv("AI_FALLBACK_TREND_MAX_POINTS", "240"))
 
 
 @app.middleware("http")
@@ -268,6 +270,16 @@ def track_response_source(endpoint: str, source: str) -> None:
     bucket[normalized_source] = int(bucket.get(normalized_source, 0)) + 1
     SOURCE_TRACKING[normalized_endpoint] = bucket
 
+    point = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "source": normalized_source,
+    }
+    timeline = FALLBACK_TREND_HISTORY.get(normalized_endpoint) or []
+    timeline.append(point)
+    if len(timeline) > max(20, FALLBACK_TREND_MAX_POINTS):
+        timeline = timeline[-max(20, FALLBACK_TREND_MAX_POINTS):]
+    FALLBACK_TREND_HISTORY[normalized_endpoint] = timeline
+
 
 def build_fallback_ratio_snapshot() -> dict[str, Any]:
     endpoint_summary: dict[str, Any] = {}
@@ -282,6 +294,44 @@ def build_fallback_ratio_snapshot() -> dict[str, Any]:
             "sources": {key: int(value) for key, value in sources.items()},
         }
     return endpoint_summary
+
+
+def build_fallback_trend_snapshot(window_minutes: int = 60, endpoint: str | None = None) -> list[dict[str, Any]]:
+    safe_window = max(5, min(window_minutes, 24 * 60))
+    now = datetime.now(timezone.utc)
+    target_endpoints = [str(endpoint).strip().lower()] if endpoint else list(FALLBACK_TREND_HISTORY.keys())
+    rows: list[dict[str, Any]] = []
+    for ep in target_endpoints:
+        timeline = FALLBACK_TREND_HISTORY.get(ep) or []
+        if not timeline:
+            continue
+        by_bucket: dict[str, dict[str, int]] = {}
+        for point in timeline:
+            try:
+                ts = datetime.fromisoformat(str(point.get("timestamp")))
+            except Exception:
+                continue
+            if (now - ts) > timedelta(minutes=safe_window):
+                continue
+            bucket_key = ts.replace(second=0, microsecond=0).isoformat()
+            bucket = by_bucket.get(bucket_key) or {"total": 0, "fallback": 0}
+            bucket["total"] += 1
+            if str(point.get("source") or "").lower() == "fallback":
+                bucket["fallback"] += 1
+            by_bucket[bucket_key] = bucket
+        for bucket_time in sorted(by_bucket.keys()):
+            total = by_bucket[bucket_time]["total"]
+            fallback = by_bucket[bucket_time]["fallback"]
+            rows.append(
+                {
+                    "endpoint": ep,
+                    "timestamp": bucket_time,
+                    "totalResponses": total,
+                    "fallbackResponses": fallback,
+                    "fallbackRatio": round((fallback / total) if total > 0 else 0.0, 4),
+                }
+            )
+    return rows
 
 
 def reload_knowledge_base(source: str = "manual") -> dict[str, Any]:
@@ -1024,6 +1074,24 @@ def ai_ops_quality_summary(request: Request, branchId: str | None = None) -> dic
             "highFallbackEndpoints": critical_ratio,
             "count": len(critical_ratio),
         },
+    }
+
+
+@app.get("/api/ai/ops/fallback-trend")
+def ai_ops_fallback_trend(
+    request: Request,
+    branchId: str | None = None,
+    endpoint: str | None = None,
+    windowMinutes: int = 60,
+) -> dict[str, Any]:
+    authorize_request(request, branchId, {"ADMIN", "MANAGER"})
+    rows = build_fallback_trend_snapshot(windowMinutes, endpoint)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "branchId": branchId,
+        "windowMinutes": max(5, min(windowMinutes, 24 * 60)),
+        "endpoint": endpoint,
+        "points": rows,
     }
 
 
