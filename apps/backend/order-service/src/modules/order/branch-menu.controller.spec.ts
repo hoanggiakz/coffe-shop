@@ -19,8 +19,7 @@ describe('BranchMenuController', () => {
   });
 
   it('forwards branch kds queue request', () => {
-    controller.getKdsQueue('branch-1', '8');
+    controller.getKdsQueue('branch-1', '8', 'BARISTA', 'branch-1');
     expect(orderService.getKdsQueueByBranch).toHaveBeenCalledWith('branch-1', { limit: 8 });
   });
 });
-
