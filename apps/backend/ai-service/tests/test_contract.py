@@ -91,6 +91,8 @@ def test_recommend_ab_summary_contract():
     assert payload.get('branchId') == 'branch-e2e'
     assert 'groups' in payload
     assert 'uplift' in payload
+    assert 'significance' in payload
+    assert 'decisionReady' in payload.get('significance', {})
 
 
 def test_recommend_feedback_contract():

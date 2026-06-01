@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import math
 import os
 import re
 import time
@@ -180,6 +181,7 @@ FALLBACK_TREND_MAX_POINTS = int(os.getenv("AI_FALLBACK_TREND_MAX_POINTS", "240")
 RECOMMEND_AB_EVENTS: list[dict[str, Any]] = []
 RECOMMEND_AB_EVENT_LIMIT = int(os.getenv("AI_RECOMMEND_AB_EVENT_LIMIT", "2000"))
 AI_RECOMMEND_AB_TREATMENT_PERCENT = int(os.getenv("AI_RECOMMEND_AB_TREATMENT_PERCENT", "50"))
+AI_RECOMMEND_AB_MIN_SAMPLE_PER_GROUP = int(os.getenv("AI_RECOMMEND_AB_MIN_SAMPLE_PER_GROUP", "120"))
 SENTIMENT_TELEMETRY: dict[str, Any] = {
     "totals": {"requests": 0, "geminiSuccess": 0, "geminiError": 0, "fallbackLexicon": 0},
     "confidenceSum": {"gemini": 0.0, "fallback": 0.0},
@@ -388,17 +390,67 @@ def build_recommend_ab_summary(branch_id: str, lookback_hours: int = 24) -> dict
         }
     treatment = groups.get("treatment") or {"ctr": 0.0, "addToCartRate": 0.0, "purchaseRate": 0.0}
     control = groups.get("control") or {"ctr": 0.0, "addToCartRate": 0.0, "purchaseRate": 0.0}
+    treatment_shown = int((groups.get("treatment") or {}).get("shown", 0))
+    control_shown = int((groups.get("control") or {}).get("shown", 0))
     uplift = {
         "ctr": round(float(treatment["ctr"]) - float(control["ctr"]), 4),
         "addToCartRate": round(float(treatment["addToCartRate"]) - float(control["addToCartRate"]), 4),
         "purchaseRate": round(float(treatment["purchaseRate"]) - float(control["purchaseRate"]), 4),
     }
+    min_sample = max(30, AI_RECOMMEND_AB_MIN_SAMPLE_PER_GROUP)
+
+    def confidence_from_diff(p_treatment: float, p_control: float, n_treatment: int, n_control: int) -> tuple[float, float]:
+        if n_treatment <= 0 or n_control <= 0:
+            return 0.0, 1.0
+        pooled = ((p_treatment * n_treatment) + (p_control * n_control)) / max(1, n_treatment + n_control)
+        se = (pooled * (1 - pooled) * ((1 / max(1, n_treatment)) + (1 / max(1, n_control)))) ** 0.5
+        if se <= 1e-9:
+            return 1.0, 0.0
+        z_score = abs((p_treatment - p_control) / se)
+        cdf = 0.5 * (1 + math.erf(z_score / (2 ** 0.5)))
+        p_value = max(0.0, min(1.0, 2 * (1 - cdf)))
+        confidence = max(0.0, min(1.0, 1 - p_value))
+        return round(confidence, 4), round(p_value, 6)
+
+    ctr_conf, ctr_p = confidence_from_diff(float(treatment["ctr"]), float(control["ctr"]), treatment_shown, control_shown)
+    cart_conf, cart_p = confidence_from_diff(
+        float(treatment["addToCartRate"]),
+        float(control["addToCartRate"]),
+        treatment_shown,
+        control_shown,
+    )
+    purchase_conf, purchase_p = confidence_from_diff(
+        float(treatment["purchaseRate"]),
+        float(control["purchaseRate"]),
+        treatment_shown,
+        control_shown,
+    )
+    sample_ready = treatment_shown >= min_sample and control_shown >= min_sample
+    confidence_ready = ctr_conf >= 0.95 and cart_conf >= 0.95
+    decision_ready = bool(sample_ready and confidence_ready)
     return {
         "branchId": branch_id,
         "lookbackHours": safe_hours,
         "events": len(rows),
         "groups": groups,
         "uplift": uplift,
+        "significance": {
+            "minSamplePerGroup": min_sample,
+            "sampleSize": {"treatment": treatment_shown, "control": control_shown},
+            "sampleReady": sample_ready,
+            "confidence": {
+                "ctr": ctr_conf,
+                "addToCartRate": cart_conf,
+                "purchaseRate": purchase_conf,
+            },
+            "pValue": {
+                "ctr": ctr_p,
+                "addToCartRate": cart_p,
+                "purchaseRate": purchase_p,
+            },
+            "confidenceReady": confidence_ready,
+            "decisionReady": decision_ready,
+        },
     }
 
 

@@ -203,6 +203,15 @@ interface RecommendAbSummary {
   groups: Record<string, { shown: number; click: number; add_to_cart: number; purchase: number; ctr: number; addToCartRate: number; purchaseRate: number }>
   uplift: { ctr: number; addToCartRate: number; purchaseRate: number }
   events: number
+  significance?: {
+    minSamplePerGroup: number
+    sampleSize: { treatment: number; control: number }
+    sampleReady: boolean
+    confidence: { ctr: number; addToCartRate: number; purchaseRate: number }
+    pValue: { ctr: number; addToCartRate: number; purchaseRate: number }
+    confidenceReady: boolean
+    decisionReady: boolean
+  }
 }
 
 function formatSentimentIssueLabel(issue: string): string {
@@ -903,6 +912,26 @@ export default function Reports() {
                 </p>
               ))}
             </div>
+            {recommendAbSummary.significance && (
+              <div
+                className={`rounded-xl border px-3 py-2 text-xs ${
+                  recommendAbSummary.significance.decisionReady
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    : 'border-amber-200 bg-amber-50 text-amber-800'
+                }`}
+              >
+                <p className="font-semibold">
+                  {recommendAbSummary.significance.decisionReady ? 'Decision-ready' : 'Chưa decision-ready'}
+                </p>
+                <p>
+                  Sample: treatment {recommendAbSummary.significance.sampleSize.treatment} / control {recommendAbSummary.significance.sampleSize.control}
+                  {' '} (min {recommendAbSummary.significance.minSamplePerGroup})
+                </p>
+                <p>
+                  Confidence CTR {Math.round(recommendAbSummary.significance.confidence.ctr * 100)}% · Add-to-cart {Math.round(recommendAbSummary.significance.confidence.addToCartRate * 100)}%
+                </p>
+              </div>
+            )}
           </div>
         </Card>
       )}
