@@ -20,6 +20,7 @@ import com.coffeeshop.userservice.entity.SalaryHistory;
 import com.coffeeshop.userservice.entity.SalaryAdvance;
 import com.coffeeshop.userservice.entity.SalaryComponent;
 import com.coffeeshop.userservice.service.HrManagementService;
+import com.coffeeshop.userservice.service.HrRealtimeHub;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -35,6 +36,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -45,6 +47,7 @@ import java.util.Map;
 public class HrManagementController {
 
     private final HrManagementService hrManagementService;
+    private final HrRealtimeHub hrRealtimeHub;
 
     @GetMapping("/staff/{userId}")
     public ResponseEntity<StaffResponse> getStaff(
@@ -241,6 +244,23 @@ public class HrManagementController {
             @RequestParam(value = "to", required = false) String to
     ) {
         return ResponseEntity.ok(hrManagementService.listAttendance(extractToken(authHeader), branchId, from, to));
+    }
+
+    @GetMapping("/branches/{branchId}/hr/events")
+    public SseEmitter branchHrEvents(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String branchId
+    ) {
+        hrManagementService.assertRealtimeBranchAccess(extractToken(authHeader), branchId);
+        return hrRealtimeHub.subscribe(branchId);
+    }
+
+    @GetMapping("/hr/realtime/metrics")
+    public ResponseEntity<Map<String, Object>> hrRealtimeMetrics(
+            @RequestHeader("Authorization") String authHeader
+    ) {
+        hrManagementService.assertRealtimeAdminOrManager(extractToken(authHeader));
+        return ResponseEntity.ok(hrRealtimeHub.metrics());
     }
 
     @GetMapping("/branches/{branchId}/attendance/export")

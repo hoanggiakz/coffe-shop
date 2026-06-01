@@ -44,6 +44,8 @@ export class JwtAuthGuard implements CanActivate {
       email?: string;
       role?: string;
       roles?: string[];
+      branchId?: string;
+      branch_id?: string;
       exp?: number;
     };
 
@@ -64,6 +66,7 @@ export class JwtAuthGuard implements CanActivate {
       sub: String(payload.sub),
       email: payload.email ? String(payload.email) : undefined,
       roles: roles.map((role) => String(role).toUpperCase()),
+      branchId: String(payload.branchId || payload.branch_id || '').trim() || undefined,
     };
   }
 

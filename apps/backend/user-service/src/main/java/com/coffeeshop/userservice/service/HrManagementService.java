@@ -91,6 +91,7 @@ public class HrManagementService {
     private final PayrollDetailRepository payrollDetailRepository;
     private final UserService userService;
     private final JwtUtil jwtUtil;
+    private final HrRealtimeHub hrRealtimeHub;
 
     public List<StaffResponse> listBranchStaff(String token, String branchId) {
         User actor = requireManagerOrAdmin(token);
@@ -299,6 +300,11 @@ public class HrManagementService {
         next.setNotes(normalizeText(request.getNotes()));
         next.setCreatedBy(actor.getId());
         WorkSchedule saved = workScheduleRepository.save(next);
+        hrRealtimeHub.publish(staff.getBranchId(), "schedule.updated", Map.of(
+                "userId", staff.getId(),
+                "date", date.toString(),
+                "shiftId", shift.getId()
+        ));
         return toScheduleResponse(saved);
     }
 
@@ -341,6 +347,10 @@ public class HrManagementService {
         User staff = requireUser(schedule.getUserId());
         assertCanAccessBranch(actor, staff.getBranchId());
         workScheduleRepository.delete(schedule);
+        hrRealtimeHub.publish(staff.getBranchId(), "schedule.deleted", Map.of(
+                "userId", staff.getId(),
+                "date", schedule.getDate().toString()
+        ));
         return Map.of("id", scheduleId, "deleted", true);
     }
 
@@ -360,6 +370,10 @@ public class HrManagementService {
         attendance.setCheckInNote(normalizeText(request.getNote()));
         attendance.setStatus(resolveAttendanceStatus(staff.getId(), date, attendance.getCheckInTime(), null));
         HrAttendance saved = hrAttendanceRepository.save(attendance);
+        hrRealtimeHub.publish(staff.getBranchId(), "attendance.checkin", Map.of(
+                "userId", staff.getId(),
+                "date", date.toString()
+        ));
         return toAttendanceResponse(saved);
     }
 
@@ -376,6 +390,11 @@ public class HrManagementService {
         attendance.setCheckOutNote(normalizeText(request.getNote()));
         recalculateAttendance(attendance);
         HrAttendance saved = hrAttendanceRepository.save(attendance);
+        hrRealtimeHub.publish(staff.getBranchId(), "attendance.checkout", Map.of(
+                "userId", staff.getId(),
+                "date", date.toString(),
+                "workedMinutes", saved.getWorkedMinutes()
+        ));
         return toAttendanceResponse(saved);
     }
 
@@ -412,7 +431,12 @@ public class HrManagementService {
         recalculateAttendance(attendance);
         attendance.setApprovedBy(actor.getId());
         attendance.setApprovedAt(LocalDateTime.now());
-        return toAttendanceResponse(hrAttendanceRepository.save(attendance));
+        HrAttendance saved = hrAttendanceRepository.save(attendance);
+        hrRealtimeHub.publish(staff.getBranchId(), "attendance.updated", Map.of(
+                "userId", staff.getId(),
+                "date", saved.getDate().toString()
+        ));
+        return toAttendanceResponse(saved);
     }
 
     public Map<String, Object> approveAttendance(String token, String attendanceId) {
@@ -423,7 +447,12 @@ public class HrManagementService {
         assertCanAccessBranch(actor, staff.getBranchId());
         attendance.setApprovedBy(actor.getId());
         attendance.setApprovedAt(LocalDateTime.now());
-        return toAttendanceResponse(hrAttendanceRepository.save(attendance));
+        HrAttendance saved = hrAttendanceRepository.save(attendance);
+        hrRealtimeHub.publish(staff.getBranchId(), "attendance.approved", Map.of(
+                "userId", staff.getId(),
+                "date", saved.getDate().toString()
+        ));
+        return toAttendanceResponse(saved);
     }
 
     public Map<String, Object> createLeaveRequest(String token, LeaveRequestCreateRequest request) {
@@ -436,6 +465,10 @@ public class HrManagementService {
                 .reason(normalizeText(request.getReason()))
                 .status(LeaveRequest.LeaveStatus.PENDING)
                 .build());
+        hrRealtimeHub.publish(actor.getBranchId(), "leave.created", Map.of(
+                "userId", actor.getId(),
+                "leaveId", saved.getId()
+        ));
         return toLeaveResponse(saved);
     }
 
@@ -463,7 +496,12 @@ public class HrManagementService {
         assertCanAccessBranch(actor, staff.getBranchId());
         leave.setStatus(approved ? LeaveRequest.LeaveStatus.APPROVED : LeaveRequest.LeaveStatus.REJECTED);
         leave.setApprovedBy(actor.getId());
-        return toLeaveResponse(leaveRequestRepository.save(leave));
+        LeaveRequest saved = leaveRequestRepository.save(leave);
+        hrRealtimeHub.publish(staff.getBranchId(), approved ? "leave.approved" : "leave.rejected", Map.of(
+                "userId", staff.getId(),
+                "leaveId", saved.getId()
+        ));
+        return toLeaveResponse(saved);
     }
 
     public List<SalaryComponent> listSalaryComponents(String token, String branchId) {
@@ -554,6 +592,7 @@ public class HrManagementService {
             payrollRepository.save(payroll);
             generated++;
         }
+        hrRealtimeHub.publish(branchId, "payroll.generated", Map.of("month", month.toString(), "generated", generated));
         return Map.of("month", month.toString(), "generated", generated);
     }
 
@@ -575,7 +614,9 @@ public class HrManagementService {
         payroll.setStatus(Payroll.PayrollStatus.APPROVED);
         payroll.setApprovedBy(actor.getId());
         payroll.setApprovedAt(LocalDateTime.now());
-        return payrollRepository.save(payroll);
+        Payroll saved = payrollRepository.save(payroll);
+        hrRealtimeHub.publish(user.getBranchId(), "payroll.approved", Map.of("payrollId", saved.getId(), "userId", user.getId()));
+        return saved;
     }
 
     public Payroll payPayroll(String token, String payrollId) {
@@ -585,7 +626,9 @@ public class HrManagementService {
         User user = requireUser(payroll.getUserId());
         assertCanAccessBranch(actor, user.getBranchId());
         payroll.setStatus(Payroll.PayrollStatus.PAID);
-        return payrollRepository.save(payroll);
+        Payroll saved = payrollRepository.save(payroll);
+        hrRealtimeHub.publish(user.getBranchId(), "payroll.paid", Map.of("payrollId", saved.getId(), "userId", user.getId()));
+        return saved;
     }
 
     public Map<String, Object> exportPayroll(String token, String payrollId) {
@@ -908,6 +951,11 @@ public class HrManagementService {
                 .approvedBy(actor.getRole() == User.Role.STAFF ? null : actor.getId())
                 .build();
         SalaryAdvance saved = salaryAdvanceRepository.save(advance);
+        hrRealtimeHub.publish(target.getBranchId(), "salary-advance.created", Map.of(
+                "advanceId", saved.getId(),
+                "userId", target.getId(),
+                "status", saved.getStatus().name()
+        ));
         return Map.of("id", saved.getId(), "status", saved.getStatus().name());
     }
 
@@ -934,7 +982,22 @@ public class HrManagementService {
         }
         advance.setStatus(approved ? SalaryAdvance.SalaryAdvanceStatus.APPROVED : SalaryAdvance.SalaryAdvanceStatus.REJECTED);
         advance.setApprovedBy(actor.getId());
-        return salaryAdvanceRepository.save(advance);
+        SalaryAdvance saved = salaryAdvanceRepository.save(advance);
+        hrRealtimeHub.publish(target.getBranchId(), approved ? "salary-advance.approved" : "salary-advance.rejected", Map.of(
+                "advanceId", saved.getId(),
+                "userId", target.getId(),
+                "status", saved.getStatus().name()
+        ));
+        return saved;
+    }
+
+    public void assertRealtimeBranchAccess(String token, String branchId) {
+        User actor = requireManagerOrAdmin(token);
+        assertCanAccessBranch(actor, branchId);
+    }
+
+    public void assertRealtimeAdminOrManager(String token) {
+        requireManagerOrAdmin(token);
     }
 
     private Payroll buildPayrollForUser(User user, LocalDate from, LocalDate to, LocalDate month, User actor) {

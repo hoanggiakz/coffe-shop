@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, Res, Sse, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { ReportsService } from './reports.service';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -11,13 +11,17 @@ import {
   TopItemsQueryDto,
 } from './dto/report-query.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ReportsRealtimeService } from './reports-realtime.service';
 
 @ApiTags('reports')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reportsService: ReportsService) {}
+  constructor(
+    private readonly reportsService: ReportsService,
+    private readonly reportsRealtimeService: ReportsRealtimeService,
+  ) {}
 
   @Get('revenue')
   @ApiOperation({ summary: 'M-19 Revenue report by date range and period' })
@@ -27,6 +31,7 @@ export class ReportsController {
   @ApiQuery({ name: 'groupBy', required: false, enum: ['day', 'week', 'month', 'year'] })
   @ApiResponse({ status: 200 })
   async getRevenue(@Query() query: RevenueReportQueryDto) {
+    this.reportsRealtimeService.emitRefresh(query.branchId, 'revenue-request');
     return this.reportsService.getRevenueReport(query);
   }
 
@@ -38,6 +43,7 @@ export class ReportsController {
   @ApiQuery({ name: 'limit', required: false, example: 10 })
   @ApiResponse({ status: 200 })
   async getTopItems(@Query() query: TopItemsQueryDto) {
+    this.reportsRealtimeService.emitRefresh(query.branchId, 'top-items-request');
     return this.reportsService.getTopItems(query);
   }
 
@@ -50,6 +56,7 @@ export class ReportsController {
   @ApiQuery({ name: 'movementLimit', required: false, example: 300 })
   @ApiResponse({ status: 200 })
   async getInventory(@Query() query: InventoryReportQueryDto) {
+    this.reportsRealtimeService.emitRefresh(query.branchId, 'inventory-request');
     return this.reportsService.getInventoryReport(query);
   }
 
@@ -61,6 +68,7 @@ export class ReportsController {
   @ApiQuery({ name: 'limit', required: false, example: 20 })
   @ApiResponse({ status: 200 })
   async getStaffPerformance(@Query() query: StaffPerformanceQueryDto) {
+    this.reportsRealtimeService.emitRefresh(query.branchId, 'staff-performance-request');
     return this.reportsService.getStaffPerformance(query);
   }
 
@@ -72,6 +80,7 @@ export class ReportsController {
   @ApiQuery({ name: 'groupBy', required: false, enum: ['day', 'week', 'month', 'year'] })
   @ApiResponse({ status: 200 })
   async getDashboard(@Query() query: DashboardQueryDto) {
+    this.reportsRealtimeService.emitRefresh(query.branchId, 'dashboard-request');
     return this.reportsService.getDashboard(query);
   }
 
@@ -82,6 +91,20 @@ export class ReportsController {
   @ApiResponse({ status: 200 })
   async getDailyStats(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string) {
     return this.reportsService.getDailyStats(dateFrom, dateTo);
+  }
+
+  @Sse('realtime/stream')
+  streamRealtime(@Req() req: any, @Query('branchId') branchId?: string) {
+    const actorBranchId = String(req?.user?.branchId || '').trim();
+    const roles = Array.isArray(req?.user?.roles) ? req.user.roles.map((item: string) => String(item).toUpperCase()) : [];
+    const isAdmin = roles.includes('ADMIN');
+    const scopedBranchId = isAdmin ? branchId : branchId || actorBranchId || null;
+    return this.reportsRealtimeService.stream(scopedBranchId);
+  }
+
+  @Get('realtime/metrics')
+  realtimeMetrics() {
+    return this.reportsRealtimeService.metrics();
   }
 
   @Get('export')

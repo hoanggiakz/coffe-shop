@@ -295,6 +295,7 @@ export default function Reports() {
   const [fallbackTrendWindowMinutes, setFallbackTrendWindowMinutes] = useState(120)
   const [showOnlyHighFallback, setShowOnlyHighFallback] = useState(false)
   const [recommendAbSummary, setRecommendAbSummary] = useState<RecommendAbSummary | null>(null)
+  const [realtimeLagMs, setRealtimeLagMs] = useState<number>(0)
 
   const [exportType, setExportType] = useState<ExportType>('revenue')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('excel')
@@ -422,11 +423,36 @@ export default function Reports() {
   }, [dateFrom, dateTo, groupBy, selectedBranchId, fallbackTrendWindowMinutes])
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      void loadReports()
-    }, 30000)
-    return () => window.clearInterval(timer)
-  }, [dateFrom, dateTo, groupBy, selectedBranchId, fallbackTrendWindowMinutes])
+    const token = useAuthStore.getState().token
+    if (!token) return
+    const params = new URLSearchParams()
+    if (selectedBranchId) params.set('branchId', selectedBranchId)
+    params.set('access_token', token)
+    const es = new EventSource(`/api/reports/realtime/stream?${params.toString()}`, {
+      withCredentials: false,
+    } as EventSourceInit)
+    let lastReloadAt = 0
+    es.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        const emittedAt = String(payload?.emittedAt || '')
+        if (emittedAt) {
+          const lag = Date.now() - new Date(emittedAt).getTime()
+          setRealtimeLagMs(Number.isFinite(lag) ? Math.max(0, lag) : 0)
+        }
+      } catch {
+        // ignore payload parse errors
+      }
+      const now = Date.now()
+      if (now - lastReloadAt >= 8000) {
+        lastReloadAt = now
+        void loadReports()
+      }
+    }
+    return () => {
+      es.close()
+    }
+  }, [selectedBranchId])
 
   const revenueChartData = useMemo(
     () =>
@@ -675,6 +701,9 @@ export default function Reports() {
         <Button variant="secondary" className="w-full sm:w-auto" onClick={() => void loadReports()} loading={loading}>
           {tv('Làm mới', 'Refresh')}
         </Button>
+        <p className={`text-xs ${realtimeLagMs > 5000 ? 'text-rose-700' : 'text-emerald-700'}`}>
+          Realtime lag: {Math.round(realtimeLagMs)} ms
+        </p>
       </div>
 
       {noBusinessDataForSelectedBranch && (
