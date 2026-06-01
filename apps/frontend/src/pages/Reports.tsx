@@ -66,6 +66,12 @@ interface InventoryReportResponse {
     totalStockValue: number
   }
   stocks: InventoryStockItem[]
+  analytics?: {
+    movementTrend: Array<{ day: string; importQty: number; exportQty: number; adjustQty: number }>
+    movementTypeBreakdown: Array<{ type: string; source: string; count: number; quantity: number }>
+    topConsumption: Array<{ ingredientId: string; ingredientName: string; quantity: number }>
+    stockRiskBands: { critical: number; low: number; healthy: number }
+  }
 }
 
 interface DashboardResponse {
@@ -461,6 +467,27 @@ export default function Reports() {
       })),
     [dashboard?.payments.byStatus],
   )
+
+  const inventoryTrendChartData = useMemo(
+    () =>
+      (inventory?.analytics?.movementTrend || []).map((item) => ({
+        day: formatPeriodLabel(item.day),
+        importQty: item.importQty,
+        exportQty: item.exportQty,
+        adjustQty: item.adjustQty,
+      })),
+    [inventory?.analytics?.movementTrend],
+  )
+
+  const inventoryRiskChartData = useMemo(() => {
+    const bands = inventory?.analytics?.stockRiskBands
+    if (!bands) return []
+    return [
+      { label: 'Critical', count: Number(bands.critical || 0) },
+      { label: 'Low', count: Number(bands.low || 0) },
+      { label: 'Healthy', count: Number(bands.healthy || 0) },
+    ]
+  }, [inventory?.analytics?.stockRiskBands])
 
   const noBusinessDataForSelectedBranch = useMemo(() => {
     if (!selectedBranchId || !dashboard) return false
@@ -1093,6 +1120,57 @@ export default function Reports() {
             </tbody>
           </table>
         </div>
+
+        {(inventoryTrendChartData.length > 0 || inventoryRiskChartData.length > 0) && (
+          <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-amber-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+              <p className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">Xu hướng nhập/xuất kho</p>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={inventoryTrendChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="day" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="importQty" name="Nhập" stroke="#16a34a" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="exportQty" name="Xuất" stroke="#dc2626" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="adjustQty" name="Điều chỉnh" stroke="#0284c7" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-amber-100 bg-white/90 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+              <p className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">Phân tầng rủi ro tồn kho</p>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={inventoryRiskChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="count" name="Số nguyên liệu" fill="#f59e0b" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {(inventory?.analytics?.topConsumption || []).length > 0 && (
+          <div className="mt-4 rounded-xl border border-amber-100 bg-white/90 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+            <p className="mb-2 font-semibold text-slate-800 dark:text-slate-100">Top nguyên liệu tiêu hao</p>
+            <div className="space-y-1 text-xs text-slate-700 dark:text-slate-300">
+              {(inventory?.analytics?.topConsumption || []).slice(0, 8).map((item, index) => (
+                <p key={item.ingredientId}>
+                  #{index + 1} {item.ingredientName}: <span className="font-semibold">{Math.round(item.quantity * 100) / 100}</span>
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
       </Card>
 
       <Card title="Report Chat (AI)" subtitle="Hỏi đáp dữ liệu báo cáo bằng ngôn ngữ tự nhiên">
