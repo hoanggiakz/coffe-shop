@@ -1,9 +1,17 @@
+import { useState } from 'react'
 import Card from '@/components/ui/Card'
 import { RoutePageSkeleton } from '@/components/ui/PageSkeleton'
 import OrderCard from './OrderCard'
 import { ManagerBoardColumn, ManagerBoardColumnKey, ManagerOrder, ManagerPayment } from './managerTypes'
 
 type Tone = 'neutral' | 'warning' | 'danger'
+const DEFAULT_VISIBLE_ORDERS = 6
+const LOAD_MORE_STEP = 6
+const INITIAL_VISIBLE_ORDERS_BY_COLUMN: Record<ManagerBoardColumnKey, number> = {
+  PENDING: DEFAULT_VISIBLE_ORDERS,
+  WORKING: DEFAULT_VISIBLE_ORDERS,
+  COMPLETED: DEFAULT_VISIBLE_ORDERS,
+}
 
 interface OrderBoardProps {
   loading: boolean
@@ -44,6 +52,9 @@ export default function OrderBoard({
   onMarkReady,
   onOpenPayment,
 }: OrderBoardProps) {
+  const [visibleOrdersByColumn, setVisibleOrdersByColumn] =
+    useState<Record<ManagerBoardColumnKey, number>>(INITIAL_VISIBLE_ORDERS_BY_COLUMN)
+
   return (
     <section className="space-y-3">
       <div className="grid grid-cols-3 gap-2 md:hidden">
@@ -72,6 +83,9 @@ export default function OrderBoard({
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           {columns.map((column) => {
             const hiddenOnMobile = mobileColumn !== column.key ? 'hidden md:flex' : 'flex'
+            const visibleLimit = visibleOrdersByColumn[column.key] ?? DEFAULT_VISIBLE_ORDERS
+            const visibleOrders = column.orders.slice(0, visibleLimit)
+            const remainingOrders = Math.max(column.orders.length - visibleOrders.length, 0)
             return (
               <div key={column.key} className={`${hiddenOnMobile} min-h-[520px] flex-col rounded-2xl border border-[#d2c4ba] bg-[#fff8f5] p-3`}>
                 <div className={`mb-3 flex items-center justify-between rounded-xl border px-3 py-2 ${column.accent}`}>
@@ -86,7 +100,7 @@ export default function OrderBoard({
                       Chưa có đơn trong cột này.
                     </div>
                   )}
-                  {column.orders.map((order) => {
+                  {visibleOrders.map((order) => {
                     const tone = getOrderTone(order)
                     const ageMinutes = getOrderAgeMinutes(order.createdAt)
                     const itemCount = order.orderItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
@@ -110,6 +124,23 @@ export default function OrderBoard({
                       />
                     )
                   })}
+                  {column.orders.length > DEFAULT_VISIBLE_ORDERS && (
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border border-[#d2c4ba] bg-white px-3 py-2 text-sm font-medium text-[#33210d] hover:bg-[#fef1e6]"
+                      onClick={() =>
+                        setVisibleOrdersByColumn((prev) => ({
+                          ...prev,
+                          [column.key]:
+                            remainingOrders > 0
+                              ? Math.min((prev[column.key] ?? DEFAULT_VISIBLE_ORDERS) + LOAD_MORE_STEP, column.orders.length)
+                              : DEFAULT_VISIBLE_ORDERS,
+                        }))
+                      }
+                    >
+                      {remainingOrders > 0 ? `Xem thêm ${Math.min(LOAD_MORE_STEP, remainingOrders)} đơn` : 'Thu gọn'}
+                    </button>
+                  )}
                 </div>
               </div>
             )
