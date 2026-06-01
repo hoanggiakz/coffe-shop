@@ -863,6 +863,21 @@ export default function CustomerMenu() {
 
   useEffect(() => {
     let ignore = false
+    const resolveTableFromBranchAndNumber = async () => {
+      if (!qrBranchId || qrTableNumber === null) {
+        return null
+      }
+      try {
+        const { data } = await api.get('/tables', { params: { branchId: qrBranchId } })
+        const rows = Array.isArray(data) ? data : []
+        const matchedById = qrTableId ? rows.find((table: any) => String(table?.id || '') === qrTableId) : null
+        const matchedByNumber = rows.find((table: any) => Number(table?.number) === qrTableNumber)
+        return matchedById || matchedByNumber || null
+      } catch {
+        return null
+      }
+    }
+
     const resolveTable = async () => {
       setResolvingTable(true)
       if (qrTableId) {
@@ -882,11 +897,26 @@ export default function CustomerMenu() {
             setBranchName(normalizeVietnameseText(data?.branchName || data?.branch?.name || ''))
           }
         } catch (error: any) {
-          if (!ignore) {
-            setTableId('')
-            setTableName('Không xác định')
+          const fallback = await resolveTableFromBranchAndNumber()
+          if (fallback?.id) {
+            if (!ignore) {
+              setTableId(String(fallback.id))
+              setTableName(`Bàn ${fallback.number ?? qrTableNumber ?? qrTableId}`)
+              setBranchName(normalizeVietnameseText(fallback?.branchName || fallback?.branch?.name || ''))
+            }
+            toast.error('Dịch vụ bàn đang gián đoạn, đã dùng dữ liệu QR dự phòng', {
+              id: 'customer-menu-table-service-fallback',
+            })
+            return
           }
-          toast.error(error.response?.data?.message || 'Không tìm thấy bàn từ QR')
+          if (!ignore) {
+            // Cho phép tiếp tục tải menu theo branchId khi có tableId từ QR.
+            setTableId(qrTableId)
+            setTableName(`Bàn ${qrTableNumber ?? qrTableId}`)
+          }
+          toast.error(error.response?.data?.message || 'Không thể xác thực bàn từ QR', {
+            id: 'customer-menu-table-service-error',
+          })
         } finally {
           if (!ignore) {
             setResolvingTable(false)
@@ -904,19 +934,18 @@ export default function CustomerMenu() {
       }
 
       try {
-        const { data } = await api.get('/tables', { params: { branchId: qrBranchId } })
-        const matched = (Array.isArray(data) ? data : []).find((table: any) => Number(table?.number) === qrTableNumber)
+        const matched = await resolveTableFromBranchAndNumber()
         if (!matched?.id) {
           toast.error('Không tìm thấy bàn từ QR')
           return
         }
         if (!ignore) {
-          setTableId(matched.id)
+          setTableId(String(matched.id))
           setTableName(`Bàn ${matched.number}`)
           setBranchName(normalizeVietnameseText(matched?.branchName || matched?.branch?.name || ''))
         }
-      } catch (error: any) {
-        toast.error(error.response?.data?.message || 'Không xác định được bàn')
+      } catch {
+        toast.error('Không xác định được bàn')
       } finally {
         if (!ignore) setResolvingTable(false)
       }
