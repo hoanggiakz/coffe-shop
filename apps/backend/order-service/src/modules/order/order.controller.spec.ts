@@ -198,6 +198,14 @@ describe('OrderController', () => {
     expect(orderService.updateItemStatus).toHaveBeenCalledWith('o1', 'i1', 'DONE');
   });
 
+  it('allows customer table order lookup without actor headers', () => {
+    controller.findAll('t1', undefined, undefined, undefined, undefined, undefined, undefined);
+
+    expect(orderService.findAll).toHaveBeenCalledWith({
+      tableId: 't1',
+    });
+  });
+
   it('returns invalid response when promotion code missing', () => {
     const result = controller.validatePromotion(undefined, '10000', 'm1,m2', 'b1', 't1');
     expect(result).toEqual({ valid: false, message: 'Missing code' });

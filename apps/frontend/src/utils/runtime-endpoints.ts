@@ -44,20 +44,5 @@ export function resolveWebsocketBaseUrl(): string {
     return ''
   }
 
-  // Local compose: prefer same-origin and let nginx proxy /socket.io to chat-service.
-  // This avoids noisy cross-port websocket handshake failures in the browser console.
-  if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
-    return window.location.origin
-  }
-
-  if (!isCodespacesHost(window.location.hostname)) {
-    return window.location.origin
-  }
-
-  const wsHost = replaceCodespacesPort(window.location.hostname, 3007)
-  if (!wsHost) {
-    return window.location.origin
-  }
-
-  return `${window.location.protocol}//${wsHost}`
+  return window.location.origin
 }

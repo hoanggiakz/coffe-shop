@@ -18,11 +18,17 @@ export class KdsOrderSyncService {
     return `${base}/api/orders`;
   }
 
+  private internalServiceToken() {
+    return String(this.configService.get<string>('INTERNAL_SERVICE_TOKEN') || 'dev-internal-token').trim();
+  }
+
   private async request(path: string, init?: RequestInit) {
+    const internalToken = this.internalServiceToken();
     const response = await fetch(`${this.baseUrl()}${path}`, {
       ...init,
       headers: {
         'content-type': 'application/json',
+        ...(internalToken ? { Authorization: `Bearer ${internalToken}` } : {}),
         'x-actor-role': 'ADMIN',
         ...(init?.headers || {}),
       },

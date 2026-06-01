@@ -117,7 +117,7 @@ export class OrderService {
   }
 
   private get internalServiceToken() {
-    return process.env.INTERNAL_SERVICE_TOKEN || 'internal-service-token';
+    return process.env.INTERNAL_SERVICE_TOKEN || 'dev-internal-token';
   }
 
   private async fetchWithRetry(
@@ -3743,6 +3743,7 @@ export class OrderService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.internalServiceToken}`,
         },
         body: JSON.stringify(payload),
       });

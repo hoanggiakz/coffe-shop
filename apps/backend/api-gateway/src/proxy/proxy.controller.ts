@@ -34,7 +34,7 @@ export class ProxyController {
       const pathRewrite =
         route.path === '/api/v1/payments'
           ? (path: string) => {
-              if (/^\/api\/v1\/payments\/webhook(?:\/|$)/.test(path)) {
+              if (/^\/api\/v1\/payments\/webhook\/?$/.test(path)) {
                 return path.replace(/^\/api\/v1\/payments\/webhook/, '/api/payment/webhook/sepay');
               }
               return path;
@@ -74,6 +74,8 @@ export class ProxyController {
     this.attachBearerFromQueryForRealtime(req);
     await this.enforceActiveStaffAccount(req);
     const isBranchOrdersPath = /^\/api\/branches\/[^/]+\/orders(\/|$)/.test(req.path);
+    const isBranchKdsPath = /^\/api\/branches\/[^/]+\/kds(\/|$)/.test(req.path);
+    const isBranchMenuPath = /^\/api\/branches\/[^/]+\/menu(\/|$)/.test(req.path);
     const isBranchCartValidatePath = /^\/api\/branches\/[^/]+\/cart\/validate(\/|$)/.test(req.path);
     const isBranchInvoicesPath = /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(req.path);
     const isBranchChatPath = /^\/api\/branches\/[^/]+\/chat\/sessions(\/|$)/.test(req.path);
@@ -91,7 +93,7 @@ export class ProxyController {
         ? ({ path: '/api/chats' } as any)
       : isNotificationsPath
         ? ({ path: '/api/chats' } as any)
-      : isBranchOrdersPath || isBranchCartValidatePath
+      : isBranchOrdersPath || isBranchKdsPath || isBranchMenuPath || isBranchCartValidatePath
         ? ({ path: '/api/orders' } as any)
       : SERVICE_ROUTES.find((r) => req.originalUrl.startsWith(r.path));
     if (!route) {
@@ -159,12 +161,17 @@ export class ProxyController {
     const isBranchChatPath = /^\/api\/branches\/[^/]+\/chat\/sessions(\/|$)/.test(path);
     const isChatSessionPath = /^\/api\/chat\/sessions\/[^/]+(\/|$)/.test(path);
     const isBranchInvoicesPath = /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(path);
+    const isBranchKdsPath = /^\/api\/branches\/[^/]+\/kds(\/|$)/.test(path);
+    const isBranchMenuPath = /^\/api\/branches\/[^/]+\/menu(\/|$)/.test(path);
     const isInvoiceDetailPath = /^\/api\/invoices\/[^/]+(\/|$)/.test(path);
     const isOrderInvoiceRegeneratePath = /^\/api\/orders\/[^/]+\/invoice\/regenerate(\/|$)/.test(path);
     const isPublicInvoicePath = /^\/api\/public\/invoices\/[^/]+(\/|$)/.test(path);
     const isPublicOrderInvoiceLinkPath = /^\/api\/public\/orders\/[^/]+\/invoice-link(\/|$)/.test(path);
     const isBranchCartValidatePath = /^\/api\/branches\/[^/]+\/cart\/validate(\/|$)/.test(path);
     const isNotificationsPath = /^\/api\/notifications(\/|$)/.test(path);
+    const isPaymentWebhookPath =
+      /^\/api\/v1\/payments\/webhook(?:\/|$)/.test(path) ||
+      /^\/api\/payment\/webhook(?:\/|$)/.test(path);
 
     // Public auth/customer endpoints
     if (
@@ -191,6 +198,14 @@ export class ProxyController {
     }
 
     if (isPublicInvoicePath || isPublicOrderInvoiceLinkPath) {
+      return;
+    }
+
+    if (isPaymentWebhookPath) {
+      return;
+    }
+
+    if (method === 'GET' && isBranchMenuPath) {
       return;
     }
 
@@ -245,6 +260,10 @@ export class ProxyController {
     }
     if (method === 'GET' && /^\/api\/branches\/[^/]+\/orders(\/|$)/.test(path)) {
       this.requireRoles(req, ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF']);
+      return;
+    }
+    if (method === 'GET' && isBranchKdsPath) {
+      this.requireRoles(req, ['ADMIN', 'MANAGER', 'BARISTA']);
       return;
     }
     if (method === 'GET' && /^\/api\/branches\/[^/]+\/invoices(\/|$)/.test(path)) {

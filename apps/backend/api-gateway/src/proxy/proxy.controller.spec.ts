@@ -8,9 +8,13 @@ declare function it(name: string, fn: () => Promise<void> | void): void;
 declare function beforeEach(fn: () => void): void;
 declare const jest: any;
 declare function expect(value: unknown): {
+  not: {
+    toThrow(): void;
+  };
   toBe(expected: unknown): void;
   toBeInstanceOf(expected: any): void;
   toContain(expected: string): void;
+  toThrow(): void;
 };
 
 jest.mock('http-proxy-middleware', () => ({
@@ -81,5 +85,42 @@ describe('ProxyController QR menu validation', () => {
       thrown = error;
     }
     expect(thrown instanceof BadRequestException).toBe(true);
+  });
+
+  it('keeps customer branch menu and payment webhook relay public', () => {
+    expect(() =>
+      (controller as any).authorizeRequest({
+        method: 'GET',
+        path: '/api/branches/branch-1/menu',
+        headers: {},
+        query: {},
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      (controller as any).authorizeRequest({
+        method: 'POST',
+        path: '/api/v1/payments/webhook/relay',
+        headers: {},
+        query: {},
+      }),
+    ).not.toThrow();
+  });
+
+  it('allows barista to read branch KDS queue through gateway', () => {
+    (jwtServiceMock.verify as any).mockReturnValue({
+      sub: 'barista-1',
+      roles: ['BARISTA'],
+      branchId: 'branch-1',
+    });
+
+    expect(() =>
+      (controller as any).authorizeRequest({
+        method: 'GET',
+        path: '/api/branches/branch-1/kds',
+        headers: { authorization: 'Bearer valid-token' },
+        query: {},
+      }),
+    ).not.toThrow();
   });
 });

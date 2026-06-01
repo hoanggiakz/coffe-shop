@@ -65,6 +65,14 @@ export class InventoryService {
     return this.configService.get('CHAT_SERVICE_URL') || 'http://chat-service:3007/api/chats';
   }
 
+  private get internalServiceToken() {
+    return String(this.configService.get('INTERNAL_SERVICE_TOKEN') || 'dev-internal-token').trim();
+  }
+
+  private internalAuthHeaders() {
+    return this.internalServiceToken ? { Authorization: `Bearer ${this.internalServiceToken}` } : {};
+  }
+
   private get lowStockAlertEmails(): string[] {
     return String(this.configService.get('LOW_STOCK_ALERT_EMAILS') || 'manager@coffeeshop.com')
       .split(',')
@@ -1076,7 +1084,7 @@ export class InventoryService {
     try {
       const response = await this.fetchWithRetry(`${this.chatServiceApiUrl}/staff-notifications`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.internalAuthHeaders() },
         body: JSON.stringify({
           type: 'LOW_STOCK',
           id: `low-stock:${payload.ingredientId}:${Date.now()}`,

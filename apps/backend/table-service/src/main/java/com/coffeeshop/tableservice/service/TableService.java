@@ -9,8 +9,12 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
@@ -45,6 +49,9 @@ public class TableService {
 
     @Value("${app.order-service-url:http://order-service:3001/api/orders}")
     private String orderServiceUrl;
+
+    @Value("${app.internal-service-token:dev-internal-token}")
+    private String internalServiceToken;
 
     public List<CoffeeTable> findAll(String branchId) {
         if (branchId != null && !branchId.isEmpty()) {
@@ -245,7 +252,11 @@ public class TableService {
             messagePayload.put("senderName", senderName);
             messagePayload.put("content", content);
             executeWithRetry(
-                    () -> restTemplate.postForEntity(chatServiceUrl + "/" + chatId + "/messages", messagePayload, Map.class),
+                    () -> restTemplate.postForEntity(
+                            chatServiceUrl + "/" + chatId + "/messages",
+                            internalJsonEntity(messagePayload),
+                            Map.class
+                    ),
                     "gui thong bao goi nhan vien"
             );
         } catch (Exception ex) {
@@ -266,7 +277,7 @@ public class TableService {
                 + "?tableId=" + URLEncoder.encode(table.getId(), StandardCharsets.UTF_8)
                 + (branchId.isEmpty() ? "" : "&branchId=" + URLEncoder.encode(branchId, StandardCharsets.UTF_8));
         ResponseEntity<List> response = executeWithRetry(
-                () -> restTemplate.getForEntity(queryUrl, List.class),
+                () -> restTemplate.exchange(queryUrl, HttpMethod.GET, internalEntity(), List.class),
                 "lay danh sach chat dang mo"
         );
         List<?> chats = response.getBody();
@@ -291,7 +302,7 @@ public class TableService {
         }
 
         ResponseEntity<Map> created = executeWithRetry(
-                () -> restTemplate.postForEntity(chatServiceUrl, createPayload, Map.class),
+                () -> restTemplate.postForEntity(chatServiceUrl, internalJsonEntity(createPayload), Map.class),
                 "tao chat moi cho ban"
         );
         Map<?, ?> body = created.getBody();
@@ -314,7 +325,7 @@ public class TableService {
                     + URLEncoder.encode(tableId, StandardCharsets.UTF_8)
                     + "/active";
             ResponseEntity<Map> response = executeWithRetry(
-                    () -> restTemplate.getForEntity(url, Map.class),
+                    () -> restTemplate.exchange(url, HttpMethod.GET, internalEntity(), Map.class),
                     "kiem tra don hang dang xu ly cua ban"
             );
             Map<?, ?> body = response.getBody();
@@ -345,6 +356,25 @@ public class TableService {
             }
         }
         throw lastError != null ? lastError : new IllegalStateException("Request that bai: " + description);
+    }
+
+    private HttpEntity<Void> internalEntity() {
+        return new HttpEntity<>(internalHeaders());
+    }
+
+    private HttpEntity<Map<String, Object>> internalJsonEntity(Map<String, Object> body) {
+        HttpHeaders headers = internalHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new HttpEntity<>(body, headers);
+    }
+
+    private HttpHeaders internalHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        String token = String.valueOf(internalServiceToken == null ? "" : internalServiceToken).trim();
+        if (!token.isEmpty()) {
+            headers.setBearerAuth(token);
+        }
+        return headers;
     }
 
     private void sleepQuietly(long millis) {

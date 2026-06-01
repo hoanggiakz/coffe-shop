@@ -276,7 +276,7 @@ export class ChatService {
     const actorUserId = String(actor.userId || '').trim();
     const branchId = String(requestedBranchId || '').trim() || actorBranchId;
 
-    if (!['ADMIN', 'MANAGER', 'WAITER', 'STAFF'].includes(role)) {
+    if (!['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF'].includes(role)) {
       throw new ForbiddenException('Insufficient permissions');
     }
 
@@ -336,7 +336,7 @@ export class ChatService {
           orderId: payload.orderId || null,
           sourceId: payload.id || null,
         },
-        targetRoles: type === 'LOW_STOCK' ? ['MANAGER'] : ['ADMIN', 'MANAGER', 'WAITER', 'STAFF'],
+        targetRoles: type === 'LOW_STOCK' ? ['MANAGER'] : ['ADMIN', 'MANAGER', 'WAITER', 'BARISTA', 'STAFF'],
         userId: null,
         createdAt,
         expiresAt,
@@ -362,7 +362,7 @@ export class ChatService {
       ...(hasReadFilter ? { isRead } : {}),
     };
 
-    if ((scope.role === 'WAITER' || scope.role === 'STAFF') && scope.userId) {
+    if ((scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') && scope.userId) {
       where.OR = [{ userId: scope.userId }, { userId: null }];
     }
 
@@ -406,7 +406,7 @@ export class ChatService {
     }
     const scope = this.resolveNotificationScope(actor, existing.branchId);
 
-    if ((scope.role === 'WAITER' || scope.role === 'STAFF') && existing.userId && existing.userId !== scope.userId) {
+    if ((scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') && existing.userId && existing.userId !== scope.userId) {
       throw new ForbiddenException('Khong co quyen cap nhat thong bao nay');
     }
 
@@ -424,7 +424,7 @@ export class ChatService {
       isRead: false,
     };
 
-    if (scope.role === 'WAITER' || scope.role === 'STAFF') {
+    if (scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') {
       where.OR = [{ userId: scope.userId || '__none__' }, { userId: null }];
     }
 
@@ -446,7 +446,7 @@ export class ChatService {
       ...(createdAfter && !Number.isNaN(createdAfter.getTime()) ? { createdAt: { gt: createdAfter } } : {}),
     };
 
-    if ((scope.role === 'WAITER' || scope.role === 'STAFF') && scope.userId) {
+    if ((scope.role === 'WAITER' || scope.role === 'BARISTA' || scope.role === 'STAFF') && scope.userId) {
       where.OR = [{ userId: scope.userId }, { userId: null }];
     }
 

@@ -5,7 +5,23 @@ const WS_URL = resolveWebsocketBaseUrl()
 
 let socket: Socket | null = null
 
+function isPublicCustomerRoute(): boolean {
+  if (typeof window === 'undefined') return false
+  const path = window.location.pathname
+  return (
+    path === '/menu' ||
+    path.startsWith('/menu/') ||
+    path === '/menu/account' ||
+    path.startsWith('/menu/account') ||
+    path === '/payment/return' ||
+    path.startsWith('/payment/return/') ||
+    path === '/invoice/public' ||
+    path.startsWith('/invoice/public/')
+  )
+}
+
 function readSessionToken(): string {
+  if (isPublicCustomerRoute()) return ''
   if (typeof window === 'undefined') return ''
   try {
     const raw = sessionStorage.getItem('auth-storage')

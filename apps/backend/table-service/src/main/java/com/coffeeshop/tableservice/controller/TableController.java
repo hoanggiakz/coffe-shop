@@ -111,4 +111,11 @@ public class TableController {
             @RequestBody(required = false) CallStaffRequest request) {
         return ResponseEntity.ok(tableService.callStaff(id, request));
     }
+
+    @PostMapping("/{id}/call-waiter")
+    public ResponseEntity<Map<String, String>> callWaiter(
+            @PathVariable String id,
+            @RequestBody(required = false) CallStaffRequest request) {
+        return ResponseEntity.ok(tableService.callStaff(id, request));
+    }
 }

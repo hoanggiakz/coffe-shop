@@ -63,6 +63,14 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     return this.config.get<string>('ORDER_SERVICE_URL', 'http://order-service:3001');
   }
 
+  private get internalServiceToken() {
+    return String(this.config.get<string>('INTERNAL_SERVICE_TOKEN', 'dev-internal-token') || '').trim();
+  }
+
+  private internalAuthHeaders() {
+    return this.internalServiceToken ? { Authorization: `Bearer ${this.internalServiceToken}` } : {};
+  }
+
   private get onlineQrImageUrl() {
     return this.config.get<string>(
       'ONLINE_PAYMENT_QR_URL',
@@ -881,7 +889,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       };
       const response = await this.fetchWithRetry(`${this.chatServiceUrl}/staff-notifications`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.internalAuthHeaders() },
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
@@ -905,6 +913,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...this.internalAuthHeaders(),
             'x-actor-role': 'ADMIN',
             ...(branchId ? { 'x-actor-branch-id': branchId } : {}),
           },
@@ -1061,7 +1070,9 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async fetchOrderForInvoice(orderId: string) {
-    const response = await this.fetchWithRetry(`${this.orderServiceUrl}/api/orders/${encodeURIComponent(orderId)}`);
+    const response = await this.fetchWithRetry(`${this.orderServiceUrl}/api/orders/${encodeURIComponent(orderId)}`, {
+      headers: this.internalAuthHeaders(),
+    });
     if (!response.ok) {
       throw new BadRequestException(`Không lấy được thông tin đơn hàng ${orderId}`);
     }
@@ -1353,7 +1364,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     query: { start_date?: string; end_date?: string; status?: string; page?: number; limit?: number },
     actor: ActorContext,
   ) {
-    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER']);
+    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
     this.enforceBranchAccess(actor, branchId);
     const status = this.normalizeInvoiceListStatus(query.status);
     const page = Number.isFinite(query.page) ? Math.max(1, Math.floor(Number(query.page))) : 1;
@@ -1403,7 +1414,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getInvoiceDetail(invoiceId: string, actor: ActorContext) {
-    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER']);
+    this.requireRoles(actor, ['ADMIN', 'MANAGER', 'WAITER', 'STAFF']);
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) throw new NotFoundException('Invoice not found');
     this.enforceBranchAccess(actor, invoice.branchId);
