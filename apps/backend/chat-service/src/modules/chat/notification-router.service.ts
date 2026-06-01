@@ -72,6 +72,7 @@ export class NotificationRouterService {
       case 'PAYMENT_SUCCESS':
         this.hub.emitToRooms('/pos', 'payment-done', branchRooms, payload);
         this.hub.emitToRooms('/customer', 'order-status', tableRooms, payload);
+        this.hub.emitToRooms('/chat', 'payment-confirmed', tableRooms, payload);
         break;
       case 'LOW_INVENTORY':
       case 'LOW_STOCK':

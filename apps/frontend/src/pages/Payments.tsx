@@ -8,6 +8,7 @@ import { phuongThucThanhToan, trangThaiThanhToan } from '@/utils/display'
 import { useBranchScopeStore } from '@/stores/branchScopeStore'
 import { useAuthStore } from '@/stores/authStore'
 import { getSocket, disconnectSocket } from '@/utils/socket'
+import { showRealtimeNotification } from '@/utils/notifications'
 
 interface PaymentApi {
   paymentId: string
@@ -141,10 +142,15 @@ export default function Payments() {
         staffName: user?.name,
       })
     }
-    const onStaffNotification = (payload: { type?: string; branchId?: string }) => {
+    const onStaffNotification = (payload: { type?: string; branchId?: string; title?: string; message?: string }) => {
       const type = String(payload?.type || '').toUpperCase()
       if (effectiveBranchId && String(payload?.branchId || '').trim() !== effectiveBranchId) return
       if (type === 'PAYMENT_SUCCESS') {
+        showRealtimeNotification(
+          String(payload?.title || 'Thanh toán thành công'),
+          String(payload?.message || 'Đã ghi nhận thanh toán'),
+          'PAYMENT_SUCCESS',
+        )
         void loadPayments()
       }
     }

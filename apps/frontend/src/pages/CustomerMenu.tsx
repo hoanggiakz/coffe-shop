@@ -825,6 +825,7 @@ export default function CustomerMenu() {
   const cartVersionRef = useRef<string>('')
   const persistCartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTelemetryKeyRef = useRef('')
+  const processedPaymentNotificationIdsRef = useRef<Record<string, number>>({})
 
   const sendCartTelemetry = async (payload: {
     action: string
@@ -1648,10 +1649,30 @@ export default function CustomerMenu() {
       toast(payload.serverWins ? 'Giỏ hàng đã đồng bộ theo máy chủ (server-wins)' : 'Giỏ hàng vừa được cập nhật bởi nhân viên')
     }
 
-    const refreshCurrentOrder = () => {
+    const refreshCurrentOrder = (payload?: { id?: string; type?: string; title?: string; message?: string; tableId?: string; orderId?: string }) => {
+      if (payload?.tableId && String(payload.tableId).trim() !== tableId) return
+      if (payload?.orderId && currentOrderId && String(payload.orderId).trim() !== currentOrderId) return
       if (!currentOrderId) return
       void fetchOrderStatus(currentOrderId)
       void fetchPaymentStatus(currentOrderId)
+      if (String(payload?.type || '').toUpperCase() === 'PAYMENT_SUCCESS') {
+        const key = String(payload?.id || payload?.orderId || `PAYMENT_SUCCESS:${currentOrderId}`).trim()
+        const now = Date.now()
+        const cache = processedPaymentNotificationIdsRef.current
+        for (const cacheKey of Object.keys(cache)) {
+          if (now - cache[cacheKey] > 5 * 60 * 1000) {
+            delete cache[cacheKey]
+          }
+        }
+        if (!cache[key]) {
+          cache[key] = now
+          showRealtimeNotification(
+            String(payload?.title || 'Thanh toán thành công'),
+            String(payload?.message || 'Đơn của bạn đã được ghi nhận thanh toán'),
+            'PAYMENT_SUCCESS',
+          )
+        }
+      }
     }
 
     socket.on('cart-updated', onCartUpdated)

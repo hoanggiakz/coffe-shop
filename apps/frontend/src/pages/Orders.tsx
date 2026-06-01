@@ -92,6 +92,7 @@ type StaffNotificationType =
   | 'KDS_ITEM_STATUS'
   | 'KDS_ORDER_READY'
   | 'CART_UPDATED'
+  | 'PAYMENT_SUCCESS'
 
 interface StaffNotificationPayload {
   id: string
@@ -560,7 +561,8 @@ export default function Orders() {
         payload.type === 'KDS_ORDER_READY' ||
         payload.type === 'ORDER_NEW' ||
         payload.type === 'KDS_ITEM_STATUS' ||
-        payload.type === 'CART_UPDATED'
+        payload.type === 'CART_UPDATED' ||
+        payload.type === 'PAYMENT_SUCCESS'
       ) {
         showRealtimeNotification(
           payload.title,
@@ -569,6 +571,8 @@ export default function Orders() {
             ? 'NEW_ORDER'
             : payload.type === 'CART_UPDATED'
               ? 'CART_UPDATED'
+              : payload.type === 'PAYMENT_SUCCESS'
+                ? 'PAYMENT_SUCCESS'
               : 'ITEM_READY',
         )
         if (typeof window !== 'undefined' && payload.createdAt) {
@@ -597,7 +601,7 @@ export default function Orders() {
         return
       }
       const type = String(payload?.type || '').toUpperCase()
-      if (!alreadyHandledRealtime(payload?.id) && (type === 'KDS_ORDER_READY' || type === 'ORDER_NEW' || type === 'KDS_ITEM_STATUS' || type === 'CART_UPDATED')) {
+      if (!alreadyHandledRealtime(payload?.id) && (type === 'KDS_ORDER_READY' || type === 'ORDER_NEW' || type === 'KDS_ITEM_STATUS' || type === 'CART_UPDATED' || type === 'PAYMENT_SUCCESS')) {
         showRealtimeNotification(
           String(payload?.title || 'Thông báo'),
           String(payload?.message || 'Có cập nhật mới'),
@@ -605,6 +609,8 @@ export default function Orders() {
             ? 'NEW_ORDER'
             : type === 'CART_UPDATED'
               ? 'CART_UPDATED'
+              : type === 'PAYMENT_SUCCESS'
+                ? 'PAYMENT_SUCCESS'
               : 'ITEM_READY',
         )
         if (typeof window !== 'undefined' && payload?.createdAt) {

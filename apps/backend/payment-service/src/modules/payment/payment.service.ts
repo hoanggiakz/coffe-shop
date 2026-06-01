@@ -863,6 +863,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       const orderId = String(payment?.orderId || '').trim() || undefined;
       const amount = Number(payment?.amount || 0);
       const payload = {
+        id: payment?.id ? `PAYMENT_SUCCESS:${payment.id}` : undefined,
         type: 'PAYMENT_SUCCESS',
         title: 'Thanh toán thành công',
         message: orderId
@@ -871,6 +872,12 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         branchId,
         tableId,
         orderId,
+        payload: {
+          paymentId: payment?.id,
+          amount,
+          status: payment?.status,
+          provider: payment?.provider,
+        },
       };
       const response = await this.fetchWithRetry(`${this.chatServiceUrl}/staff-notifications`, {
         method: 'POST',
