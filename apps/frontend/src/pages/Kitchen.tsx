@@ -156,6 +156,11 @@ export default function Kitchen() {
   const effectiveBranchId = String(selectedBranchId || currentUser?.branchId || '').trim()
   const wsBaseUrl = resolveWebsocketBaseUrl()
   const kdsSocketRef = useRef<Socket | null>(null)
+  const soundEnabledRef = useRef(soundEnabled)
+
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled
+  }, [soundEnabled])
 
   const loadData = async () => {
     try {
@@ -228,10 +233,10 @@ export default function Kitchen() {
     const onConnectError = (error: Error & { message?: string }) => {
       const message = String(error?.message || '').trim()
       if (/unauthorized|forbidden/i.test(message)) {
-        toast.error(tv('KDS không xác thực được phiên đăng nhập. Vui lòng đăng nhập lại.', 'KDS socket unauthorized. Please login again.'))
+        toast.error('KDS không xác thực được phiên đăng nhập. Vui lòng đăng nhập lại.')
         return
       }
-      toast.error(tv(`KDS realtime lỗi kết nối: ${message || 'unknown'}`, `KDS realtime connection error: ${message || 'unknown'}`))
+      toast.error(`KDS realtime lỗi kết nối: ${message || 'unknown'}`)
     }
 
     const onRealtimeEvent = (payload: StaffNotificationPayload | KdsSocketPayload) => {
@@ -242,7 +247,7 @@ export default function Kitchen() {
           String(payload?.message || '') || tv('KDS vừa nhận đơn mới', 'KDS received a new order'),
           'NEW_ORDER',
         )
-        playKitchenOrderSound(soundEnabled)
+        playKitchenOrderSound(soundEnabledRef.current)
         loadData()
         return
       }
@@ -276,7 +281,7 @@ export default function Kitchen() {
         kdsSocketRef.current = null
       }
     }
-  }, [soundEnabled, currentUser?.id, effectiveBranchId, wsBaseUrl, authToken, tv])
+  }, [currentUser?.id, effectiveBranchId, wsBaseUrl, authToken])
 
   useEffect(() => {
     if (socketConnected) return
