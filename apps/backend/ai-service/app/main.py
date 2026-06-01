@@ -44,6 +44,7 @@ AI_RATE_LIMIT_CHAT_PER_MINUTE = int(os.getenv("AI_RATE_LIMIT_CHAT_PER_MINUTE", "
 AI_SENTIMENT_GEMINI_API_KEY = os.getenv("AI_SENTIMENT_GEMINI_API_KEY", "").strip()
 AI_SENTIMENT_GEMINI_MODEL = os.getenv("AI_SENTIMENT_GEMINI_MODEL", "gemini-1.5-flash").strip() or "gemini-1.5-flash"
 AI_SENTIMENT_GEMINI_TIMEOUT_MS = int(os.getenv("AI_SENTIMENT_GEMINI_TIMEOUT_MS", "2500"))
+AI_SENTIMENT_QUALITY_LOOKBACK_HOURS = int(os.getenv("AI_SENTIMENT_QUALITY_LOOKBACK_HOURS", "24"))
 
 DEFAULT_MENU_KB = [
     {"keyword": "cà phê", "answer": "Nhóm cà phê đang có các món truyền thống, latte, cappuccino và espresso."},
@@ -893,7 +894,61 @@ def record_sentiment_telemetry(source: str, success: bool, confidence: float | N
     SENTIMENT_SOURCE_COUNT.labels(source=source_key, status="success" if success else "error").inc()
 
 
-def sentiment_model_quality_snapshot() -> dict[str, Any]:
+def sentiment_model_quality_snapshot(branch_id: str | None = None) -> dict[str, Any]:
+    safe_lookback = max(1, min(AI_SENTIMENT_QUALITY_LOOKBACK_HOURS, 24 * 14))
+    if REPORT_DATABASE_URL:
+        try:
+            where_branch = 'AND "branchId" = %s' if branch_id else ""
+            params: list[Any] = [safe_lookback]
+            if branch_id:
+                params.append(branch_id)
+            rows = execute_sql(
+                f"""
+                SELECT reason, COUNT(*)::int AS count, AVG(confidence)::float AS avg_confidence
+                FROM sentiment_analysis
+                WHERE "analyzedAt" >= (NOW() - (%s::int || ' hours')::interval)
+                  {where_branch}
+                GROUP BY reason
+                """,
+                params,
+            )
+            totals = {"requests": 0, "geminiSuccess": 0, "geminiError": 0, "fallbackLexicon": 0}
+            gemini_avg = 0.0
+            fallback_avg = 0.0
+            for row in rows:
+                reason = str(row.get("reason") or "").lower()
+                count = int(row.get("count") or 0)
+                avg_conf = float(row.get("avg_confidence") or 0.0)
+                totals["requests"] += count
+                if "gemini" in reason:
+                    totals["geminiSuccess"] += count
+                    gemini_avg = avg_conf
+                elif "fallback" in reason or "lexicon" in reason:
+                    totals["fallbackLexicon"] += count
+                    fallback_avg = avg_conf
+            requests = max(1, totals["requests"])
+            return {
+                "provider": "gemini+fallback-lexicon",
+                "geminiEnabled": bool(AI_SENTIMENT_GEMINI_API_KEY),
+                "geminiModel": AI_SENTIMENT_GEMINI_MODEL,
+                "lookbackHours": safe_lookback,
+                "source": "db",
+                "totals": totals,
+                "ratios": {
+                    "geminiSuccessRatio": round(totals["geminiSuccess"] / requests, 4),
+                    "geminiErrorRatio": 0.0,
+                    "fallbackRatio": round(totals["fallbackLexicon"] / requests, 4),
+                },
+                "avgConfidence": {
+                    "gemini": round(gemini_avg, 4),
+                    "fallback": round(fallback_avg, 4),
+                },
+                "lastError": SENTIMENT_TELEMETRY.get("lastError"),
+                "lastUpdatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception:
+            pass
+
     totals = SENTIMENT_TELEMETRY.get("totals", {})
     requests = max(1, int(totals.get("requests", 0)))
     gemini_success = int(totals.get("geminiSuccess", 0))
@@ -907,6 +962,8 @@ def sentiment_model_quality_snapshot() -> dict[str, Any]:
         "provider": "gemini+fallback-lexicon",
         "geminiEnabled": bool(AI_SENTIMENT_GEMINI_API_KEY),
         "geminiModel": AI_SENTIMENT_GEMINI_MODEL,
+        "lookbackHours": safe_lookback,
+        "source": "memory",
         "totals": totals,
         "ratios": {
             "geminiSuccessRatio": round(gemini_success / requests, 4),
@@ -1447,7 +1504,7 @@ def ai_ops_quality_summary(request: Request, branchId: str | None = None) -> dic
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "branchId": branchId,
         "quality": quality,
-        "modelQuality": {"sentiment": sentiment_model_quality_snapshot()},
+        "modelQuality": {"sentiment": sentiment_model_quality_snapshot(branchId)},
         "fallbackRatios": fallback_by_endpoint,
         "attention": {
             "highFallbackEndpoints": critical_ratio,
@@ -1462,7 +1519,7 @@ def ai_ops_model_quality(request: Request, branchId: str | None = None) -> dict[
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "branchId": branchId,
-        "sentiment": sentiment_model_quality_snapshot(),
+        "sentiment": sentiment_model_quality_snapshot(branchId),
     }
 
 
@@ -2119,14 +2176,17 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
     payload.branchId = normalize_branch_id(payload.branchId)
     sanitized_text = redact_pii_text(payload.text)
     sentiment_source = "fallback"
+    persist_reason = "fallback_lexicon_v2"
     try:
         label, confidence, scores, explanation = classify_sentiment_with_gemini(sanitized_text)
         sentiment_source = "gemini"
+        persist_reason = "gemini_flash"
         record_sentiment_telemetry("gemini", True, confidence=confidence)
     except Exception as gemini_error:  # pylint: disable=broad-except
         label, confidence, scores, explanation = classify_sentiment(sanitized_text)
         explanation["geminiError"] = str(gemini_error)[:160]
         sentiment_source = "fallback"
+        persist_reason = "fallback_lexicon_v2"
         record_sentiment_telemetry("gemini", False, error=str(gemini_error))
         record_sentiment_telemetry("fallback", True, confidence=confidence)
     persisted = False
@@ -2146,7 +2206,7 @@ def sentiment_analyze(payload: SentimentAnalyzePayload, request: Request) -> dic
                             sanitized_text,
                             label,
                             confidence,
-                            "gemini_flash+fallback_lexicon_v2",
+                            persist_reason,
                             AI_ACTIVE_MODEL_VERSION,
                         ),
                     )
