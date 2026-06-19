@@ -1,0 +1,242 @@
+# Coffee Shop Microservices Architecture Map
+
+```mermaid
+flowchart LR
+    Client[Browser / Mobile]
+    Frontend[frontend\nReact + Nginx]
+    Gateway[api-gateway\nNestJS]
+    User[user-service\nSpring Boot]
+    Table[table-service\nSpring Boot]
+    Order[order-service\nNestJS + Prisma]
+    Chat[chat-service\nNestJS + Socket.IO]
+    Inventory[inventory-service\nNestJS + Prisma]
+    Payment[payment-service\nNestJS + Prisma]
+    Report[report-service\nNestJS + Prisma]
+    AI[ai-service\nFastAPI]
+    Postgres[(PostgreSQL)]
+    Redis[(Redis)]
+    Kafka[(Kafka)]
+
+    Client --> Frontend
+    Frontend --> Gateway
+
+    Gateway --> User
+    Gateway --> Table
+    Gateway --> Order
+    Gateway --> Chat
+    Gateway --> Inventory
+    Gateway --> Payment
+    Gateway --> Report
+    Gateway --> AI
+
+    User --> Postgres
+    Table --> Postgres
+    Order --> Postgres
+    Chat --> Postgres
+    Inventory --> Postgres
+    Payment --> Postgres
+    Report --> Postgres
+    AI --> Postgres
+
+    Gateway --> Redis
+    Chat --> Redis
+
+    Order --> Kafka
+    Inventory --> Kafka
+    Report --> Kafka
+    AI --> Kafka
+```
+
+```mermaid
+flowchart TB
+    subgraph Roles[User Roles]
+        Customer[Customer]
+        Staff[Staff]\nWAITER / BARISTA / STAFF
+        Manager[Manager]
+        Admin[Admin]
+    end
+
+    subgraph GatewayRules[API Gateway Rules]
+        Public[Public routes\n/api/users/login\n/api/orders/menu\n/api/tables/*/qr\n/api/chats]
+        BranchScoped[Branch-scoped routes\n/orders\n/tables\n/inventory\n/reports]
+        AdminOnly[Admin-only routes\n/branches CRUD\n/staff management\n/system settings]
+    end
+
+    Customer --> Public
+    Staff --> BranchScoped
+    Manager --> BranchScoped
+    Manager --> AdminOnly
+    Admin --> AdminOnly
+```
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant F as Frontend
+    participant G as API Gateway
+    participant T as Table Service
+    participant O as Order Service
+    participant K as Kafka
+    participant S as Staff / KDS
+
+    C->>F: Scan QR / open menu
+    F->>G: GET /api/orders/menu?tableId=...
+    G->>T: Validate table
+    T-->>G: table valid
+    G->>O: Fetch menu
+    O-->>G: menu items
+    G-->>F: menu items
+    F-->>C: Show menu
+    C->>F: Place order
+    F->>G: POST /api/orders
+    G->>O: Create order
+    O->>K: Publish OrderCreated
+    K-->>S: OrderCreated event
+    O-->>G: order result
+    G-->>F: order result
+    F-->>C: Confirmation
+```
+
+```mermaid
+sequenceDiagram
+    participant A as Admin / Manager
+    participant F as Frontend
+    participant G as API Gateway
+    participant U as User Service
+    participant R as Report Service
+    participant I as Inventory Service
+
+    A->>F: Open admin screen
+    F->>G: Request branch-scoped data
+    G->>G: RBAC + branch validation
+    G->>U: Staff / branch / attendance APIs
+    G->>R: Reports APIs
+    G->>I: Inventory APIs
+    U-->>G: user data
+    R-->>G: report data
+    I-->>G: inventory data
+    G-->>F: aggregated response
+```
+
+```mermaid
+sequenceDiagram
+    participant C as Customer / Staff
+    participant F as Frontend
+    participant G as API Gateway
+    participant Ch as Chat Service
+    participant DB as PostgreSQL
+    participant WS as Socket.IO Clients
+
+    C->>F: Open chat
+    F->>G: POST /api/chats
+    G->>Ch: Create or open chat
+    Ch->>DB: Store chat session
+    Ch-->>G: chat session
+    G-->>F: chat session
+    F->>G: POST /api/chats/{id}/messages
+    G->>Ch: Send message
+    Ch->>DB: Store message
+    Ch-->>WS: Emit new-message
+    Ch-->>G: message accepted
+    G-->>F: message accepted
+```
+
+```mermaid
+sequenceDiagram
+    participant M as Manager / Staff
+    participant F as Frontend
+    participant G as API Gateway
+    participant P as Payment Service
+    participant O as Order Service
+    participant W as SePay / Webhook
+
+    M->>F: Start payment flow
+    F->>G: POST /api/v1/payments
+    G->>P: Create payment
+    P-->>G: paymentId
+    G-->>F: paymentId
+    F->>G: POST /api/v1/payments/{paymentId}/confirm-cash
+    G->>P: Confirm cash payment
+    P->>O: Update order/payment state
+    P-->>G: payment complete
+    G-->>F: payment complete
+    W->>P: Online payment webhook / return
+    P->>O: Sync final payment state
+```
+
+```mermaid
+sequenceDiagram
+    participant M as Manager / Admin
+    participant F as Frontend
+    participant G as API Gateway
+    participant I as Inventory Service
+    participant O as Order Service
+
+    M->>F: Edit ingredients / stock
+    F->>G: POST /api/v1/ingredients
+    G->>I: Create ingredient
+    I-->>G: ingredient created
+    G-->>F: created
+    F->>G: POST /api/v1/ingredients/stock/import
+    G->>I: Record stock import
+    I-->>G: stock updated
+    G-->>F: stock updated
+    O->>I: Sync menu / recipe stock
+    I-->>O: sync result
+```
+
+```mermaid
+sequenceDiagram
+    participant A as Admin / Manager
+    participant F as Frontend
+    participant G as API Gateway
+    participant R as Report Service
+    participant DB as PostgreSQL
+
+    A->>F: Open dashboard
+    F->>G: GET /api/reports/dashboard
+    G->>R: Fetch report data
+    R->>DB: Query analytics tables
+    DB-->>R: report data
+    R-->>G: dashboard payload
+    G-->>F: dashboard payload
+    F-->>A: Render charts
+```
+
+```mermaid
+flowchart TB
+    subgraph Sync[HTTP / REST]
+        G1[Gateway] --> U1[User Service]
+        G1 --> T1[Table Service]
+        G1 --> O1[Order Service]
+        G1 --> C1[Chat Service]
+        G1 --> I1[Inventory Service]
+        G1 --> P1[Payment Service]
+        G1 --> R1[Report Service]
+        G1 --> A1[AI Service]
+    end
+
+    subgraph Async[Kafka]
+        O1 --> K1[(Kafka)]
+        I1 --> K1
+        R1 --> K1
+        A1 --> K1
+    end
+
+    subgraph Realtime[WebSocket]
+        C1 --> W1[(Socket.IO Clients)]
+    end
+
+    subgraph Data[Shared Data Stores]
+        U1 --> DB1[(PostgreSQL)]
+        T1 --> DB1
+        O1 --> DB1
+        C1 --> DB1
+        I1 --> DB1
+        P1 --> DB1
+        R1 --> DB1
+        A1 --> DB1
+        C1 --> REDIS[(Redis)]
+        G1 --> REDIS
+    end
+```
