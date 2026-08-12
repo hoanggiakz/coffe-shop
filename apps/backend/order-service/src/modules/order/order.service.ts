@@ -2162,8 +2162,28 @@ export class OrderService {
     return parsed;
   }
 
+  private normalizeIdempotencyKey(value?: string): string | null {
+    const key = String(value || '').trim();
+    if (!key) return null;
+    if (key.length > 128) {
+      throw new BadRequestException('Idempotency-Key khong duoc vuot qua 128 ky tu');
+    }
+    return key;
+  }
+
   // ── Orders ──────────────────────────────────────────────
-  async create(dto: CreateOrderDto) {
+  async create(dto: CreateOrderDto, idempotencyKey?: string) {
+    const normalizedIdempotencyKey = this.normalizeIdempotencyKey(idempotencyKey);
+    if (normalizedIdempotencyKey) {
+      const existingOrder = await this.prisma.order.findUnique({
+        where: { idempotencyKey: normalizedIdempotencyKey },
+        include: { orderItems: true },
+      });
+      if (existingOrder) {
+        return this.enrichOrder(existingOrder);
+      }
+    }
+
     this.enforceTableOrderRateLimit(dto.tableId);
 
     const branchIdFromPayload = this.normalizeBranchId(dto.branchId);
@@ -2278,43 +2298,62 @@ export class OrderService {
     const discountAmount = promotion.discountAmount;
     const totalAmount = Math.max(subtotalAmount - discountAmount, 0);
 
-    const order = await this.prisma.$transaction(async (tx) => {
-      const createdOrder = await tx.order.create({
-        data: {
-          tableId: dto.tableId,
-          branchId: resolvedBranchId,
-          customerId: dto.customerId || null,
-          customerEmail: dto.customerEmail || null,
-          customerName: dto.customerName,
-          customerPhone: dto.customerPhone,
-          subtotalAmount,
-          discountAmount,
-          promotionCode: promotion.code || null,
-          totalAmount,
-          orderItems: {
-            create: normalizedItems.map((item) => ({
-              menuItemId: item.menuItemId,
-              quantity: item.quantity,
-              price: item.unitPrice,
-              note: item.note,
-              options: item.options,
-            })),
-          },
-        },
-        include: { orderItems: true },
-      });
-
-      if (promotion.promo) {
-        await tx.promotionCode.update({
-          where: { id: promotion.promo.id },
+    let order;
+    try {
+      order = await this.prisma.$transaction(async (tx) => {
+        const createdOrder = await tx.order.create({
           data: {
-            usedCount: { increment: 1 },
+            tableId: dto.tableId,
+            branchId: resolvedBranchId,
+            customerId: dto.customerId || null,
+            customerEmail: dto.customerEmail || null,
+            customerName: dto.customerName,
+            customerPhone: dto.customerPhone,
+            idempotencyKey: normalizedIdempotencyKey,
+            subtotalAmount,
+            discountAmount,
+            promotionCode: promotion.code || null,
+            totalAmount,
+            orderItems: {
+              create: normalizedItems.map((item) => ({
+                menuItemId: item.menuItemId,
+                quantity: item.quantity,
+                price: item.unitPrice,
+                note: item.note,
+                options: item.options,
+              })),
+            },
           },
+          include: { orderItems: true },
         });
-      }
 
-      return createdOrder;
-    });
+        if (promotion.promo) {
+          await tx.promotionCode.update({
+            where: { id: promotion.promo.id },
+            data: {
+              usedCount: { increment: 1 },
+            },
+          });
+        }
+
+        return createdOrder;
+      });
+    } catch (error) {
+      if (
+        normalizedIdempotencyKey &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const existingOrder = await this.prisma.order.findUnique({
+          where: { idempotencyKey: normalizedIdempotencyKey },
+          include: { orderItems: true },
+        });
+        if (existingOrder) {
+          return this.enrichOrder(existingOrder);
+        }
+      }
+      throw error;
+    }
 
     this.logger.log(
       `Tạo đơn ${order.id} cho bàn ${dto.tableId} – subtotal ${subtotalAmount.toLocaleString()}₫, discount ${discountAmount.toLocaleString()}₫, total ${totalAmount.toLocaleString()}₫`,

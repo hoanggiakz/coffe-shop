@@ -328,8 +328,8 @@ export class OrderController {
   // ── Orders ──────────────────────────────────────────────
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateOrderDto) {
-    return this.orderService.create(dto);
+  create(@Body() dto: CreateOrderDto, @Headers('idempotency-key') idempotencyKey?: string) {
+    return this.orderService.create(dto, idempotencyKey);
   }
 
   @Get()

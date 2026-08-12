@@ -167,7 +167,7 @@ describe('OrderController', () => {
     controller.updateCustomerItems('o1', customerItemsDto as any);
     await controller.updateItemStatus('o1', 'i1', 'DONE', 'BARISTA', 'b1');
 
-    expect(orderService.create).toHaveBeenCalledWith(createOrderDto);
+    expect(orderService.create).toHaveBeenCalledWith(createOrderDto, undefined);
     expect(orderService.findAll).toHaveBeenCalledWith({
       tableId: 't1',
       status: 'PENDING',

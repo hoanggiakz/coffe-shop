@@ -199,6 +199,7 @@ model Order {
   customerEmail String?
   customerName  String?
   customerPhone String?
+  idempotencyKey String?     @unique
   status        OrderStatus @default(PENDING)
   subtotalAmount Int        @default(0) // Tong truoc khuyen mai
   discountAmount Int        @default(0) // So tien giam
@@ -216,6 +217,7 @@ model Order {
   @@index([customerId])
   @@index([customerEmail])
   @@index([customerPhone])
+  @@index([idempotencyKey])
 }
 
 model OrderItem {
